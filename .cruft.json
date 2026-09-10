@@ -1,0 +1,35 @@
+{
+  "template": "https://github.com/FAIRmat-NFDI/cookiecutter-nomad-plugin",
+  "commit": "b67d40d4d5d4be4a639baa56ecf9af41f1680830",
+  "checkout": null,
+  "context": {
+    "cookiecutter": {
+      "full_name": "Simon Ternes",
+      "email": "john.doe@physik.hu-berlin.de",
+      "github_username": "HU Berlin",
+      "plugin_name": "nomad-pv-stability-measurements",
+      "module_name": "nomad_pv_stability_measurements",
+      "short_description": "data schema for ingesting stability measurments on pv according to different measurement protocals (standardized and custom)",
+      "version": "0.1.0",
+      "license": "Apache-2.0",
+      "include_schema_package": true,
+      "include_normalizer": true,
+      "include_parser": true,
+      "include_app": false,
+      "include_example_uploads": true,
+      "include_action": false,
+      "include_api": false,
+      "include_north_tools": false,
+      "north_tool_name": "my_north_tool",
+      "include_dashboard": false,
+      "include_citation_file": false,
+      "_copy_without_render": [
+        "*.html",
+        "*.png"
+      ],
+      "_template": "https://github.com/FAIRmat-NFDI/cookiecutter-nomad-plugin",
+      "_commit": "b67d40d4d5d4be4a639baa56ecf9af41f1680830"
+    }
+  },
+  "directory": null
+}
