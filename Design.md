@@ -52,7 +52,7 @@ protocol:                                  # ISOS-L-2 (full file in §8)
 
 | # | Decision |
 |---|---|
-| D11 | **One node type, `Protocol`.** A step opens with `channel:` (it *acts*) or `subprotocol:` (it *contains* further `steps`). |
+| D11 | **Two node classes: the root `Protocol` and `SubProtocol(Protocol)` for every step below it.** A step opens with `channel:` (it *acts*) or `subprotocol:` (it *contains* further `steps`); the keyword makes the YAML read as structure. Step-only fields (`channel`, `subprotocol`, `variable`, the state slots) live on `SubProtocol`, so the root cannot act. Not named `Step`: a step can also be a command. |
 | D12 | **`mode: sequential \| parallel`** on a node says how its `steps` run. Children of a `parallel` node must write disjoint control groups (rule R3). **Join-all:** a parallel block ends when its longest bounded child ends. |
 | D13 | **Lifetime by lexical scope.** A state holds exactly for its node's span; no start/stop pairs; states have no duration of their own. *Channels own "what", the tree owns "when".* |
 | D14 | **Termination lives on the node:** `repetitions`, `duration`, `stop_when` — whichever comes first. No `WaitUntil`. |
@@ -91,9 +91,9 @@ All ship with `nomad-lab`. Import paths **verified**:
 | `CompositeSystemReference` | ″ | **the link to the solar-cell sample** (`Measurement.samples`) |
 | `InstrumentReference` | ″ | channel → instrument provenance |
 | `PlotSection`, `PlotlyFigure` | `nomad.datamodel.metainfo.plot` | protocol and results plots (plotly 5.24 installed) |
-| `ELNAnnotation`, `SectionProperties` | `nomad.datamodel.metainfo.annotations` | ELN field order |
+| `ELNAnnotation`, `SectionDisplayAnnotation` | `nomad.datamodel.metainfo.annotations` | editable fields; ELN field order |
 | `HDF5Reference`, `HDF5Dataset` | `nomad.datamodel.hdf5` | large result arrays |
-| `Quantity`, `SubSection`, `SectionProxy`, `MEnum`, `JSON`, `SchemaPackage` | `nomad.metainfo` | |
+| `Quantity`, `SubSection`, `SectionProxy`, `Section`, `MEnum`, `Any`, `SchemaPackage` | `nomad.metainfo` | |
 | `ureg` | `nomad.units` | the shared pint registry (read-only use!) |
 
 **Deliberately not used:**
@@ -125,8 +125,9 @@ There is no `Protocol`/`Recipe` base section in NOMAD core — this is new groun
 **The core model — four concepts:**
 
 ```
-Channel         a device: named variables it can control / monitor
-Protocol              ONE node type. Names a channel -> sets it to a state.
+Channel               a device: named variables it can control / monitor
+Protocol              the tree: a root, and SubProtocol nodes below it.
+                      Names a channel -> sets it to a state.
                       Has steps -> runs them per its `mode`.
 ProtocolTimeline      the expanded events (derived)
 StabilityMeasurement  observed data, linked to protocol + sample (+ StabilityResult)
@@ -174,9 +175,11 @@ Why this shape holds up:
 3. Declaration order is kept within each group.
 
 Sketches below are in true serialization order. Hand-written YAML may use any key order.
-The ELN order can be overridden with
-`a_eln=ELNAnnotation(properties=SectionProperties(order=[...]))` — use it on `Protocol` to keep
-the state slots together (they straddle rule 2). Check in the GUI whether quantities and
+The ELN order can be overridden on the section definition with
+`m_def = Section(a_display=SectionDisplayAnnotation(order=[...]))` — use it on `SubProtocol` to
+keep the state slots together (they straddle rule 2). **Verified:** the older
+`a_eln=ELNAnnotation(properties=SectionProperties(order=[...]))` still works but is marked
+*deprecated* in this NOMAD version; use `a_display`. Check in the GUI whether quantities and
 sub-sections interleave; if not, the split is cosmetic only.
 
 ### 4.1 Channels — `channels.py`
@@ -188,9 +191,10 @@ Channel(ArchiveSection)                    # abstract
     key            str             # REQUIRED, stable — YAML references, timeline, parsers
     monitor_every  str             # "60 s"; omitted => not monitored
     monitored      str[]  (opt)    # which variables; default: all monitorable ones
-    limits         JSON   (opt)    # {variable: [min, max]} as unit strings;
+    limits         Any    (opt)    # {variable: [min, max]} as unit strings;
                                    #   plain [min, max] allowed for single-variable channels
     idle           enum{uncontrolled, off}   # state between steps; default uncontrolled
+                                   #   (YAML reads a bare `off` as false — see §4.2 pitfall)
     variables      str[]           # DERIVED from the class table (shown in the ELN)
     is_controlled  bool            # DERIVED: some step sets a state other than `uncontrolled`
     is_monitored   bool            # DERIVED: monitor_every is set
@@ -201,6 +205,13 @@ Channel(ArchiveSection)                    # abstract
 RegulationLaw(ArchiveSection)                    # metadata only
     kind enum{open_loop, pid, on_off, external};  kp, ki, kd, hysteresis
 ```
+
+> **Pitfall — `JSON` accepts dicts only (verified).** `Quantity(type=JSON)` rejects a list
+> (`Shape mismatch`, and the type itself raises `needs to be a dict`), so the single-variable
+> form `limits: [20 °C, 90 °C]` would fail to load. `limits` is therefore `Quantity(type=Any)`
+> (`nomad.metainfo.Any`), which stores both forms as given and round-trips through
+> `m_to_dict`. Cost: no ELN widget (there is no JSON edit component either) — limits are
+> authored in YAML.
 
 **Subclasses — the whole per-channel specificity is this table:**
 
@@ -314,31 +325,38 @@ Channels(ArchiveSection)
     mechanical       MechanicalChannel[]
 ```
 
-### 4.2 Protocol node and states — `protocol.py`, `states.py`
+### 4.2 Protocol nodes and states — `protocol.py`, `states.py`
 
 ```
-Protocol(ArchiveSection)                          # ONE recursive node type
+Protocol(ArchiveSection)                          # the ROOT node
     # --- quantities
-    channel       str        # channel KEY  -> this step ACTS         } exactly one
-    subprotocol   str        # block name   -> this step CONTAINS     } (root: neither, uses name)
-    variable      str        # see "variable rule" below
-    name          str        # root: authored. Others: DERIVED ('daily cycle', 'bias: track mpp')
+    name          str        # root: authored. Below: DERIVED ('daily cycle', 'bias: track mpp')
     mode          MEnum(sequential, parallel)  # default sequential
     duration      str        # "24 h": the node's span — or a time cap if it would run longer
     repetitions   str        # "42" or "forever"; omitted => 1
     stop_when     str        # "pce_relative < 80 %" — a text condition, §4.2.1
+    duration_s    float [s]  # DERIVED
+    # --- sub-sections
+    steps         SubProtocol[]  # SubSection(section_def=SectionProxy('SubProtocol'), repeats=True)
+
+SubProtocol(Protocol)                             # every node below the root
+    # --- quantities: inherited ones first, then
+    channel       str        # channel KEY  -> this step ACTS         } exactly one
+    subprotocol   str        # block name   -> this step CONTAINS     }
+    variable      str        # see "variable rule" below
     uncontrolled  bool   ┐
     off           bool   │  scalar state slots
     hold          str    │  "65 °C"
     track         MEnum(mpp, voc, jsc) ┘
-    duration_s    float [s]  # DERIVED
-    # --- sub-sections
+    # --- sub-sections: inherited `steps`, then
     ramp          Ramp       ┐
     cycle         Cycle      │  section state slots
     tabulated     Tabulated  │
     sweep         Sweep      ┘
-    steps         Protocol[] # SubSection(section_def=SectionProxy('Protocol'), repeats=True)
 ```
+
+`SubProtocol` inherits `steps`, so it nests without limit. On a `subprotocol` node the derived
+`name` repeats the `subprotocol` text; it exists so that `channel` nodes get a label too.
 
 **At most one state slot per node; a `channel` node needs exactly one.** Expose them through
 one Python property (`node.state`) so the expander sees a single canonical state object.
@@ -361,6 +379,16 @@ Three sweeps in a row: `repetitions: 3` on the sweep's node.
 > **Pitfall — `from` is a Python keyword.** **Verified** workaround:
 > `from_ = Quantity(type=str, aliases=['from'])` reads `from:` from YAML, but NOMAD
 > re-serializes it as `from_`. Acceptable; the alternative is renaming to `start`/`end`.
+
+> **Pitfall — `off` is a YAML 1.1 boolean (verified).** NOMAD reads `.archive.yaml` with
+> `yaml.SafeLoader`, which turns a bare `off` (like `on`, `yes`, `no`) into a boolean —
+> **also as a mapping key**. `{channel: oven_dark, off: true}` arrives as
+> `{'channel': 'oven_dark', False: True}` and parsing crashes; `idle: off` arrives as
+> `idle: false` and fails the enum. Workaround, so §8 loads as written: override
+> `m_update_from_dict` in exactly the two places `off` is valid —
+> `SubProtocol` maps a `False` *key* back to `'off'`, `Channel` maps `idle: False` back to
+> `'off'`. JSON and ELN input carry the string and are unaffected. Quoting (`'off': true`)
+> also works but will be forgotten. The alternative is renaming the state (e.g. `dark`).
 
 **The `variable` rule.** `hold`, `ramp`, `cycle`, `tabulated`, `sweep` target one variable;
 `variable` is **required when the channel has more than one controllable variable** (on an
@@ -652,8 +680,9 @@ Never call `ureg.define()` — the registry is shared with every other plugin.
 **Verified:** NOMAD normalizes sub-sections *before* their parent, and catches and logs
 exceptions ("could not normalize section"). Therefore:
 
-- Run the whole pipeline in **`StabilityProtocol.normalize()`** (it runs last). `Protocol` and
-  channel sections need no `normalize()` of their own.
+- Run the whole pipeline in **`StabilityProtocol.normalize()`** (it runs last). The one exception is
+  a node's derived `name`: `SubProtocol.normalize()` sets it, since it depends on the node
+  alone. Channel sections need no `normalize()` of their own.
 - **Do not raise.** Collect messages, `logger.error/warning` them, copy them to
   `timeline.messages`, and skip expansion on errors — a raised exception just leaves the entry
   half-derived.
@@ -676,7 +705,7 @@ Steps 1–4 take the authored protocol content as input and touch no archive, so
 
 | Area | Check |
 |---|---|
-| Structure | root has neither `channel` nor `subprotocol`; every other node exactly one · `subprotocol` without `steps` · `channel` with `steps` · `channel` without a state slot · more than one state slot · `mode: parallel` without children (*warning*) |
+| Structure | unknown key, with did-you-mean (§9 pitfall) · every `SubProtocol` has exactly one of `channel` / `subprotocol` (the root has neither field) · `subprotocol` without `steps` · `channel` with `steps` · `channel` without a state slot · more than one state slot · `mode: parallel` without children (*warning*) |
 | References | unknown channel key (with did-you-mean) · duplicate keys · stepping on an implicit channel |
 | Variables & states | missing / unknown / non-controllable `variable` · state not in `accepted_states` · sweep on a variable other than voltage/current · ramp with neither or both of `rate` and `duration` · non-positive `rate` |
 | Units | unparseable string · bare number · ambiguous unit (bare `%` on humidity or oxygen) · dimension mismatch · mixed kinds within one state · value outside `limits` (compared only within the same kind) |
@@ -792,11 +821,32 @@ derived unit-ful quantities. A `str` quantity accepts YAML integers (`repetition
 **Keys instead of paths.** NOMAD would write `#/data/channels/0` — unreadable and broken by
 reordering. `channel: chuck_T` resolves in `normalize()` with a did-you-mean on typos.
 
-**Recursion — verified.** `SubSection(section_def=SectionProxy('Protocol'), repeats=True)`
-nests without limit.
+**Recursion — verified.** `SubSection(section_def=SectionProxy('SubProtocol'), repeats=True)`
+on `Protocol`, inherited by `SubProtocol`, nests without limit; the children load as
+`SubProtocol` without any `m_def`. It must be a `SubSection` (containment):
+`Quantity(type=SubProtocol)` is a *reference*, and a nested YAML dict loaded into it silently
+becomes an unresolvable proxy. The proxy is needed because `SubProtocol` does not exist yet
+while `Protocol`'s body is executed; it is resolved by name later. Any tree needs it — a
+class that contains itself always refers to a name that is not defined yet.
+Side effect (**verified**): `m_to_dict()` writes `m_def` on every nested step. Its check
+(`sub_section != m_def`) compares the proxy with the resolved definition — two objects,
+though both are `SubProtocol`. Harmless: the stored archive reloads, and hand-written YAML
+needs no `m_def`. Tests that compare against authored dicts strip it.
+
+> **Pitfall — unknown keys are dropped silently (verified).** NOMAD's YAML parser ignores
+> keys that are not fields of the section: a typo (`chanel: bias`, `hodl: 65 °C`) or a field
+> on the wrong node (`channel:` on the root `Protocol`) vanishes without an error, and
+> `normalize()` can no longer see it. This is a validation gap, not a design driver — the
+> structure is chosen as if unknown keys raised. Mitigation (**verified** with `m_from_dict`):
+> override `m_update_from_dict` — the same hook as the `off` fix — to note the keys not in
+> `m_def.all_properties` on the instance (a plain attribute, not metainfo; it only has to
+> live until `normalize()`, which runs right after parsing), then report them in §7 with a
+> did-you-mean.
 
 **Still worth knowing:**
 - the root `m_def` is unavoidable (one line);
+- YAML 1.1 reads bare `off` / `on` / `yes` / `no` as booleans; of the schema's words only
+  `off` collides, and it is handled (§4.2 pitfall);
 - deep trees get deeply indented — flow style (`{channel: …, hold: …}`) keeps leaves to one line;
 - **modelling tip:** use a `cycle` state for periodic *stress* (one line, no depth) and
   `repetitions` only for repeating *structure*. Two channels with incommensurate periods are
@@ -814,7 +864,7 @@ src/nomad_pv_stability_measurements/
     conditions.py     stop_when tokenizer + parser -> IR                     (§4.2.1)
     channels.py       Variable, Kind, Channel + 5 subclasses, Channels, RegulationLaw
     states.py         Ramp, Cycle, Tabulated, Sweep
-    protocol.py       Protocol, StabilityProtocol, ProtocolSummary, normalize pipeline, plot
+    protocol.py       Protocol, SubProtocol, StabilityProtocol, ProtocolSummary, normalize pipeline, plot
     timeline.py       ProtocolTimeline
     results.py        StabilityMeasurement, StabilityResult, …                (iteration 2)
   simulation/
