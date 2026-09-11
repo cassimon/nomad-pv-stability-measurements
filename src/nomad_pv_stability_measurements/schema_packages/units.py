@@ -1,10 +1,3 @@
-"""Parsing authored value strings into pint quantities (Design.md §6).
-
-The one place that calls pint. Everything else asks for a parsed value from here,
-so the traps below are handled once — including `WrittenUnits` at the bottom, which
-is how a written unit reaches a quantity that stores a plain number (D19).
-"""
-
 import re
 
 import pint
@@ -43,9 +36,8 @@ _NUMBER_AND_UNIT = re.compile(
 def split(text: str) -> tuple[float, str]:
     """`'24 h'` as `(24.0, 'hour')`, `'2 d'` as `(48.0, 'hour')`.
 
-    A bare number is an error (D6). Splitting the number off ourselves is also what
-    makes offset units work: `ureg.Quantity('65 °C')` raises, `ureg.Quantity(65, '°C')`
-    does not.
+    A bare number is an error. Splitting the number off ourselves is also what
+    makes offset units work
     """
     cleaned = text
     for written, readable in _CHARACTER_FIXES.items():

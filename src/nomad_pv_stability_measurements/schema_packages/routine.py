@@ -1,9 +1,4 @@
-"""The routine tree: what a protocol asks of each channel, and when (Design.md §4.1, §4.2).
 
-`RoutineCommand` is what a `ChannelCommand` and a `Subroutine` share; one list holds
-both, and `Subroutine.m_update_from_dict` decides which is which by the keys an entry
-writes (D11a). Every value is a real quantity authored with its unit (D19).
-"""
 
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
@@ -49,9 +44,6 @@ class ChannelCommand(RoutineCommand):
     a block's `commands` it holds for that block's span and wins there. Setpoint
     and logging fall back separately, so a command may change only the sampling
     rate.
-
-    The setpoint itself is *not* declared here: `hold` is kelvin on one axis and
-    W/m² on the next, so each channel class declares its own (D19a).
     """
 
     channel = Quantity(
@@ -176,12 +168,7 @@ class Subroutine(RoutineCommand):
         self._report_commands_that_never_run(logger)
 
     def _report_overlapping_commands(self, logger):
-        """R4: two commands on one channel must be truly subsequent — each with its
-        own `duration`, in a `sequential` block. Siblings have equal scope, so nothing
-        decides between them and they are never merged into one command: asking nothing
-        of a channel is itself a statement (D8), so `hold` beside a bare `monitor` is a
-        contradiction, not two halves of one command (D13a). Reported, never repaired —
-        the authored commands stay as written and expansion is what gets skipped."""
+    
         for channel in CHANNELS:
             commands = [
                 command
@@ -208,10 +195,7 @@ class Subroutine(RoutineCommand):
             )
 
     def _report_commands_that_never_run(self, logger):
-        """R5: episodes take their turns in order, so if this block's own `duration` is
-        already spent by the ones before it, a command gets no time at all — authored,
-        but never executed (D13a). Commands without a `duration` are conditions: they
-        hold for the whole span and take no turn."""
+        
         if self.mode != 'sequential' or self.duration is None:
             return
         budget = self.duration.to('s').magnitude

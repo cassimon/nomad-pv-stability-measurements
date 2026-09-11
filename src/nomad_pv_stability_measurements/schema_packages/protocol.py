@@ -1,12 +1,3 @@
-"""
-The `StabilityProtocol` entry: channel settings plus the routine (Design.md §3,
-§4.2, §4.3).
-
-`channel_settings` holds one optional block per channel (Design.md §4.1),
-commanding it for the whole run; a routine node commanding the same channel
-overrides it for its own span. The routine tree itself — `Routine`,
-`Subroutine`, and the two kinds of `RoutineCommand` — lives in `routine.py`.
-"""
 
 from nomad.datamodel.data import ArchiveSection, EntryData
 from nomad.datamodel.metainfo.basesections import BaseSection
