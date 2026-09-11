@@ -1,12 +1,15 @@
+"""The routine tree: what a protocol asks of each channel, and when (Design.md §4.1, §4.2).
+
+`RoutineCommand` is what a `ChannelCommand` and a `Subroutine` share; one list holds
+both, and `Subroutine.m_update_from_dict` decides which is which by the keys an entry
+writes (D11a). Every value is a real quantity authored with its unit (D19).
+"""
+
 import numpy as np
-from nomad.datamodel.data import ArchiveSection
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
 
-from nomad_pv_stability_measurements.schema_packages.units import (
-    parse_duration,
-    parse_frequency,
-)
-from nomad_pv_stability_measurements.schema_packages.utils import parsed, with_m_def
+from nomad_pv_stability_measurements.schema_packages.units import WrittenUnits
+from nomad_pv_stability_measurements.schema_packages.utils import with_m_def
 
 m_package = SchemaPackage()
 
@@ -16,13 +19,7 @@ m_package = SchemaPackage()
 CHANNELS = ('temperature',)
 
 
-def _bounded(command) -> bool:
-    """Whether `command` gives a `duration` — an episode that takes its turn, as
-    against a condition that holds for its block's whole span (D13)."""
-    return bool(command.duration and command.duration.strip())
-
-
-class RoutineCommand(ArchiveSection):
+class RoutineCommand(WrittenUnits):
     """
     One thing a routine does.
 
@@ -36,21 +33,12 @@ class RoutineCommand(ArchiveSection):
         'derived from what the command does.',
     )
     duration = Quantity(
-        type=str,
-        description='How long this command lasts, e.g. `24 h`. With one, it '
-        'takes its turn in the block around it. Leave empty to last as long as '
-        'that block does. Text only so the file can write the unit — the value '
-        'is `duration_value`.',
-    )
-    duration_value = Quantity(
         type=np.float64,
         unit='s',
-        description='`duration` as a number. Derived on save — edit `duration`.',
+        description='How long this command lasts, authored with its unit, e.g. '
+        '`24 h`. With one, the command takes its turn in the block around it; '
+        'leave it empty to last as long as that block does.',
     )
-
-    def normalize(self, archive, logger):
-        super().normalize(archive, logger)
-        self.duration_value = parsed(self.duration, parse_duration, 'duration', logger)
 
 
 class ChannelCommand(RoutineCommand):
@@ -61,6 +49,9 @@ class ChannelCommand(RoutineCommand):
     a block's `commands` it holds for that block's span and wins there. Setpoint
     and logging fall back separately, so a command may change only the sampling
     rate.
+
+    The setpoint itself is *not* declared here: `hold` is kelvin on one axis and
+    W/m² on the next, so each channel class declares its own (D19a).
     """
 
     channel = Quantity(
@@ -68,45 +59,32 @@ class ChannelCommand(RoutineCommand):
         description='Which stress axis this command acts on. Leave empty under '
         '`channel_settings`, where the slot already says the axis.',
     )
-    hold = Quantity(
-        type=str,
-        description='Constant setpoint to hold, e.g. `65 °C`. Leave empty to keep the channel uncontrolled in this command.'
-        'States such as `off` or `ambient` are also interpreted as setpoints.',
-    )
     monitor = Quantity(
         type=bool,
         description='Log data from this channel. Independent of `hold` — a '
         'channel nobody regulates can still be logged.',
     )
     sample_every = Quantity(
-        type=str,
-        description='How often to sample, e.g. `60 s`. Use either this or '
-        '`sampling_rate`, not both. Text only so the file can write the unit — '
-        'the value is `sample_every_value`.',
-    )
-    sample_every_value = Quantity(
         type=np.float64,
         unit='s',
-        description='`sample_every` as a number. Derived on save — edit `sample_every`.',
+        description='How often to sample, authored with its unit, e.g. `60 s`. '
+        'Write either this or `sampling_rate`; the other is derived from it.',
     )
     sampling_rate = Quantity(
-        type=str,
-        description='How fast to sample a continuous stream, e.g. `10 Hz`. Use '
-        'either this or `sample_every`, not both. Text only so the file can write '
-        'the unit — the value is `sampling_rate_value`.',
-    )
-    sampling_rate_value = Quantity(
         type=np.float64,
         unit='Hz',
-        description='`sampling_rate` as a number, or the reciprocal of '
-        '`sample_every` when only that was given. Derived on save.',
+        description='How fast to sample a continuous stream, authored with its '
+        'unit, e.g. `10 Hz`. Write either this or `sample_every`; the other is '
+        'derived from it.',
     )
 
     @property
     def controlled(self) -> bool:
         """Whether this command asks for a setpoint. Says nothing about what the
-        channel does over time — that belongs to the derived timeline."""
-        return bool(self.hold and self.hold.strip())
+        channel does over time — that belongs to the derived timeline. Asks by
+        `getattr` because `hold` belongs to the channel class (D19a), so a command
+        that never reached one has no setpoint to give."""
+        return getattr(self, 'hold', None) is not None
 
     @property
     def monitored(self) -> bool:
@@ -115,21 +93,28 @@ class ChannelCommand(RoutineCommand):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        self.sample_every_value = parsed(
-            self.sample_every, parse_duration, 'sample_every', logger
-        )
-        self.sampling_rate_value = parsed(
-            self.sampling_rate, parse_frequency, 'sampling_rate', logger
-        )
-        if self.sampling_rate_value is None and self.sample_every_value:
-            self.sampling_rate_value = 1 / self.sample_every_value
-
-        if self.sample_every_value is None and self.sampling_rate_value:
-            self.sample_every_value = 1 / self.sampling_rate_value
+        # One sampling figure is authored and the other follows from it, so whichever
+        # the file wrote, everything downstream can read either (D9).
+        if self.sampling_rate is None and self.sample_every is not None:
+            self.sampling_rate = 1 / self.sample_every
+        if self.sample_every is None and self.sampling_rate is not None:
+            self.sample_every = 1 / self.sampling_rate
 
 
 class TemperatureChannel(ChannelCommand):
     """The temperature axis."""
+
+    hold = Quantity(
+        type=np.float64,
+        unit='K',
+        description='Constant temperature to hold, authored with its unit, e.g. '
+        '`65 °C`. Leave it empty to keep the channel uncontrolled in this command.',
+    )
+
+
+#: Which class an authored `channel:` names (D19a). Not cosmetic: a `hold` loaded as
+#: the base class is dropped without a word, since only the channel class declares it.
+CHANNEL_CLASSES = {'temperature': TemperatureChannel}
 
 
 class Subroutine(RoutineCommand):
@@ -157,15 +142,17 @@ class Subroutine(RoutineCommand):
     )
 
     def m_update_from_dict(self, dct: dict, **kwargs) -> None:
-        """Fills in each `commands` entry's `m_def` — naming a `channel` means
-        `ChannelCommand`, anything else a nested `Subroutine` — before NOMAD
-        loads the list natively (see `utils.with_m_def`)."""
+        """Fills in each `commands` entry's `m_def` — a `channel` names that
+        channel's own class, anything else a nested `Subroutine` — before NOMAD
+        loads the list natively (see `utils.with_m_def`). The channel's *value*
+        decides, not just the key: the setpoint is declared on the channel class
+        and NOMAD drops it silently if the entry is built as the base (D19a)."""
 
         def named(entry):
-            is_channel_command = isinstance(entry, dict) and 'channel' in entry
-            return with_m_def(
-                entry, ChannelCommand if is_channel_command else Subroutine
-            )
+            channel = entry.get('channel') if isinstance(entry, dict) else None
+            if channel is None:
+                return with_m_def(entry, Subroutine)
+            return with_m_def(entry, CHANNEL_CLASSES.get(channel, ChannelCommand))
 
         entries = dct.get('commands')
         if isinstance(entries, list):
@@ -205,7 +192,9 @@ class Subroutine(RoutineCommand):
                 continue
             if self.mode == 'parallel':
                 reason = 'a `parallel` block runs its commands at the same time'
-            elif any(not _bounded(command) for command in commands):
+            elif any(command.duration is None for command in commands):
+                # A command without a `duration` is a condition and spans the whole
+                # block, so it overlaps whatever else speaks to the channel (D13).
                 reason = (
                     "a command without a `duration` holds for the block's whole span"
                 )
@@ -222,14 +211,13 @@ class Subroutine(RoutineCommand):
         """R5: episodes take their turns in order, so if this block's own `duration` is
         already spent by the ones before it, a command gets no time at all — authored,
         but never executed (D13a). Commands without a `duration` are conditions: they
-        hold for the whole span and take no turn. Reads the twins, which NOMAD has
-        filled by now — it normalizes every nested section before its parent."""
-        if self.mode != 'sequential' or self.duration_value is None:
+        hold for the whole span and take no turn."""
+        if self.mode != 'sequential' or self.duration is None:
             return
-        budget = self.duration_value.to('s').magnitude
+        budget = self.duration.to('s').magnitude
         spent = 0.0
         for command in self.commands:
-            if command.duration_value is None:
+            if command.duration is None:
                 continue
             if spent >= budget:
                 logger.warning(
@@ -237,7 +225,7 @@ class Subroutine(RoutineCommand):
                     f'{self.name or "<unnamed>"} is already spent by the commands '
                     f'before it.'
                 )
-            spent += command.duration_value.to('s').magnitude
+            spent += command.duration.to('s').magnitude
 
 
 class Routine(Subroutine):

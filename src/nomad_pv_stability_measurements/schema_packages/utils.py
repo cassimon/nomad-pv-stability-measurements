@@ -1,22 +1,5 @@
 """Small helpers shared across schema modules."""
 
-import pint
-
-
-def parsed(text, parse, field: str, logger):
-    """`text` parsed by `parse`, or `None` with an error logged.
-
-    Never raises: NOMAD's own normalizer would catch it and log a plugin crash, so
-    an authoring mistake is reported as an error and the twin is left empty (§7).
-    """
-    if not text or not text.strip():
-        return None
-    try:
-        return parse(text)
-    except (ValueError, pint.errors.PintError) as error:
-        logger.error(f'could not parse `{field}` {text!r}: {error}')
-        return None
-
 
 def with_m_def(entry, cls: type) -> dict:
     """`entry` with an `m_def` naming `cls`, added only if it's missing.

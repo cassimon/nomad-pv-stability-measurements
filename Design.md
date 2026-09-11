@@ -44,7 +44,7 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | D4a | **`channel_settings:` carries each channel's run-wide conditions** — one optional block per channel: a setpoint (`hold`), a monitor tag with its rate, plus `limits`, regulation, instrument, spectrum … It holds wherever the routine is silent; a step overrides it for its span. **Only static conditions** live there — a constant `hold` is the settings' whole vocabulary; the time-varying shapes (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) are only ever set by the routine, never a field of a settings block (§4.1). |
 | D4b | **The routine overrides the settings, and the warning says where.** One precedence rule for states and for monitoring: the innermost step that speaks wins for its span, the settings hold everywhere else. Because a shadowed setting is invisible in the file, `normalize()` reports it: a *warning* per (channel, field) that some step overrides, and a louder one for a setting that is **never** in effect. This must also be said in plain words in the field descriptions and the README (§10). |
 | D5 | **Variables have physical names** (`humidity`, `oxygen`, `temperature` …); **the unit selects the quantity kind** (relative, molar ratio, dew point …). Values stay in the kind they were given — no cross-kind conversion. |
-| D6 | **Every value is a unit string** (`65 °C`, `85 %RH`, `1 sun`), parsed and dimension-checked against its variable. **Ambiguity is an error:** bare numbers, and bare `%` on humidity/oxygen. The one documented convention: `ppm`/`ppb` are molar (ppmv) — the glovebox standard. The string is the *authored* form only; the parsed value lands in a typed twin (D19, D19a). |
+| D6 | **Every value is a unit string** (`65 °C`, `85 %RH`, `1 sun`), parsed and dimension-checked against its variable. **Ambiguity is an error:** bare numbers, and bare `%` on humidity/oxygen. The one documented convention: `ppm`/`ppb` are molar (ppmv) — the glovebox standard. The string is the *authored* form only: it is read into the field's own unit-ful quantity on the way in (D19). A bare number **written as text** stays an error; a plain YAML number is read in the quantity's declared unit — which is what NOMAD itself writes back when it serializes. |
 | D7 | **The four ISOS stress axes are always reported.** Since the vocabulary is fixed (D4), this is structural: a channel no routine touches appears in the derived layers as *uncontrolled and unmonitored*. UV content is a property of the irradiation spectrum, not a channel; encapsulation belongs to the sample. |
 | D8 | **A command says what is *asked* of a channel; the control *state* is derived, never authored.** A `ChannelCommand` carries a setpoint (`hold`) or a time-varying shape (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) and nothing that names a control mode. **Asking nothing is the neutral element**: a channel no command in scope touches is not regulated, which is also what it is wherever nothing says otherwise, so every channel still has a defined state at every instant (D7). Two booleans follow per channel, **computed over time when commands are expanded into a time series, not stored on a command**: **`controlled`** (some command in scope asks for a value) and **`monitored`** (a monitor tag is in effect) — timeline rows, plottable next to the values (§4.4). On a command itself, `controlled` is only "does this carry a setpoint". *Supersedes `control = MEnum('off', 'hold', 'active')` (and, before that, the `uncontrolled`/`off` split): `hold` already said `hold`, and `active` was a label for time-varying behaviour that a single static command cannot know — a command is one clause, and what a channel is doing at hour 700 follows from all the clauses in scope. **Explicitly released** is still writable, structurally: a command that **names a channel and asks nothing of it** says "not regulated here" out loud, as against a channel nobody mentions (§4.1, "Untouched channels").* |
 | D8a | **Named setpoints: a channel class may declare words that stand for values.** `IrradiationChannel` declares `dark` (= `0 W/m²`); `ElectricalLoadChannel` declares `open_circuit`. They are written wherever a value is written — `hold: dark`, `cycle: {low: dark, high: 1 sun}`, `ramp: {from: dark, to: 1 sun}` — and resolved against the channel's own table in `normalize()`, **before** `parse()` (§6). Per channel, never global: `dark` is meaningless on the temperature axis and is rejected there. A name that stands for a number becomes one, so the timeline plots `dark` as 0 instead of a NaN hole; a name that stands for no number at all (`open_circuit` is neither 0 V nor 0 A) stays NaN, like `track`. **Asking for a named setpoint is asking for something**, so `controlled` is true — that is how "deliberately dark" is said out loud *and counted*, the one thing the old irradiation-only `off` state did that D8 alone does not (§4.1). **Spelled `dark`, never `off`:** a bare `off` is a YAML 1.1 boolean (§9), so that spelling arrives as `False` and would silently invert the very flag it exists to set — and `dark` is ISOS's own word. **There is no `on`:** `dark` has a defined value and an illuminated state does not, and the irradiance is exactly what ISOS reporting needs, so it is written as a number (`hold: 1 sun`). |
@@ -56,7 +56,7 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | # | Decision |
 |---|---|
 | D11 | **One base, two kinds of command, single inheritance throughout: `RoutineCommand` → `ChannelCommand` \| `Subroutine` → `Routine`.** A `ChannelCommand` *acts* on one axis; a `Subroutine` is a *block* that contains commands of its own. **Both live in one authored list, `commands:`** — a channel command holds for its block's whole span, a block runs where `mode` puts it. `Routine` is the root: a block authored under the protocol. **Three keywords carry the whole tree: `commands`, `channel`, `name`.** A node needs no `subroutine:` tag — a block is simply a command that names no `channel`, and it labels itself with the `name` every command already has. |
-| D11a | **The mixed list decides its `m_def` by key, then lets NOMAD load it natively.** Verified: a repeating sub-section typed to a common base instantiates *the base* and silently drops whatever the subclass added, unless every entry carries the ~70-char qualified `m_def:` — schema boilerplate in every file, and the only native discriminator NOMAD has (no short form: a bare class name fails to resolve, verified). `Subroutine.m_update_from_dict` reads the keys — **naming a `channel` means `m_def: …ChannelCommand`, anything else means `m_def: …Subroutine`** — writes that one field into each entry, then calls NOMAD's own, unmodified `m_update_from_dict` to do the actual building. No hand-built sections, no round-trip asymmetry (`m_to_dict` already wrote `m_def`; loading now agrees), and a nested block's own `commands` get their `m_def` too, since NOMAD calls back into this same method when it builds that block. An entry that already carries `m_def` is left alone — the sniff only fills a gap. |
+| D11a | **The mixed list decides its `m_def` by key, then lets NOMAD load it natively.** Verified: a repeating sub-section typed to a common base instantiates *the base* and silently drops whatever the subclass added, unless every entry carries the ~70-char qualified `m_def:` — schema boilerplate in every file, and the only native discriminator NOMAD has (no short form: a bare class name fails to resolve, verified). `Subroutine.m_update_from_dict` reads the keys — **a `channel` names that channel's own class, `channel: temperature` → `m_def: …TemperatureChannel` (D19a); anything else means `m_def: …Subroutine`** — writes that one field into each entry, then calls NOMAD's own, unmodified `m_update_from_dict` to do the actual building. No hand-built sections, no round-trip asymmetry (`m_to_dict` already wrote `m_def`; loading now agrees), and a nested block's own `commands` get their `m_def` too, since NOMAD calls back into this same method when it builds that block. An entry that already carries `m_def` is left alone — the sniff only fills a gap. |
 | D12 | **`mode: sequential \| parallel`** on a node says how the *blocks* in its `commands` run — channel commands are conditions, not moments, so each holds for the node's whole span either way. Children of a `parallel` node must write disjoint control groups (rule R3). **Join-all:** a parallel block ends when its longest bounded child ends. |
 | D13 | **Lifetime by lexical scope, with `duration` on the command itself.** No start/stop pairs. A command that gives a `duration` is an **episode** — it takes its turn in the order `mode` gives. A channel command that gives none is a **condition**, holding for its block's whole span; a block without one lasts as long as what it contains. Because `duration` sits on `RoutineCommand`, an episode needs no block wrapped around it purely to be given a lifetime. |
 | D13a | **Two commands on one channel are never merged — they must be truly subsequent.** Siblings in one `commands` list have *equal* scope, so nothing in the file decides between them: `{channel: temperature, hold: 85 °C}` beside `{channel: temperature, monitor: true}` is **not** read as "hold and log", and no reader may assume it is. Two commands on the same channel are legal in one block only when each carries its own `duration` and the block is `sequential` — then they genuinely follow one another (rule R4). Everything else overlaps and is an **error**: two commands without a `duration` both span the block, a command without one covers an episode beside it, and under `mode: parallel` every child is simultaneous by definition. There is nothing to merge *because asking nothing is itself a statement* — a command that names a channel and asks nothing of it says "not regulated here" (D8), so the pair above is a contradiction, not two half-filled forms. The fix is one command carrying all the keys, or explicit nesting: where scopes differ, D4b's innermost-wins does decide, and that is the only reason this rule can be a cheap per-block set check instead of interval arithmetic. Overlaps are **reported, never repaired** — the authored file is left as written and expansion is skipped (§7). A command the block's `duration` leaves no time for is reported too (*warning*, R5).
@@ -70,8 +70,8 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | # | Decision |
 |---|---|
 | D18 | **Named state slots** (`hold:`, `ramp:` …) instead of polymorphic sub-sections — `m_def` is never hand-written except at the root. |
-| D19 | **A string field is an authoring aid, never the stored value.** A `Quantity(type=str)` is used *only* where a typed quantity cannot carry what has to be authored: a written unit is needed for the file to stay readable (**verified**: a unit-ful quantity rejects `'24 h'` outright, reads a bare number as its declared unit, and NOMAD honours no `__unit:` escape hatch anywhere in its source), or the dimension depends on the channel (`hold` on a shared base), or the vocabulary is not a number at all (`dark`, `open_circuit`, `track`, `stop_when`). Everywhere else the quantity is declared with its own `unit=` and no string exists — including where YAML's own scalars already suffice (`monitor: true`, and `repetitions: 42` as an `int`). *Supersedes the blanket "human strings for durations, rates and values": the string was never the point, the readable file was.* |
-| D19a | **Every string field has a typed twin that `normalize()` keeps synchronized.** The authored string keeps the plain key the file writes (`duration: 24 h`, `hold: 65 °C`); the value everything downstream reads is a sibling `Quantity(type=np.float64, unit=…)` named `<name>_value`, parsed from the string via §6 and rebuilt from scratch on every `normalize()` (idempotent, §7), so the two can never drift. The twin is what buys back what a string costs: the GUI's unit switching (the quantity declares the canonical `unit`, a `display: {unit: …}` annotation the default *shown* one — `eln.defaultDisplayUnit` is deprecated), numeric search and plotting, and a **loud** `DimensionalityError` instead of a hand-rolled check. **Verified:** assigning a pint quantity converts and stores correctly (`24 hour` → `86400 s`, `65 °C` → `338.15 K`), `m_to_dict()` writes a plain number, and **a subclass may re-declare an inherited quantity with its own unit** — so `TemperatureChannel.hold_value` in K beside `IrradiationChannel.hold_value` in W/m² needs no extra machinery, and that is where §7's per-channel dimension check actually lands. Every such string's `description` states in one clause that it exists only so the file can carry a written unit, and names its twin. |
+| D19 | **One field per value: the quantity itself, with the written unit read on the way in.** Every authored value is a real `Quantity(type=np.float64, unit=…)` — no `type=str` beside it, no twin. NOMAD refuses `duration: 500 h` on such a quantity (**verified**: it rejects `'24 h'` outright, reads a bare number as its declared unit, and honours no `__unit:` escape hatch anywhere in its source), so the plugin overrides the **one gateway every assignment passes through** — `MSection.m_set`, which `m_from_dict`, `m_update_from_dict` and `Section(**kwargs)` all funnel into (**verified**). A string handed to a quantity that declares a `unit` is parsed by §6 into a pint quantity, and NOMAD's own type normalization then converts and stores it (`500 h` → `1800000.0 s`, `65 °C` → `338.15 K`, **verified**). The file keeps the unit it was written with, the archive keeps a number, and unit switching, numeric search, plots and a loud `DimensionalityError` all come free from the declaration. *Supersedes the string-plus-twin pair: the twin existed only to buy back what the string cost, and reading the string one step earlier costs nothing to begin with.* |
+| D19a | **Where the dimension depends on the channel, the field is declared on the channel class.** `hold` cannot sit on `ChannelCommand`: it is kelvin for temperature and W/m² for irradiation. So `ChannelCommand` does not declare it at all and each channel class declares its own — `TemperatureChannel.hold` in `K` — which is also how a channel whose setpoint is not a number at all declares an `MEnum` instead (`dark`, `open_circuit`, D8a). **Verified:** a subclass may declare what its base does not, and NOMAD then **silently drops** an authored `hold` when the same dict is loaded as the base class. That makes D11a's per-entry dispatch load-bearing rather than a convenience: it must resolve the `channel:` *value* to that channel's class (`channel: temperature` → `TemperatureChannel`), or the setpoint disappears without a word. Text the file writes that §6 cannot read is remembered where it was written and reported by `normalize()` (§7), never raised — a typo must not stop an entry from loading; an empty or blank string leaves the field unset, since asking nothing is the neutral element (D8). |
 | D20 | **References by enum value** (`channel: temperature`) — never `#/data/...` paths, and never a free string that each lab spells differently. |
 
 **Derived outputs and provenance** (§4.3–§4.5)
@@ -217,28 +217,32 @@ channel does *whenever the routine is silent*, in the same words a step uses:
 ```
 RoutineCommand(ArchiveSection)             # the interface both kinds of command share
     name          str              # authored at the root; derived further down
-    duration      str              # "24 h" — this command's span. WITH one it is an
-                                   #   episode and takes its turn; WITHOUT one a channel
-                                   #   command is a condition spanning its block, and a
-                                   #   block lasts as long as what it contains.
+    duration      float [s]        # authored as "24 h", stored in seconds (D19). This
+                                   #   command's span: WITH one it is an episode and takes
+                                   #   its turn; WITHOUT one a channel command is a
+                                   #   condition spanning its block, and a block lasts as
+                                   #   long as what it contains.
                                    # + repetitions / stop_when when termination is built
 
 ChannelCommand(RoutineCommand)             # acts on ONE axis — in a block's `commands`,
                                            #   or as a `channel_settings` block
     channel       MEnum(*CHANNELS)  # which axis; empty in settings (the slot says it)
     variable      str   (opt)      # which variable this applies to (the "variable rule", §4.2)
-    hold          str              # "65 °C" — a constant setpoint. Empty = nothing asked
-                                   #   of the channel: the neutral element (D8). No control
-                                   #   mode is stored; it is derived over time (§4.4)
+    # NO `hold` here — its dimension is the axis's, so each channel class declares its
+    #   own (D19a). Unset = nothing asked of the channel: the neutral element (D8). No
+    #   control mode is stored either; it is derived over time (§4.4)
     monitor       bool             # acquire data here (D9)
     monitored     str[] (opt)      # which variables; default: every monitorable one
-    sample_every  str   ┐          # "60 s"  -> discrete measurements  } at most one;
-    sampling_rate str   ┘          # "10 Hz" -> a stream               } omitted: unspecified
+    sample_every  float [s]  ┐     # "60 s"  -> discrete measurements  } author at most
+    sampling_rate float [Hz] ┘     # "10 Hz" -> a stream               } one; the other is
+                                   #   derived as its reciprocal (neither: unspecified)
 
 TemperatureChannel(ChannelCommand)         # one per CHANNELS member: the axis's own class,
                                            #   carrying its variable table and, as a
                                            #   `channel_settings` block, the run-wide extras
     # --- quantities
+    hold           float [K]       # authored as "65 °C" — the setpoint, in the unit only
+                                   #   this class knows (D19a)
     limits         Any    (opt)    # {variable: [min, max]} as unit strings;
                                    #   plain [min, max] allowed for single-variable channels
     variables      str[]           # DERIVED from the class table (shown in the ELN)
@@ -473,7 +477,6 @@ Subroutine(RoutineCommand)                        # a NODE: what it commands, wh
     mode          MEnum(sequential, parallel)  # default sequential; on every node, not just the root
     repetitions   str        # "42" or "forever"; omitted => 1
     stop_when     str        # "pce_relative < 80 %" — a text condition, §4.2.1
-    duration_value  float [s]  # DERIVED from `duration` (D19a)
     # --- sub-sections
     commands      RoutineCommand[]  # ChannelCommands and blocks in ONE list;
                                     #   resolved by key, not by m_def (D11a)
@@ -493,9 +496,9 @@ ChannelCommand(RoutineCommand)                    # §4.1 — the acting kind; g
 > **How one list can hold two classes (D11a).** NOMAD will not do it unaided: a repeating
 > sub-section typed to `RoutineCommand` instantiates *`RoutineCommand`* and silently drops
 > whatever the subclass added, unless every entry carries `m_def:` (verified, §9) — there is no
-> shorter native spelling. `Subroutine.m_update_from_dict` reads the keys — **naming a
-> `channel` means `ChannelCommand`, anything else means `Subroutine`** — and writes the
-> matching `m_def` into the entry before handing it to NOMAD's own dict-loading code, which
+> shorter native spelling. `Subroutine.m_update_from_dict` reads the keys — **a `channel`
+> names that channel's own class (`temperature` → `TemperatureChannel`, D19a), anything
+> else means `Subroutine`** — and writes the matching `m_def` into the entry before handing it to NOMAD's own dict-loading code, which
 > does the actual building (and the actual recursing, into a nested block's own `commands`).
 > The file stays free of schema boilerplate; the override's whole job is picking a class name,
 > nothing more.
@@ -867,11 +870,13 @@ never exclusive.
 
 One function, never ad-hoc pint calls. The channel's `parse()` delegates here.
 
-**Where the result goes.** Every number this module returns lands in a declared, unit-ful
-twin quantity (`<name>_value`, D19a) as well as in the IR the expander works on — parsing is
-not a private step that feeds the simulation and leaves the archive holding text. Assigning
-the parsed value to a field whose `unit=` says the expected dimension also re-checks step 5
-for free, in NOMAD's own code.
+**Where the result goes.** Every number this module returns lands in the declared, unit-ful
+quantity the file wrote it into (D19) as well as in the IR the expander works on — parsing is
+not a private step that feeds the simulation and leaves the archive holding text. It happens in
+`WrittenUnits.m_set`, the setter every assignment passes through, so the field's own `unit=`
+states the expected dimension and NOMAD's own code re-checks step 5 for free. Text §6 cannot
+read is remembered on the section and reported by `normalize()` (§7) — a mistyped value must
+not stop the entry from loading.
 
 ```
 parse(text, variable) -> (kind, float in the kind's canonical unit)
@@ -927,8 +932,9 @@ exceptions ("could not normalize section"). Therefore:
 
 - Run the whole pipeline in **`StabilityProtocol.normalize()`** (it runs last). The exceptions are
   the derivations that depend on **one section alone**, which that section does itself: a node's
-  derived `name`, and the typed twin of every authored string (D19a) — a twin is parsed from the
-  string right beside it and needs no tree context, so it is filled where it lives.
+  derived `name`, the reciprocal of `sample_every`/`sampling_rate`, and the report of any value
+  the file wrote unreadably (D19) — none of them needs tree context, so each happens where it
+  lives.
   **Verified:** NOMAD calls `normalize()` on every nested section, so no manual recursion is
   needed to reach them.
 - **Do not raise.** Collect messages, `logger.error/warning` them, copy them to
@@ -942,8 +948,7 @@ exceptions ("could not normalize section"). Therefore:
 2. build IR          -> plain dataclasses: resolve keys, parse every string (§6)
 3. validate          -> §7 list below, on the IR
 4. expand            -> exact event list (§5)
-5. write back        -> derived fields on nodes (name, the typed twins of every authored
-                        string — duration_value, hold_value … — D19a), timeline (budgeted),
+5. write back        -> derived fields on nodes (name, …), timeline (budgeted),
                         summary, figures
 ```
 
@@ -957,7 +962,7 @@ Steps 1–4 take the authored protocol content as input and touch no archive, so
 | Structure | unknown key, with did-you-mean (§9 pitfall) · a `ChannelCommand` that names no `channel` (it would have been read as a block — D11a) · a block with no `commands` (*warning*: nothing happens) · a channel command with neither a state nor a monitor tag · more than one state slot · `mode: parallel` with fewer than two blocks (*warning*) |
 | References | — the `channel` enum makes unknown, misspelled and duplicate channels impossible (D4); only the settings blocks can name a channel twice, and the schema forbids that too |
 | Variables & states | missing / unknown / non-controllable `variable` · state not in `accepted_states` · a named value the channel does not declare, e.g. `dark` on temperature (D8a) · sweep on a variable other than voltage/current · ramp with neither or both of `rate` and `duration` · non-positive `rate` |
-| Units | unparseable string · bare number · ambiguous unit (bare `%` on humidity or oxygen) · dimension mismatch (the twin's own `unit=` raises it, D19a — check it by assigning, do not re-implement it) · mixed kinds within one state · value outside `limits` (compared only within the same kind) |
+| Units | unparseable string · bare number · ambiguous unit (bare `%` on humidity or oxygen) · dimension mismatch (the field's own `unit=` raises it, D19 — check it by assigning, do not re-implement it) · mixed kinds within one state · value outside `limits` (compared only within the same kind) |
 | Monitoring (D9) | `monitor` / `monitored` / `sample_every` / `sampling_rate` on a node without `channel` · both `sample_every` and `sampling_rate` in one place · sampling details without `monitor` (*warning*: the tag decides) · unknown or non-monitorable variable in `monitored` · a monitor tag whose rate is unspecified here and in the settings (*warning*) · nothing monitored anywhere (*warning*) |
 | Channel settings | more than one state slot in a block · `variable` missing where the channel has several controllable variables · a state the channel does not accept (`off` outside irradiation) · a routine with no commands *and* settings that carry no conditions (*warning*: nothing happens) |
 | Precedence (D4b) | a settings field some command overrides (*warning*, once per channel and field, with how long and how many commands) · a settings field **never** in effect (*warning*, dead configuration) · a command that repeats its channel's settings value verbatim (*warning*: redundant) |
@@ -1088,30 +1093,37 @@ Same trick for the channel settings via `ChannelSettings`, where the slot is als
 channel's identity (D4). Cost: "exactly one state slot" is a runtime check (§7), not a schema
 constraint.
 
-**Strings *beside* unit-ful quantities, never instead of them — verified (D19, D19a).**
+**No string beside the quantity — the setter reads the written unit (D19, D19a).**
 `Quantity(type=np.float64, unit='second')` accepts only a bare number *in seconds*: `dur: 24`
 is 24 s, while `'24 h'` raises `ValueError` and `{value: 24, unit: hour}` raises too. There is
 no escape hatch: `__unit` appears nowhere in NOMAD's source, and a `duration__unit: hour` key
 is silently ignored as an unknown key (the §9 pitfall below), leaving 24 **seconds** — the
 quiet wrong answer that makes a written unit worth having in the file at all.
 
-So a value that must be authored with its unit is written into a `Quantity(type=str)`, and
-that string is **paired with a typed twin** `<name>_value` that `normalize()` parses and keeps
-in sync (D19a). The twin is not a nicety — it is the only thing that restores what NOMAD
-natively gives a unit-ful quantity:
+An earlier draft answered that with a `Quantity(type=str)` paired with a typed twin
+`<name>_value` that `normalize()` kept in sync. The twin bought back everything the string
+cost — and itself cost a second field per value, a second name in every ELN, and a standing
+rule that the two may never drift. Reading the string one step earlier is cheaper and buys
+the same thing: `WrittenUnits.m_set` (§6) parses it into a *pint quantity*, which NOMAD
+already knows how to convert and store, leaving one field that is both the authored key and
+the stored number.
 
-| | authored string alone | with the typed twin |
+| | authored string alone | one quantity, its unit read on the way in |
 |---|---|---|
 | unit switching in the GUI | — (inert text) | ✅ canonical `unit=`, default shown via `display: {unit: …}` |
 | numeric search / filtering, plots | — | ✅ archive holds a number |
 | dimension check | hand-rolled in `parse()` (§6) | ✅ loud `DimensionalityError` on assignment |
 | `65 °C`, `24 h` | our own parsing, and the traps in §6 | ✅ pint converts on assignment: `338.15 K`, `86400 s` |
+| what the file writes | `hold: 65 °C` | `hold: 65 °C` — unchanged |
+| fields per value | 2 | 1 |
 
-**Verified:** a pint quantity assigned to a unit-ful field converts and stores correctly,
-`m_to_dict()` writes a plain number, a wrong dimension raises loudly, and a subclass may
-re-declare an inherited quantity with its own unit (per-channel `hold_value`, D19a). Residual
-cost, and the whole reason the string stays: the ELN shows a text field for the authored
-value, and the numeric widget belongs to the twin.
+**Verified:** `m_set` is the single gateway — `m_from_dict`, `m_update_from_dict` and
+`Section(**kwargs)` all funnel into it — a pint quantity assigned to a unit-ful field converts
+and stores correctly, `m_to_dict()` writes a plain number that reloads unchanged, a wrong
+dimension raises loudly, and a subclass may declare a quantity its base does not, which is
+where a per-channel `hold` lives (D19a). Residual cost: the ELN's numeric widget edits the
+value in the unit the field declares, not the one it was authored in, unless a `display`
+annotation says otherwise.
 
 **An enum instead of paths or keys.** NOMAD would write `#/data/channels/0` — unreadable and
 broken by reordering. A free key (`chuck_T`) would read well but let every lab invent its own
@@ -1161,7 +1173,8 @@ src/nomad_pv_stability_measurements/
     __init__.py       the entry point; it loads `protocol.m_package`, whose imports pull
                       in the modules below (each module carries its own SchemaPackage —
                       a package cannot span modules)
-    units.py          parse / parse_duration / parse_rate, kind tables        (§6)
+    units.py          parse / parse_duration / parse_rate, kind tables, and the
+                      WrittenUnits base that reads a written unit on the way in (§6, D19)
     conditions.py     stop_when tokenizer + parser -> IR                     (§4.2.1)
     routine.py        CHANNELS, Variable, Kind, RoutineCommand, ChannelCommand + 5
                       channel classes, Subroutine, Routine, RegulationLaw

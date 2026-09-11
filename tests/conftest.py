@@ -35,8 +35,8 @@ def log():
 def normalized(log):
     """Normalizes a hand-built section the way NOMAD's own pass does.
 
-    Every nested section runs before its parent (**verified**) — which is what fills
-    the typed twins (D19a) that a parent's checks read.
+    Every nested section runs before its parent (**verified**) — which is what a
+    parent's checks rely on, and what reports anything a child could not read (D19).
     """
 
     def run(section):
