@@ -1,0 +1,61 @@
+import pint
+import pytest
+from nomad.units import ureg
+
+from nomad_pv_stability_measurements.schema_packages.units import (
+    parse_duration,
+    parse_frequency,
+    split,
+)
+
+
+@pytest.mark.parametrize(
+    ('text', 'seconds'),
+    [
+        ('60 s', 60),
+        ('100 ms', 0.1),
+        # The traps pint falls into unaided (Design.md §6): `h` is Planck's
+        # constant, `min` is milli-inch, `d` is undefined — all three silent.
+        ('24 h', 86400),
+        ('500 h', 1800000),
+        ('5 min', 300),
+        ('2 d', 172800),
+        # No space, and a written-out unit.
+        ('60s', 60),
+        ('1000 hours', 3600000),
+    ],
+)
+def test_parse_duration(text, seconds):
+    assert parse_duration(text).to(ureg.second).magnitude == pytest.approx(seconds)
+
+
+def test_parse_frequency():
+    assert parse_frequency('10 Hz').to(ureg.hertz).magnitude == pytest.approx(10)
+    assert parse_frequency('1 kHz').to(ureg.hertz).magnitude == pytest.approx(1000)
+
+
+def test_a_bare_number_is_ambiguous():
+    # D6: a number with no unit is an error, never a guess.
+    with pytest.raises(ValueError, match='bare number'):
+        parse_duration('60')
+
+
+def test_a_wrong_dimension_fails_loudly():
+    with pytest.raises(pint.errors.DimensionalityError, match='Cannot convert'):
+        parse_duration('10 Hz')
+
+
+def test_unreadable_text_fails():
+    with pytest.raises(ValueError, match='not a number'):
+        parse_duration('now and then')
+
+
+def test_split_handles_human_characters():
+    # A true minus and a non-breaking space, as pasted from a document.
+    assert split('−40 °C') == (-40.0, '°C')
+
+
+def test_split_leaves_units_that_pint_already_reads():
+    # Only an exact `h`/`min`/`d` is aliased, so `ms` is not read as minutes.
+    assert split('100 ms') == (100.0, 'ms')
+    assert split('10 Hz') == (10.0, 'Hz')

@@ -1,0 +1,17 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: steady soak
+  channel_settings:
+    temperature:
+      hold: 65 °C
+      monitor: true
+      sample_every: 60 s
+  routine:
+    name: soak
+    commands:
+      - channel: temperature        # an episode: 500 h at 85 °C, logged fast
+        hold: 85 °C
+        duration: 500 h
+        sampling_rate: 10 Hz
+      - channel: temperature        # no setpoint: left to drift for 100 h
+        duration: 100 h
