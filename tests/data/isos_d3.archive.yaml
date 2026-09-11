@@ -1,0 +1,19 @@
+# ISOS-D-3 -- damp heat, 85 °C / 85 %RH, dark (Design.md §8)
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-D-3 damp heat
+  isos_specification: ISOS-D-3
+  horizon: 1000 h                                  # every step is unbounded
+
+  channels:
+    temperature: [{key: oven_T, monitor_every: 10 min}]
+    irradiation: [{key: oven_dark}]
+    atmosphere:  [{key: oven_air, balance_gas: air, monitor_every: 10 min}]
+
+  protocol:
+    name: damp heat
+    mode: parallel
+    steps:
+      - {channel: oven_T, hold: 85 °C}
+      - {channel: oven_air, variable: humidity, hold: 85 %RH}
+      - {channel: oven_dark, off: true}            # deliberately dark: D, not "bench"

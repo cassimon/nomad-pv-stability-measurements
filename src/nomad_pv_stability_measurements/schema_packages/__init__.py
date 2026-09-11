@@ -1,17 +1,15 @@
 from nomad.config.models.plugins import SchemaPackageEntryPoint
-from pydantic import Field
 
 
-class NewSchemaPackageEntryPoint(SchemaPackageEntryPoint):
-    parameter: int = Field(0, description='Custom configuration parameter')
-
+class StabilityProtocolEntryPoint(SchemaPackageEntryPoint):
     def load(self):
-        from nomad_pv_stability_measurements.schema_packages.schema_package import m_package
+        # Importing `protocol` also loads the channels, states and timeline packages.
+        from nomad_pv_stability_measurements.schema_packages.protocol import m_package
 
         return m_package
 
 
-schema_package_entry_point = NewSchemaPackageEntryPoint(
-    name='NewSchemaPackage',
-    description='New schema package entry point configuration.',
+schema_package_entry_point = StabilityProtocolEntryPoint(
+    name='PVStabilityMeasurements',
+    description='Schema for PV stability test protocols and their measurements.',
 )

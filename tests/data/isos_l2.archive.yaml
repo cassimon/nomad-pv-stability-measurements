@@ -1,0 +1,34 @@
+# ISOS-L-2 -- light soak, 65 °C, 1 sun, MPP with a daily JV sweep (Design.md §8)
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-L-2 light soak, 65 C, MPP with daily JV
+  isos_specification: ISOS-L-2
+
+  channels:
+    temperature:
+      - key: chuck_T
+        limits: [20 °C, 90 °C]
+        regulation: {kind: pid, kp: 2.0, ki: 0.1}
+        monitor_every: 60 s
+    irradiation:
+      - key: sun
+        spectrum: AM1.5G
+        monitor_every: 60 s
+    electrical_load:
+      - key: bias
+        monitor_every: 60 s
+    # no atmosphere declared -> implicit "atmosphere: uncontrolled" row
+
+  protocol:
+    name: light soak
+    mode: parallel
+    steps:
+      - {channel: chuck_T, hold: 65 °C}          # unbounded -> spans the block
+      - {channel: sun, hold: 1 sun}              # unbounded -> spans the block
+      - subprotocol: daily cycle                 # bounded: 42 × (24 h + sweep)
+        repetitions: 42
+        steps:
+          - {channel: bias, track: mpp, duration: 24 h}
+          - channel: bias
+            variable: voltage
+            sweep: {from: -0.2 V, to: 1.3 V, rate: 50 mV/s, direction: both}
