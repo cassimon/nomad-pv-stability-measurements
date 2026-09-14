@@ -1,4 +1,3 @@
-
 from nomad.datamodel.data import ArchiveSection, EntryData
 from nomad.datamodel.metainfo.basesections import BaseSection
 from nomad.metainfo import SchemaPackage, SubSection

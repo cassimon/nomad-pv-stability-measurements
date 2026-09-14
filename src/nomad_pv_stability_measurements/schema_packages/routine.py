@@ -1,5 +1,3 @@
-
-
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
 
@@ -168,7 +166,7 @@ class Subroutine(RoutineCommand):
         self._report_commands_that_never_run(logger)
 
     def _report_overlapping_commands(self, logger):
-    
+
         for channel in CHANNELS:
             commands = [
                 command
@@ -195,7 +193,7 @@ class Subroutine(RoutineCommand):
             )
 
     def _report_commands_that_never_run(self, logger):
-        
+
         if self.mode != 'sequential' or self.duration is None:
             return
         budget = self.duration.to('s').magnitude
