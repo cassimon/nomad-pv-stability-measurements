@@ -3,6 +3,7 @@ from nomad.datamodel.metainfo.basesections import BaseSection
 from nomad.metainfo import SchemaPackage, SubSection
 
 from nomad_pv_stability_measurements.schema_packages.routine import (
+    IrradiationChannel,
     Routine,
     TemperatureChannel,
 )
@@ -20,6 +21,7 @@ class ChannelSettings(ArchiveSection):
     """
 
     temperature = SubSection(section_def=TemperatureChannel)
+    irradiation = SubSection(section_def=IrradiationChannel)
 
 
 class StabilityProtocol(BaseSection, EntryData):

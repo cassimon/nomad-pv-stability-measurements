@@ -1,7 +1,10 @@
-import numpy as np
+from nomad.datamodel.data import ArchiveSection
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
 
-from nomad_pv_stability_measurements.schema_packages.units import WrittenUnits
+from nomad_pv_stability_measurements.schema_packages.units import (
+    UNREADABLE_VALUES,
+    StabilityUnitAwareFloat,
+)
 from nomad_pv_stability_measurements.schema_packages.utils import with_m_def
 
 m_package = SchemaPackage()
@@ -9,10 +12,26 @@ m_package = SchemaPackage()
 #: The channel vocabulary. One member per class below, one slot per member in
 #: `ChannelSettings` (protocol.py), and the values a `ChannelCommand.channel`
 #: may take.
-CHANNELS = ('temperature',)
+CHANNELS = ('temperature', 'irradiation')
 
 
-class RoutineCommand(WrittenUnits):
+class StabilityUnitAwareSection(ArchiveSection):
+    """Base class for sections with `StabilityUnitAwareFloat` fields: reports what
+    they could not read.
+
+    Parsing itself happens in the field's own type (units.py, D19). A value that
+    type could not read is left unset and remembered here, so that one typo does
+    not stop the entry from loading; this reports the lot on the next normalize
+    (§7).
+    """
+
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        for complaint in self.m_cache.get(UNREADABLE_VALUES, {}).values():
+            logger.error(complaint)
+
+
+class RoutineCommand(StabilityUnitAwareSection):
     """
     One thing a routine does.
 
@@ -26,7 +45,7 @@ class RoutineCommand(WrittenUnits):
         'derived from what the command does.',
     )
     duration = Quantity(
-        type=np.float64,
+        type=StabilityUnitAwareFloat(),
         unit='s',
         description='How long this command lasts, authored with its unit, e.g. '
         '`24 h`. With one, the command takes its turn in the block around it; '
@@ -55,13 +74,13 @@ class ChannelCommand(RoutineCommand):
         'channel nobody regulates can still be logged.',
     )
     sample_every = Quantity(
-        type=np.float64,
+        type=StabilityUnitAwareFloat(),
         unit='s',
         description='How often to sample, authored with its unit, e.g. `60 s`. '
         'Write either this or `sampling_rate`; the other is derived from it.',
     )
     sampling_rate = Quantity(
-        type=np.float64,
+        type=StabilityUnitAwareFloat(),
         unit='Hz',
         description='How fast to sample a continuous stream, authored with its '
         'unit, e.g. `10 Hz`. Write either this or `sample_every`; the other is '
@@ -95,16 +114,37 @@ class TemperatureChannel(ChannelCommand):
     """The temperature axis."""
 
     hold = Quantity(
-        type=np.float64,
+        type=StabilityUnitAwareFloat(),
         unit='K',
         description='Constant temperature to hold, authored with its unit, e.g. '
         '`65 °C`. Leave it empty to keep the channel uncontrolled in this command.',
     )
 
 
+class IrradiationChannel(ChannelCommand):
+    """The irradiation axis."""
+
+    hold = Quantity(
+        # `dark` belongs to this one field, not to every unit-ful field here (D8a).
+        type=StabilityUnitAwareFloat(named={'dark': '0 W/m^2'}),
+        unit='W/m^2',
+        description='Constant irradiance to hold, authored with its unit, e.g. `1 sun` '
+        'or `100 mW/cm^2`. Write `dark` for a run deliberately kept dark: that is a '
+        'setpoint somebody chose, not silence about the channel (D8a). Leave it empty '
+        'to keep the channel uncontrolled in this command.',
+    )
+    spectrum = Quantity(
+        type=str,
+        description='Which spectrum the lamp delivers, e.g. `AM1.5G`. Free text for now.',
+    )
+
+
 #: Which class an authored `channel:` names (D19a). Not cosmetic: a `hold` loaded as
 #: the base class is dropped without a word, since only the channel class declares it.
-CHANNEL_CLASSES = {'temperature': TemperatureChannel}
+CHANNEL_CLASSES = {
+    'temperature': TemperatureChannel,
+    'irradiation': IrradiationChannel,
+}
 
 
 class Subroutine(RoutineCommand):

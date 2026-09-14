@@ -6,6 +6,11 @@ data:
       hold: 65 °C
       monitor: true
       sample_every: 60 s
+    irradiation:
+      hold: 1 sun
+      spectrum: AM1.5G
+      monitor: true
+      sample_every: 60 s
   routine:
     name: soak
     commands:
@@ -14,4 +19,7 @@ data:
         duration: 500 h
         sampling_rate: 10 Hz
       - channel: temperature        # no setpoint: left to drift for 100 h
+        duration: 100 h
+      - channel: irradiation        # deliberately dark, and counted (D8a)
+        hold: dark
         duration: 100 h

@@ -47,7 +47,7 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | D6 | **Every value is a unit string** (`65 °C`, `85 %RH`, `1 sun`), parsed and dimension-checked against its variable. **Ambiguity is an error:** bare numbers, and bare `%` on humidity/oxygen. The one documented convention: `ppm`/`ppb` are molar (ppmv) — the glovebox standard. The string is the *authored* form only: it is read into the field's own unit-ful quantity on the way in (D19). A bare number **written as text** stays an error; a plain YAML number is read in the quantity's declared unit — which is what NOMAD itself writes back when it serializes. |
 | D7 | **The four ISOS stress axes are always reported.** Since the vocabulary is fixed (D4), this is structural: a channel no routine touches appears in the derived layers as *uncontrolled and unmonitored*. UV content is a property of the irradiation spectrum, not a channel; encapsulation belongs to the sample. |
 | D8 | **A command says what is *asked* of a channel; the control *state* is derived, never authored.** A `ChannelCommand` carries a setpoint (`hold`) or a time-varying shape (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) and nothing that names a control mode. **Asking nothing is the neutral element**: a channel no command in scope touches is not regulated, which is also what it is wherever nothing says otherwise, so every channel still has a defined state at every instant (D7). Two booleans follow per channel, **computed over time when commands are expanded into a time series, not stored on a command**: **`controlled`** (some command in scope asks for a value) and **`monitored`** (a monitor tag is in effect) — timeline rows, plottable next to the values (§4.4). On a command itself, `controlled` is only "does this carry a setpoint". *Supersedes `control = MEnum('off', 'hold', 'active')` (and, before that, the `uncontrolled`/`off` split): `hold` already said `hold`, and `active` was a label for time-varying behaviour that a single static command cannot know — a command is one clause, and what a channel is doing at hour 700 follows from all the clauses in scope. **Explicitly released** is still writable, structurally: a command that **names a channel and asks nothing of it** says "not regulated here" out loud, as against a channel nobody mentions (§4.1, "Untouched channels").* |
-| D8a | **Named setpoints: a channel class may declare words that stand for values.** `IrradiationChannel` declares `dark` (= `0 W/m²`); `ElectricalLoadChannel` declares `open_circuit`. They are written wherever a value is written — `hold: dark`, `cycle: {low: dark, high: 1 sun}`, `ramp: {from: dark, to: 1 sun}` — and resolved against the channel's own table in `normalize()`, **before** `parse()` (§6). Per channel, never global: `dark` is meaningless on the temperature axis and is rejected there. A name that stands for a number becomes one, so the timeline plots `dark` as 0 instead of a NaN hole; a name that stands for no number at all (`open_circuit` is neither 0 V nor 0 A) stays NaN, like `track`. **Asking for a named setpoint is asking for something**, so `controlled` is true — that is how "deliberately dark" is said out loud *and counted*, the one thing the old irradiation-only `off` state did that D8 alone does not (§4.1). **Spelled `dark`, never `off`:** a bare `off` is a YAML 1.1 boolean (§9), so that spelling arrives as `False` and would silently invert the very flag it exists to set — and `dark` is ISOS's own word. **There is no `on`:** `dark` has a defined value and an illuminated state does not, and the irradiance is exactly what ISOS reporting needs, so it is written as a number (`hold: 1 sun`). |
+| D8a | **Named setpoints: a field may declare words that stand for values.** Irradiation's `hold` declares `dark` (= `0 W/m²`); the electrical load's declares `open_circuit`. They are written wherever a value is written — `hold: dark`, `cycle: {low: dark, high: 1 sun}`, `ramp: {from: dark, to: 1 sun}` — and the table is declared **on the field's own type**, `StabilityUnitAwareFloat(named={'dark': '0 W/m²'})`, which resolves the word **before** parsing it (D19, §6). *Resolution moved twice: out of `normalize()` when D19 made a word have to become a value before the field is set, and then off the section onto the field — a word belongs to the quantity it can be written into, not to every unit-ful field the section happens to declare, which is what kept `duration: dark` from reading as an irradiance.* Per field, never global: `dark` is meaningless on the temperature axis and is rejected there. Where a state section takes endpoints of the same dimension (`ramp: {from: dark}`, states.py), that section's own endpoint fields declare the same table. A name that stands for a number becomes one, so the timeline plots `dark` as 0 instead of a NaN hole; a name that stands for no number at all (`open_circuit` is neither 0 V nor 0 A) stays NaN, like `track`. **Asking for a named setpoint is asking for something**, so `controlled` is true — that is how "deliberately dark" is said out loud *and counted*, the one thing the old irradiation-only `off` state did that D8 alone does not (§4.1). **Spelled `dark`, never `off`:** a bare `off` is a YAML 1.1 boolean (§9), so that spelling arrives as `False` and would silently invert the very flag it exists to set — and `dark` is ISOS's own word. **There is no `on`:** `dark` has a defined value and an illuminated state does not, and the irradiance is exactly what ISOS reporting needs, so it is written as a number (`hold: 1 sun`). |
 | D9 | **Monitoring is a tag, not a state.** Acquiring data is an action, so it is said where the condition is said: `monitor: true` with an optional `sample_every: 60 s` or `sampling_rate: 10 Hz` — in a channel's settings (the whole run) or on a node (its span, D13). It is orthogonal to the setpoint, so the same place may set a state *and* monitor, and monitoring alone logs a channel nobody controls. |
 | D10 | **The regulation law (PID, on/off …) is a channel setting**, orthogonal to the setpoint shape. |
 
@@ -70,7 +70,7 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | # | Decision |
 |---|---|
 | D18 | **Named state slots** (`hold:`, `ramp:` …) instead of polymorphic sub-sections — `m_def` is never hand-written except at the root. |
-| D19 | **One field per value: the quantity itself, with the written unit read on the way in.** Every authored value is a real `Quantity(type=np.float64, unit=…)` — no `type=str` beside it, no twin. NOMAD refuses `duration: 500 h` on such a quantity (**verified**: it rejects `'24 h'` outright, reads a bare number as its declared unit, and honours no `__unit:` escape hatch anywhere in its source), so the plugin overrides the **one gateway every assignment passes through** — `MSection.m_set`, which `m_from_dict`, `m_update_from_dict` and `Section(**kwargs)` all funnel into (**verified**). A string handed to a quantity that declares a `unit` is parsed by §6 into a pint quantity, and NOMAD's own type normalization then converts and stores it (`500 h` → `1800000.0 s`, `65 °C` → `338.15 K`, **verified**). The file keeps the unit it was written with, the archive keeps a number, and unit switching, numeric search, plots and a loud `DimensionalityError` all come free from the declaration. *Supersedes the string-plus-twin pair: the twin existed only to buy back what the string cost, and reading the string one step earlier costs nothing to begin with.* |
+| D19 | **One field per value: the quantity itself, with the written unit read by its own type.** Every authored value is a real `Quantity(type=StabilityUnitAwareFloat(), unit=…)` — no `type=str` beside it, no twin. NOMAD's stock float refuses `duration: 500 h` (**verified**: it rejects `'24 h'` outright, reads a bare number as its declared unit, and honours no `__unit:` escape hatch anywhere in its source), so the plugin declares **its own `Datatype`** (§6) — the extension point NOMAD itself uses for this, exactly as its stock `Datetime` type accepts a written-out date and stores a canonical one. `StabilityUnitAwareFloat.normalize` parses the string against the field's own `unit=` and hands `super()` a pint quantity, which NOMAD's own number type already knows how to convert and store (`500 h` → `1800000.0 s`, `65 °C` → `338.15 K`, **verified**). Because `Quantity.__set__` calls `self.type.normalize` unconditionally, **every** way of setting the field is covered — `m_from_dict`, `m_update_from_dict`, `Section(**kwargs)`, an ELN edit *and* a plain `section.hold = '65 °C'` (**verified**). The file keeps the unit it was written with, the archive keeps a number, and unit switching, numeric search, plots and a loud `DimensionalityError` all come free from the declaration. The schema still serializes as a plain float quantity, so nothing downstream needs to know (**verified**). *Supersedes two earlier drafts: the string-plus-twin pair (the twin existed only to buy back what the string cost), and then a section-wide `m_set` override — which worked, but intercepted every field of every section to serve the few that declare a unit, and still missed plain attribute assignment.* |
 | D19a | **Where the dimension depends on the channel, the field is declared on the channel class.** `hold` cannot sit on `ChannelCommand`: it is kelvin for temperature and W/m² for irradiation. So `ChannelCommand` does not declare it at all and each channel class declares its own — `TemperatureChannel.hold` in `K` — which is also how a channel whose setpoint is not a number at all declares an `MEnum` instead (`dark`, `open_circuit`, D8a). **Verified:** a subclass may declare what its base does not, and NOMAD then **silently drops** an authored `hold` when the same dict is loaded as the base class. That makes D11a's per-entry dispatch load-bearing rather than a convenience: it must resolve the `channel:` *value* to that channel's class (`channel: temperature` → `TemperatureChannel`), or the setpoint disappears without a word. Text the file writes that §6 cannot read is remembered where it was written and reported by `normalize()` (§7), never raised — a typo must not stop an entry from loading; an empty or blank string leaves the field unset, since asking nothing is the neutral element (D8). |
 | D20 | **References by enum value** (`channel: temperature`) — never `#/data/...` paths, and never a free string that each lab spells differently. |
 
@@ -398,9 +398,10 @@ class AtmosphereChannel(Channel):
     }
     control_groups = [{'humidity'}, {'oxygen'}, {'total_pressure'}]
     accepted_states = GENERIC_STATES
-    named_setpoints = {}              # D8a; IrradiationChannel: {'dark': '0 W/m²'},
-                                      #   ElectricalLoadChannel: {'open_circuit': None}
     always_reported = True
+    # Named setpoints (D8a) are NOT here: a word belongs to the field it can be
+    # written into, so it is declared on that quantity's own type —
+    #   hold = Quantity(type=StabilityUnitAwareFloat(named={'dark': '0 W/m²'}), unit='W/m²')
 ```
 
 **Base-class interface** (implemented once):
@@ -408,8 +409,8 @@ class AtmosphereChannel(Channel):
 ```
 can_control(variable) / can_monitor(variable) -> bool
 group_of(variable)                            -> frozenset
-resolve(text)                                 -> a named setpoint, or text unchanged  # D8a
 parse(variable, text)                         -> (kind, canonical float)   # §6
+# resolving a named setpoint is NOT here: it belongs to the field's type (D8a, §6)
 ```
 
 Control groups encode physics: humidity and oxygen are set independently by a gas mixer
@@ -873,8 +874,9 @@ One function, never ad-hoc pint calls. The channel's `parse()` delegates here.
 **Where the result goes.** Every number this module returns lands in the declared, unit-ful
 quantity the file wrote it into (D19) as well as in the IR the expander works on — parsing is
 not a private step that feeds the simulation and leaves the archive holding text. It happens in
-`WrittenUnits.m_set`, the setter every assignment passes through, so the field's own `unit=`
-states the expected dimension and NOMAD's own code re-checks step 5 for free. Text §6 cannot
+`StabilityUnitAwareFloat.normalize`, the quantity's own type, which `Quantity.__set__` calls on every
+assignment whatever its origin, so the field's own `unit=` states the expected dimension and
+NOMAD's own number type re-checks step 5 for free. Text §6 cannot
 read is remembered on the section and reported by `normalize()` (§7) — a mistyped value must
 not stop the entry from loading.
 
@@ -894,17 +896,19 @@ parse(text, variable) -> (kind, float in the kind's canonical unit)
          '%' 1e-2 -> only if the variable has exactly one dimensionless kind;
                      otherwise "ambiguous" error listing the options
        everything else -> pint dimension -> the variable's kind with that dimension
-  4. 'sun' -> 1000 W/m^2 (handled here, never via ureg.define)
+  4. 'sun' -> 1000 W/m^2 — the same (factor, unit) alias table as step 2, never ureg.define
   5. check the dimension; convert to canonical; any mismatch fails LOUDLY
 parse_duration(text)       -> seconds    (expected dimension [time])
 parse_frequency(text)      -> hertz      (expected dimension 1/[time]; `sampling_rate`, D9)
 parse_rate(text, variable) -> (kind, canonical per second)
        split at the LAST '/': numerator via parse(), denominator via parse_duration()
        -> works for '5 %RH/h' and '2 K/min', where pint alone cannot
-resolve(channel, text)     -> a named setpoint's value, or text unchanged      (D8a)
-       tried BEFORE parse(), per channel: 'dark' -> '0 W/m²' on irradiation only.
-       A name standing for no number at all ('open_circuit') -> None -> NaN in the
-       timeline, like `track`. An unresolved word then fails in parse(), loudly.
+StabilityUnitAwareFloat(named={...}) -> the datatype a unit-ful quantity declares   (D19)
+       normalize() resolves a named setpoint BEFORE parse(), from the table that
+       field declares: 'dark' -> '0 W/m²' on irradiation's `hold` only, never on a
+       `duration` beside it (D8a). A name standing for no number at all
+       ('open_circuit') -> NaN in the timeline, like `track`. An unresolved word
+       then fails in parse(), and is reported rather than raised (§7).
 ```
 
 **Verified pint behaviour this spec exists for** (`nomad.units.ureg`):
@@ -1104,9 +1108,9 @@ An earlier draft answered that with a `Quantity(type=str)` paired with a typed t
 `<name>_value` that `normalize()` kept in sync. The twin bought back everything the string
 cost — and itself cost a second field per value, a second name in every ELN, and a standing
 rule that the two may never drift. Reading the string one step earlier is cheaper and buys
-the same thing: `WrittenUnits.m_set` (§6) parses it into a *pint quantity*, which NOMAD
-already knows how to convert and store, leaving one field that is both the authored key and
-the stored number.
+the same thing: `StabilityUnitAwareFloat.normalize` (§6), the field's own type, parses it into a *pint
+quantity*, which NOMAD already knows how to convert and store, leaving one field that is both
+the authored key and the stored number.
 
 | | authored string alone | one quantity, its unit read on the way in |
 |---|---|---|
@@ -1117,11 +1121,19 @@ the stored number.
 | what the file writes | `hold: 65 °C` | `hold: 65 °C` — unchanged |
 | fields per value | 2 | 1 |
 
-**Verified:** `m_set` is the single gateway — `m_from_dict`, `m_update_from_dict` and
-`Section(**kwargs)` all funnel into it — a pint quantity assigned to a unit-ful field converts
-and stores correctly, `m_to_dict()` writes a plain number that reloads unchanged, a wrong
-dimension raises loudly, and a subclass may declare a quantity its base does not, which is
-where a per-channel `hold` lives (D19a). Residual cost: the ELN's numeric widget edits the
+**Verified:** `Quantity.__set__` calls the field's own `type.normalize` on every assignment
+whatever its origin — `m_from_dict`, `m_update_from_dict`, `Section(**kwargs)`, an ELN edit and
+a plain `section.hold = '65 °C'` all reach it, so there is no path that stores text unread. The
+type is handed the section as a keyword argument, which is how an unreadable value is remembered
+where it was written. A pint quantity converts and stores correctly, `m_to_dict()` writes a plain
+number that reloads unchanged, a wrong dimension raises loudly, the schema still serializes as a
+plain float quantity so nothing downstream needs to know, and a subclass may declare a quantity
+its base does not, which is where a per-channel `hold` lives (D19a). Residual cost: blank text
+(`hold: ''`) leaves the field unset but *writes* it back as an explicit `null` rather than
+omitting the key — the type may choose what a value becomes, not whether it is stored at all. The
+two read identically (`__get__` answers `None` either way) and a `null` reloads as unset, so this
+is verbosity, not a semantic difference; omitting the key is still the way to ask nothing (D8).
+Second residual cost: the ELN's numeric widget edits the
 value in the unit the field declares, not the one it was authored in, unless a `display`
 annotation says otherwise.
 
@@ -1174,10 +1186,13 @@ src/nomad_pv_stability_measurements/
                       in the modules below (each module carries its own SchemaPackage —
                       a package cannot span modules)
     units.py          parse / parse_duration / parse_rate, kind tables, and the
-                      WrittenUnits base that reads a written unit on the way in (§6, D19)
+                      StabilityUnitAwareFloat datatype that reads a written unit on
+                      the way in (§6, D19)
     conditions.py     stop_when tokenizer + parser -> IR                     (§4.2.1)
-    routine.py        CHANNELS, Variable, Kind, RoutineCommand, ChannelCommand + 5
-                      channel classes, Subroutine, Routine, RegulationLaw
+    routine.py        CHANNELS, Variable, Kind, StabilityUnitAwareSection (reports
+                      what a StabilityUnitAwareFloat could not read), RoutineCommand,
+                      ChannelCommand + 5 channel classes, Subroutine, Routine,
+                      RegulationLaw
     utils.py          with_m_def and other small cross-module helpers (D11a)
     states.py         Ramp, Cycle, Tabulated, Sweep
     protocol.py       ChannelSettings, StabilityProtocol, ProtocolSummary,
@@ -1196,7 +1211,19 @@ Suggested order — each step is testable on its own:
 
 1. **`units.py` + tests** — table-driven from §6; the highest bug density lives here.
    `conditions.py` follows naturally — it reuses `parse()` for its values.
-2. **`routine.py`** — variable tables, `parse()` delegation, control groups.
+2. **`routine.py`** — the channel classes (D4). Four substeps, each one idea and testable
+   on its own:
+   - **2a — named setpoints, and the irradiation channel (D8a).** `sun` (§6 step 4), and a
+     per-channel table of words that stand for values, resolved by the same setter that reads
+     the written unit (D19). `IrradiationChannel` carries `dark` and `spectrum`.
+   - **2b — variables and control groups.** The `Variable` table, `variable` on a command,
+     `can_control` / `can_monitor` / `group_of`. `MechanicalChannel` (two variables) and
+     `ElectricalLoadChannel` (three in one group, plus the numberless `open_circuit`) are what
+     exercise them.
+   - **2c — quantity kinds (§6 step 3).** The dimensionless token table, bare `%` ambiguity,
+     `ppm` = molar. `AtmosphereChannel` and its `balance_gas` are what need them.
+   - **2d — envelope and provenance.** `limits`, `RegulationLaw`, `instrument`, `monitored`.
+     `is_controlled` / `is_monitored` are derived over the whole tree, so they land with step 4.
 3. **`simulation/`** — IR, expander, validation; test with plain dataclasses, no archive.
 4. **`states.py`, `routine.py`, `protocol.py`** — metainfo, IR builder, `normalize()`, summary.
 5. **`timeline.py` + plot** — budgeting and the two figures.
@@ -1219,6 +1246,7 @@ always-reported set, one protocol per upload).
 | | Question | Iteration 1 |
 |---|---|---|
 | O9 | **Cross-kind search** — a best-effort `water_molar_ratio_mean` in the summary, computed only when temperature is *controlled* over the span and null otherwise (never guessed from an uncontrolled channel)? | left out; revisit after the first real data |
+| O11 | **Bare number on offset unit** — `hold: 65` on temperature reads as 65 K = −208 °C, because D6-as-amended requires a plain YAML number to read in the declared unit to preserve round-trip. Unfixable without breaking `m_to_dict` and reload. Worth recording in §9 as a second residual cost, alongside the `display` annotation? | decision: document, do not fix |
 
 ## 12. Deferred on purpose
 

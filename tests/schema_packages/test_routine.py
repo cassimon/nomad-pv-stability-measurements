@@ -7,8 +7,10 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.protocol import ChannelSettings
 from nomad_pv_stability_measurements.schema_packages.routine import (
+    CHANNEL_CLASSES,
     CHANNELS,
     ChannelCommand,
+    IrradiationChannel,
     RoutineCommand,
     Subroutine,
     TemperatureChannel,
@@ -324,3 +326,104 @@ def test_a_corrected_value_clears_the_complaint(normalized, log):
 
     assert command.duration.to(ureg.hour).magnitude == pytest.approx(500)
     assert log.errors == []
+
+
+def test_each_channel_declares_its_own_hold_unit():
+    # `hold` cannot sit on ChannelCommand: it is kelvin on one axis and W/m² on the
+    # next. That is the whole reason it lives on the channel class (D19a).
+    units = {
+        name: str(cls.m_def.all_quantities['hold'].unit)
+        for name, cls in CHANNEL_CLASSES.items()
+    }
+
+    assert units == {
+        'temperature': 'kelvin',
+        'irradiation': 'watt / meter ** 2',
+    }
+
+
+def test_a_named_setpoint_becomes_the_value_it_stands_for():
+    # `dark` is a setpoint somebody chose and reported, so it resolves to a number and
+    # the channel counts as controlled — as against nobody mentioning it at all (D8a).
+    channel = IrradiationChannel.m_from_dict({'hold': 'dark'})
+
+    assert channel.hold.to(ureg.watt / ureg.meter**2).magnitude == pytest.approx(0)
+    assert channel.controlled is True
+
+
+def test_a_named_setpoint_belongs_to_one_channel(normalized, log):
+    # Per channel, never global: nothing on the temperature axis resolves `dark`, so it
+    # stays text, no unit reads it, and it is reported like any other typo (D8a, §7).
+    channel = normalized(TemperatureChannel.m_from_dict({'hold': 'dark'}))
+
+    assert (channel.hold, channel.controlled) == (None, False)
+    assert len(log.errors) == 1
+    assert 'hold' in log.errors[0]
+
+
+def test_a_block_commands_the_irradiation_axis():
+    node = Subroutine.m_from_dict(
+        {
+            'commands': [
+                {'channel': 'irradiation', 'hold': '1 sun', 'spectrum': 'AM1.5G'}
+            ]
+        }
+    )
+    command = node.commands[0]
+
+    assert isinstance(command, IrradiationChannel)
+    assert command.hold.to(ureg.watt / ureg.meter**2).magnitude == pytest.approx(1000)
+    assert command.spectrum == 'AM1.5G'
+
+
+def test_entry_loads_a_named_setpoint_and_a_sun():
+    # The whole path, through NOMAD's own parse: a word stands for a value, and a unit
+    # this registry does not define is read anyway (D8a, §6 step 4).
+    archive = parse(os.path.join(DATA_DIR, 'channels.archive.yaml'))[0]
+    normalize_all(archive)
+    settings = archive.data.channel_settings.irradiation
+    dark = archive.data.routine.commands[2]
+    irradiance = ureg.watt / ureg.meter**2
+
+    assert settings.hold.to(irradiance).magnitude == pytest.approx(1000)
+    assert settings.spectrum == 'AM1.5G'
+    assert isinstance(dark, IrradiationChannel)
+    assert dark.hold.to(irradiance).magnitude == pytest.approx(0)
+    # Deliberately dark is a condition somebody chose, so it counts as controlled.
+    assert dark.controlled is True
+
+
+def test_a_value_is_read_however_the_field_is_set():
+    # Parsing lives in the field's own type, which `Quantity.__set__` calls on every
+    # assignment, so there is no path that stores text unread — a plain attribute
+    # assignment included, which the earlier section-level override could not reach.
+    assigned = TemperatureChannel()
+    assigned.hold = '65 °C'
+    updated = TemperatureChannel()
+    updated.m_update_from_dict({'hold': '65 °C'})
+
+    for channel in [
+        assigned,
+        updated,
+        TemperatureChannel(hold='65 °C'),
+        TemperatureChannel.m_from_dict({'hold': '65 °C'}),
+    ]:
+        assert channel.hold.to(ureg.degC).magnitude == pytest.approx(65)
+
+
+def test_a_named_setpoint_belongs_to_its_own_field(normalized, log):
+    # The word table is declared on the quantity, not on the section, so `dark` is
+    # readable where an irradiance belongs and nowhere else (D8a).
+    command = normalized(IrradiationChannel.m_from_dict({'duration': 'dark'}))
+
+    assert command.duration is None
+    assert 'not a number followed by a unit' in log.errors[0]
+
+
+def test_the_schema_still_declares_a_plain_float():
+    # The type is ours, but it serializes as what it is — a float64 with a unit — so
+    # an archive, the GUI and any other client need know nothing about it (D19).
+    hold = TemperatureChannel.m_def.all_quantities['hold']
+
+    assert hold.type.serialize_self() == {'type_kind': 'numpy', 'type_data': 'float64'}
+    assert str(hold.unit) == 'kelvin'

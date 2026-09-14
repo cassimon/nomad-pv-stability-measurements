@@ -3,6 +3,7 @@ import pytest
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.units import (
+    parse,
     parse_duration,
     parse_frequency,
     split,
@@ -59,3 +60,14 @@ def test_split_leaves_units_that_pint_already_reads():
     # Only an exact `h`/`min`/`d` is aliased, so `ms` is not read as minutes.
     assert split('100 ms') == (100.0, 'ms')
     assert split('10 Hz') == (10.0, 'Hz')
+
+
+def test_a_sun_is_an_irradiance():
+    # `sun` is undefined in this registry and `ureg.define()` is forbidden, so it rides
+    # the same (factor, unit) alias table as the time tokens (§6 step 4).
+    irradiance = ureg.watt / ureg.meter**2
+
+    assert parse('1 sun', irradiance).magnitude == pytest.approx(1000)
+    assert parse('0.5 sun', irradiance).magnitude == pytest.approx(500)
+    # What pint already reads correctly is left alone.
+    assert parse('100 mW/cm^2', irradiance).magnitude == pytest.approx(1000)
