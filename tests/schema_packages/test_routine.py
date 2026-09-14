@@ -5,15 +5,17 @@ from nomad import utils
 from nomad.client import normalize_all, parse
 from nomad.units import ureg
 
+from nomad_pv_stability_measurements.schema_packages.channel_commands import (
+    CHANNEL_CLASSES,
+    IrradiationChannelCommand,
+    TemperatureChannelCommand,
+)
 from nomad_pv_stability_measurements.schema_packages.protocol import ChannelSettings
 from nomad_pv_stability_measurements.schema_packages.routine import (
-    CHANNEL_CLASSES,
     CHANNELS,
     ChannelCommand,
-    IrradiationChannel,
     RoutineCommand,
     Subroutine,
-    TemperatureChannel,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
@@ -26,7 +28,7 @@ def test_every_channel_has_a_settings_slot():
 
 
 def test_settings_carry_conditions_for_the_whole_run():
-    channel = TemperatureChannel.m_from_dict(
+    channel = TemperatureChannelCommand.m_from_dict(
         {'hold': '65 °C', 'monitor': True, 'sample_every': '60 s'}
     )
 
@@ -47,7 +49,7 @@ def test_settings_carry_conditions_for_the_whole_run():
 def test_a_channel_slot_holds_one_block_and_needs_no_m_def():
     settings = ChannelSettings.m_from_dict({'temperature': {'hold': '65 °C'}})
 
-    assert isinstance(settings.temperature, TemperatureChannel)
+    assert isinstance(settings.temperature, TemperatureChannelCommand)
     assert settings.temperature.hold.to(ureg.degC).magnitude == pytest.approx(65)
 
 
@@ -61,12 +63,12 @@ def test_only_channel_commands_carry_conditions():
     conditions = {'monitor', 'sample_every', 'sampling_rate'}
 
     assert conditions <= set(ChannelCommand.m_def.all_quantities)
-    assert conditions <= set(TemperatureChannel.m_def.all_quantities)
+    assert conditions <= set(TemperatureChannelCommand.m_def.all_quantities)
     assert conditions.isdisjoint(Subroutine.m_def.all_quantities)
     # `hold` is the exception: its dimension is the axis's, so only the axis's own
     # class declares it, and it knows the unit (D19a).
     assert 'hold' not in ChannelCommand.m_def.all_quantities
-    assert str(TemperatureChannel.m_def.all_quantities['hold'].unit) == 'kelvin'
+    assert str(TemperatureChannelCommand.m_def.all_quantities['hold'].unit) == 'kelvin'
 
 
 def test_both_kinds_of_command_share_one_base():
@@ -79,11 +81,11 @@ def test_asking_nothing_is_the_neutral_element():
     # No setpoint means the channel is not regulated, which is also what it is
     # wherever nothing says otherwise. Blank text asks nothing either, so it leaves
     # the field unset rather than failing to parse (D19a).
-    assert TemperatureChannel().controlled is False
-    assert TemperatureChannel.m_from_dict({'hold': '65 °C'}).controlled is True
+    assert TemperatureChannelCommand().controlled is False
+    assert TemperatureChannelCommand.m_from_dict({'hold': '65 °C'}).controlled is True
 
     for blank in ['', ' ', '\t', '\n']:
-        channel = TemperatureChannel.m_from_dict({'hold': blank})
+        channel = TemperatureChannelCommand.m_from_dict({'hold': blank})
 
         assert (channel.hold, channel.controlled) == (None, False)
 
@@ -95,8 +97,8 @@ def test_channel_is_a_closed_vocabulary():
 
 
 def test_monitored_follows_the_tag():
-    assert TemperatureChannel().monitored is False
-    assert TemperatureChannel.m_from_dict({'monitor': True}).monitored is True
+    assert TemperatureChannelCommand().monitored is False
+    assert TemperatureChannelCommand.m_from_dict({'monitor': True}).monitored is True
 
 
 def test_a_block_commands_channels_through_its_commands_list():
@@ -108,7 +110,7 @@ def test_a_block_commands_channels_through_its_commands_list():
     )
     command = node.commands[0]
 
-    assert isinstance(command, TemperatureChannel)
+    assert isinstance(command, TemperatureChannelCommand)
     assert (command.controlled, command.monitored) == (True, True)
 
 
@@ -220,7 +222,7 @@ def test_a_command_without_a_duration_takes_no_turn(normalized, log):
 def test_a_command_carries_its_own_duration():
     # No block is needed just to give a command a lifetime: `duration` is on
     # RoutineCommand, so both kinds have it.
-    episode = TemperatureChannel.m_from_dict(
+    episode = TemperatureChannelCommand.m_from_dict(
         {'channel': 'temperature', 'hold': '85 °C', 'duration': '24 h'}
     )
     block = Subroutine.m_from_dict({'name': 'phase', 'duration': '24 h'})
@@ -233,14 +235,14 @@ def test_a_command_carries_its_own_duration():
 
 def test_logging_is_orthogonal_to_the_setpoint():
     # A channel nobody regulates can still be logged, and vice versa.
-    logged = TemperatureChannel.m_from_dict({'monitor': True})
+    logged = TemperatureChannelCommand.m_from_dict({'monitor': True})
 
     assert (logged.controlled, logged.monitored) == (False, True)
 
 
 def test_settings_take_no_time_varying_state():
     # A ramp belongs in the routine, where time lives (Design.md §4.1).
-    assert 'ramp' not in TemperatureChannel.m_def.all_properties
+    assert 'ramp' not in TemperatureChannelCommand.m_def.all_properties
 
 
 def test_entry_loads_settings_and_a_command_that_overrides_them():
@@ -254,7 +256,7 @@ def test_entry_loads_settings_and_a_command_that_overrides_them():
     assert settings.sample_every.to(ureg.second).magnitude == pytest.approx(60)
     # The command stands directly in `commands`, with its own duration — no
     # block wrapped around it — and it is the temperature axis's own class (D19a).
-    assert isinstance(command, TemperatureChannel)
+    assert isinstance(command, TemperatureChannelCommand)
     assert command.channel == 'temperature'
     assert command.hold.to(ureg.degC).magnitude == pytest.approx(85)
     assert command.sampling_rate.to(ureg.hertz).magnitude == pytest.approx(10)
@@ -272,14 +274,16 @@ def test_a_command_is_built_as_the_class_its_channel_names():
         {'commands': [{'channel': 'temperature', 'hold': '85 °C'}]}
     )
 
-    assert isinstance(node.commands[0], TemperatureChannel)
+    assert isinstance(node.commands[0], TemperatureChannelCommand)
     assert node.commands[0].hold.to(ureg.degC).magnitude == pytest.approx(85)
 
 
 def test_a_value_written_unreadably_is_reported_not_raised(normalized, log):
     # The entry still loads: `normalize()` complains and the field stays unset (§7).
     command = normalized(
-        TemperatureChannel.m_from_dict({'hold': '85 °C', 'duration': 'a fortnight'})
+        TemperatureChannelCommand.m_from_dict(
+            {'hold': '85 °C', 'duration': 'a fortnight'}
+        )
     )
 
     assert command.duration is None
@@ -290,14 +294,14 @@ def test_a_value_written_unreadably_is_reported_not_raised(normalized, log):
 
 def test_a_bare_number_written_as_text_is_still_ambiguous(normalized, log):
     # D6 survives the move: the file must say what unit it means.
-    command = normalized(TemperatureChannel.m_from_dict({'duration': '500'}))
+    command = normalized(TemperatureChannelCommand.m_from_dict({'duration': '500'}))
 
     assert command.duration is None
     assert 'bare number' in log.errors[0]
 
 
 def test_a_wrong_dimension_is_reported(normalized, log):
-    command = normalized(TemperatureChannel.m_from_dict({'duration': '10 Hz'}))
+    command = normalized(TemperatureChannelCommand.m_from_dict({'duration': '10 Hz'}))
 
     assert command.duration is None
     assert len(log.errors) == 1
@@ -306,13 +310,13 @@ def test_a_wrong_dimension_is_reported(normalized, log):
 def test_the_archive_holds_a_number_that_reloads_unchanged():
     # What the file writes with a unit, the archive keeps as a number in the unit the
     # field declares — which is what buys search, plots and unit switching (D19).
-    data = TemperatureChannel.m_from_dict(
+    data = TemperatureChannelCommand.m_from_dict(
         {'hold': '85 °C', 'duration': '500 h'}
     ).m_to_dict()
 
     assert data['duration'] == pytest.approx(1800000)
     assert data['hold'] == pytest.approx(358.15)
-    reloaded = TemperatureChannel.m_from_dict(data)
+    reloaded = TemperatureChannelCommand.m_from_dict(data)
     assert reloaded.hold.to(ureg.degC).magnitude == pytest.approx(85)
     assert reloaded.duration.to(ureg.hour).magnitude == pytest.approx(500)
 
@@ -320,7 +324,7 @@ def test_the_archive_holds_a_number_that_reloads_unchanged():
 def test_a_corrected_value_clears_the_complaint(normalized, log):
     # The ELN edits a field by setting it again, so a fixed typo must not keep
     # reporting itself (§7 is idempotent).
-    command = TemperatureChannel.m_from_dict({'duration': 'a fortnight'})
+    command = TemperatureChannelCommand.m_from_dict({'duration': 'a fortnight'})
     command.m_update_from_dict({'duration': '500 h'})
     normalized(command)
 
@@ -345,7 +349,7 @@ def test_each_channel_declares_its_own_hold_unit():
 def test_a_named_setpoint_becomes_the_value_it_stands_for():
     # `dark` is a setpoint somebody chose and reported, so it resolves to a number and
     # the channel counts as controlled — as against nobody mentioning it at all (D8a).
-    channel = IrradiationChannel.m_from_dict({'hold': 'dark'})
+    channel = IrradiationChannelCommand.m_from_dict({'hold': 'dark'})
 
     assert channel.hold.to(ureg.watt / ureg.meter**2).magnitude == pytest.approx(0)
     assert channel.controlled is True
@@ -354,7 +358,7 @@ def test_a_named_setpoint_becomes_the_value_it_stands_for():
 def test_a_named_setpoint_belongs_to_one_channel(normalized, log):
     # Per channel, never global: nothing on the temperature axis resolves `dark`, so it
     # stays text, no unit reads it, and it is reported like any other typo (D8a, §7).
-    channel = normalized(TemperatureChannel.m_from_dict({'hold': 'dark'}))
+    channel = normalized(TemperatureChannelCommand.m_from_dict({'hold': 'dark'}))
 
     assert (channel.hold, channel.controlled) == (None, False)
     assert len(log.errors) == 1
@@ -371,7 +375,7 @@ def test_a_block_commands_the_irradiation_axis():
     )
     command = node.commands[0]
 
-    assert isinstance(command, IrradiationChannel)
+    assert isinstance(command, IrradiationChannelCommand)
     assert command.hold.to(ureg.watt / ureg.meter**2).magnitude == pytest.approx(1000)
     assert command.spectrum == 'AM1.5G'
 
@@ -387,7 +391,7 @@ def test_entry_loads_a_named_setpoint_and_a_sun():
 
     assert settings.hold.to(irradiance).magnitude == pytest.approx(1000)
     assert settings.spectrum == 'AM1.5G'
-    assert isinstance(dark, IrradiationChannel)
+    assert isinstance(dark, IrradiationChannelCommand)
     assert dark.hold.to(irradiance).magnitude == pytest.approx(0)
     # Deliberately dark is a condition somebody chose, so it counts as controlled.
     assert dark.controlled is True
@@ -397,16 +401,16 @@ def test_a_value_is_read_however_the_field_is_set():
     # Parsing lives in the field's own type, which `Quantity.__set__` calls on every
     # assignment, so there is no path that stores text unread — a plain attribute
     # assignment included, which the earlier section-level override could not reach.
-    assigned = TemperatureChannel()
+    assigned = TemperatureChannelCommand()
     assigned.hold = '65 °C'
-    updated = TemperatureChannel()
+    updated = TemperatureChannelCommand()
     updated.m_update_from_dict({'hold': '65 °C'})
 
     for channel in [
         assigned,
         updated,
-        TemperatureChannel(hold='65 °C'),
-        TemperatureChannel.m_from_dict({'hold': '65 °C'}),
+        TemperatureChannelCommand(hold='65 °C'),
+        TemperatureChannelCommand.m_from_dict({'hold': '65 °C'}),
     ]:
         assert channel.hold.to(ureg.degC).magnitude == pytest.approx(65)
 
@@ -414,7 +418,7 @@ def test_a_value_is_read_however_the_field_is_set():
 def test_a_named_setpoint_belongs_to_its_own_field(normalized, log):
     # The word table is declared on the quantity, not on the section, so `dark` is
     # readable where an irradiance belongs and nowhere else (D8a).
-    command = normalized(IrradiationChannel.m_from_dict({'duration': 'dark'}))
+    command = normalized(IrradiationChannelCommand.m_from_dict({'duration': 'dark'}))
 
     assert command.duration is None
     assert 'not a number followed by a unit' in log.errors[0]
@@ -423,7 +427,7 @@ def test_a_named_setpoint_belongs_to_its_own_field(normalized, log):
 def test_the_schema_still_declares_a_plain_float():
     # The type is ours, but it serializes as what it is — a float64 with a unit — so
     # an archive, the GUI and any other client need know nothing about it (D19).
-    hold = TemperatureChannel.m_def.all_quantities['hold']
+    hold = TemperatureChannelCommand.m_def.all_quantities['hold']
 
     assert hold.type.serialize_self() == {'type_kind': 'numpy', 'type_data': 'float64'}
     assert str(hold.unit) == 'kelvin'

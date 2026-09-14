@@ -4,13 +4,15 @@ import pytest
 from nomad import utils
 from nomad.client import normalize_all, parse
 
+from nomad_pv_stability_measurements.schema_packages.channel_commands import (
+    TemperatureChannelCommand,
+)
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 from nomad_pv_stability_measurements.schema_packages.routine import (
     ChannelCommand,
     Routine,
     RoutineCommand,
     Subroutine,
-    TemperatureChannel,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
@@ -67,7 +69,7 @@ def test_one_list_holds_both_kinds_of_command():
     )
 
     assert [type(command).__name__ for command in node.commands] == [
-        'TemperatureChannel',
+        'TemperatureChannelCommand',
         'Subroutine',
     ]
 
@@ -118,8 +120,8 @@ def test_normalize_drops_a_command_that_names_no_channel():
     # (verified against nomad.normalizing.metainfo); an authoring mistake like
     # a stray `channel:` should read as a warning, not break processing.
     node = Subroutine()
-    node.commands.append(TemperatureChannel(hold='65 °C'))
-    node.commands.append(TemperatureChannel(channel='temperature', hold='85 °C'))
+    node.commands.append(TemperatureChannelCommand(hold='65 °C'))
+    node.commands.append(TemperatureChannelCommand(channel='temperature', hold='85 °C'))
 
     node.normalize(None, utils.get_logger(__name__))
 
