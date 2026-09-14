@@ -43,10 +43,11 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | D4 | **The channels are a closed, hard-coded vocabulary — one per stress axis, never authored.** A channel is a Python class holding a table of named *variables* — each controllable and/or monitorable — plus *control groups* (which variables can be commanded at the same time). All behaviour lives once in the base class. The routine names a channel through an **enum** (`channel: temperature`), so there are no user-invented keys and no `channels:` section in the file. A new channel = a new class plus an enum member, i.e. a plugin change that everybody then shares. |
 | D4a | **`channel_settings:` carries each channel's run-wide conditions** — one optional block per channel: a setpoint (`hold`), a monitor tag with its rate, plus `limits`, regulation, instrument, spectrum … It holds wherever the routine is silent; a step overrides it for its span. **Only static conditions** live there — a constant `hold` is the settings' whole vocabulary; the time-varying shapes (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) are only ever set by the routine, never a field of a settings block (§4.1). |
 | D4b | **The routine overrides the settings, and the warning says where.** One precedence rule for states and for monitoring: the innermost step that speaks wins for its span, the settings hold everywhere else. Because a shadowed setting is invisible in the file, `normalize()` reports it: a *warning* per (channel, field) that some step overrides, and a louder one for a setting that is **never** in effect. This must also be said in plain words in the field descriptions and the README (§10). |
+| D4c | **A channel declares one table, and the control group is it.** `control_groups` is the whole of a channel's capability (§4.1 role 2): each `ControlGroup` **owns** its variables, so the grouping cannot name a variable that does not exist and `variables` is derived by flattening the groups in declaration order rather than written a second time — **on demand, by a classmethod that reads `control_groups`**. Not cached onto the class by an `__init_subclass__` hook, and not built in `normalize()`: D19b's `hold` rewriting runs while the entry loads, *before* any normalize, so a table built there would be built too late, and would have an instance writing state that belongs to the class. A channel has three variables at most; walking them costs nothing, and `control_groups` stays the only place the capability is either written or read. Group-level facts live on the group — which variables are tied, why (`tied_by`), and the words that stand for no number at all (`open_circuit` releases every variable the group ties, not one of them, D8a). Variable-level facts stay on the `Variable`, and are **asked of it**: `resistance` is settable but not readable *inside* the same group where `voltage` is both, so `control` / `monitor` cannot move up — and neither can they be re-exported as base-class predicates, since the channel's own part of the answer is just whether `variables` holds the name. The group stamps each variable with its own name when it takes it, which is what lets a `Variable` answer `setpoint_field` for itself (D19b). *Supersedes three parallel class tables (`variables`, `control_groups` as name-sets, `numberless`), which said one thing three times and could disagree.* |
 | D5 | **Variables have physical names** (`humidity`, `oxygen`, `temperature` …); **the unit selects the quantity kind** (relative, molar ratio, dew point …). Values stay in the kind they were given — no cross-kind conversion. |
 | D6 | **Every value is a unit string** (`65 °C`, `85 %RH`, `1 sun`), parsed and dimension-checked against its variable. **Ambiguity is an error:** bare numbers, and bare `%` on humidity/oxygen. The one documented convention: `ppm`/`ppb` are molar (ppmv) — the glovebox standard. The string is the *authored* form only: it is read into the field's own unit-ful quantity on the way in (D19). A bare number **written as text** stays an error; a plain YAML number is read in the quantity's declared unit — which is what NOMAD itself writes back when it serializes. |
 | D7 | **The four ISOS stress axes are always reported.** Since the vocabulary is fixed (D4), this is structural: a channel no routine touches appears in the derived layers as *uncontrolled and unmonitored*. UV content is a property of the irradiation spectrum, not a channel; encapsulation belongs to the sample. |
-| D8 | **A command says what is *asked* of a channel; the control *state* is derived, never authored.** A `ChannelCommand` carries a setpoint (`hold`) or a time-varying shape (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) and nothing that names a control mode. **Asking nothing is the neutral element**: a channel no command in scope touches is not regulated, which is also what it is wherever nothing says otherwise, so every channel still has a defined state at every instant (D7). Two booleans follow per channel, **computed over time when commands are expanded into a time series, not stored on a command**: **`controlled`** (some command in scope asks for a value) and **`monitored`** (a monitor tag is in effect) — timeline rows, plottable next to the values (§4.4). On a command itself, `controlled` is only "does this carry a setpoint". *Supersedes `control = MEnum('off', 'hold', 'active')` (and, before that, the `uncontrolled`/`off` split): `hold` already said `hold`, and `active` was a label for time-varying behaviour that a single static command cannot know — a command is one clause, and what a channel is doing at hour 700 follows from all the clauses in scope. **Explicitly released** is still writable, structurally: a command that **names a channel and asks nothing of it** says "not regulated here" out loud, as against a channel nobody mentions (§4.1, "Untouched channels").* |
+| D8 | **A command says what is *asked* of a channel; the control *state* is derived, never authored.** A `ChannelCommand` carries a setpoint (`hold`) or a time-varying shape (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) and nothing that names a control mode. **Asking nothing is the neutral element**: a channel no command in scope touches is not regulated, which is also what it is wherever nothing says otherwise, so every channel still has a defined state at every instant (D7). Two booleans follow per channel, **computed over time when commands are expanded into a time series, not stored on a command**: **`controlled`** (some command in scope asks for a value) and **`monitored`** (a monitor tag is in effect) — timeline rows, plottable next to the values (§4.4). On a command itself, `controlled` is only "does this ask for anything" — and it is **spelled `asks_for_anything` there**, for two reasons. The same class also carries the derived `is_controlled` (§4.1), and two names one letter apart for two different questions is a misreading waiting to happen. And the question is an `any`, not an `all`: one setpoint out of a channel's three makes it true — asking for *more* than one is a contradiction (§4.2), not a fuller answer — while `open_circuit` makes it true with no setpoint at all, since a word standing for no number is still something somebody asked for (D8a). `has_setpoint` would have been wrong on both counts. *Supersedes `control = MEnum('off', 'hold', 'active')` (and, before that, the `uncontrolled`/`off` split): `hold` already said `hold`, and `active` was a label for time-varying behaviour that a single static command cannot know — a command is one clause, and what a channel is doing at hour 700 follows from all the clauses in scope. **Explicitly released** is still writable, structurally: a command that **names a channel and asks nothing of it** says "not regulated here" out loud, as against a channel nobody mentions (§4.1, "Untouched channels").* |
 | D8a | **Named setpoints: a field may declare words that stand for values.** Irradiation's `hold` declares `dark` (= `0 W/m²`); the electrical load's declares `open_circuit`. They are written wherever a value is written — `hold: dark`, `cycle: {low: dark, high: 1 sun}`, `ramp: {from: dark, to: 1 sun}` — and the table is declared **on the field's own type**, `StabilityUnitAwareFloat(named={'dark': '0 W/m²'})`, which resolves the word **before** parsing it (D19, §6). *Resolution moved twice: out of `normalize()` when D19 made a word have to become a value before the field is set, and then off the section onto the field — a word belongs to the quantity it can be written into, not to every unit-ful field the section happens to declare, which is what kept `duration: dark` from reading as an irradiance.* Per field, never global: `dark` is meaningless on the temperature axis and is rejected there. Where a state section takes endpoints of the same dimension (`ramp: {from: dark}`, states.py), that section's own endpoint fields declare the same table. A name that stands for a number becomes one, so the timeline plots `dark` as 0 instead of a NaN hole; a name that stands for no number at all (`open_circuit` is neither 0 V nor 0 A) stays NaN, like `track`. **Asking for a named setpoint is asking for something**, so `controlled` is true — that is how "deliberately dark" is said out loud *and counted*, the one thing the old irradiation-only `off` state did that D8 alone does not (§4.1). **Spelled `dark`, never `off`:** a bare `off` is a YAML 1.1 boolean (§9), so that spelling arrives as `False` and would silently invert the very flag it exists to set — and `dark` is ISOS's own word. **There is no `on`:** `dark` has a defined value and an illuminated state does not, and the irradiance is exactly what ISOS reporting needs, so it is written as a number (`hold: 1 sun`). |
 | D9 | **Monitoring is a tag, not a state.** Acquiring data is an action, so it is said where the condition is said: `monitor: true` with an optional `sample_every: 60 s` or `sampling_rate: 10 Hz` — in a channel's settings (the whole run) or on a node (its span, D13). It is orthogonal to the setpoint, so the same place may set a state *and* monitor, and monitoring alone logs a channel nobody controls. |
 | D10 | **The regulation law (PID, on/off …) is a channel setting**, orthogonal to the setpoint shape. |
@@ -72,6 +73,7 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | D18 | **Named state slots** (`hold:`, `ramp:` …) instead of polymorphic sub-sections — `m_def` is never hand-written except at the root. |
 | D19 | **One field per value: the quantity itself, with the written unit read by its own type.** Every authored value is a real `Quantity(type=StabilityUnitAwareFloat(), unit=…)` — no `type=str` beside it, no twin. NOMAD's stock float refuses `duration: 500 h` (**verified**: it rejects `'24 h'` outright, reads a bare number as its declared unit, and honours no `__unit:` escape hatch anywhere in its source), so the plugin declares **its own `Datatype`** (§6) — the extension point NOMAD itself uses for this, exactly as its stock `Datetime` type accepts a written-out date and stores a canonical one. `StabilityUnitAwareFloat.normalize` parses the string against the field's own `unit=` and hands `super()` a pint quantity, which NOMAD's own number type already knows how to convert and store (`500 h` → `1800000.0 s`, `65 °C` → `338.15 K`, **verified**). Because `Quantity.__set__` calls `self.type.normalize` unconditionally, **every** way of setting the field is covered — `m_from_dict`, `m_update_from_dict`, `Section(**kwargs)`, an ELN edit *and* a plain `section.hold = '65 °C'` (**verified**). The file keeps the unit it was written with, the archive keeps a number, and unit switching, numeric search, plots and a loud `DimensionalityError` all come free from the declaration. The schema still serializes as a plain float quantity, so nothing downstream needs to know (**verified**). *Supersedes two earlier drafts: the string-plus-twin pair (the twin existed only to buy back what the string cost), and then a section-wide `m_set` override — which worked, but intercepted every field of every section to serve the few that declare a unit, and still missed plain attribute assignment.* |
 | D19a | **Where the dimension depends on the channel, the field is declared on the channel class.** `hold` cannot sit on `ChannelCommand`: it is kelvin for temperature and W/m² for irradiation. So `ChannelCommand` does not declare it at all and each channel class declares its own — `TemperatureChannelCommand.hold` in `K` — which is also how a channel whose setpoint is not a number at all declares an `MEnum` instead (`dark`, `open_circuit`, D8a). **Verified:** a subclass may declare what its base does not, and NOMAD then **silently drops** an authored `hold` when the same dict is loaded as the base class. That makes D11a's per-entry dispatch load-bearing rather than a convenience: it must resolve the `channel:` *value* to that channel's class (`channel: temperature` → `TemperatureChannelCommand`), or the setpoint disappears without a word. Text the file writes that §6 cannot read is remembered where it was written and reported by `normalize()` (§7), never raised — a typo must not stop an entry from loading; an empty or blank string leaves the field unset, since asking nothing is the neutral element (D8). |
+| D19b | **Where the dimension depends on the *variable*, the field is declared per variable — and `variable:` + `hold:` stays the authored spelling.** D19a's argument does not stop at the channel: the electrical load holds volts, amps *or* ohms, and the mechanical channel metres *or* a dimensionless strain, so one `hold` quantity cannot carry them either — a NOMAD `Quantity` has exactly one unit, and `shape=['*']` gives a list of *volts*, not a list of one of each. So a channel with several variables declares **one unit-ful quantity per variable, named after it** (`voltage` in `V`, `strain` in `dimensionless`), and the `variable` a command names says which. A channel with a single variable keeps `hold` — there is no variable to name — which the variable's table entry records as `field='hold'`. **The two spellings are one field:** `{variable: strain, hold: 2 %}` (§8) and `{strain: 2 %}` both land in `strain`, because `ChannelCommand.m_update_from_dict` moves an authored `hold` into the named variable's own quantity before NOMAD loads it — the same per-entry rewriting D11a already does for `m_def`. A `hold` with no variable to go to (several controllable, none named) is remembered and reported like an unreadable value (D19a, §7), never dropped in silence. *Considered and rejected: a repeating `hold` ordered by a `variables` list. It does not solve the dimension problem (the list is still all one unit), it makes `hold[i]` meaningful only through `variables[i]` — so adding a variable to a class silently re-targets stored values — and §4.1 already decided one command sets at most one variable, which is the only thing the list would buy.* |
 | D20 | **References by enum value** (`channel: temperature`) — never `#/data/...` paths, and never a free string that each lab spells differently. |
 
 **Derived outputs and provenance** (§4.3–§4.5)
@@ -227,12 +229,19 @@ RoutineCommand(ArchiveSection)             # the interface both kinds of command
 ChannelCommand(RoutineCommand)             # acts on ONE axis — in a block's `commands`,
                                            #   or as a `channel_settings` block
     channel       MEnum(*CHANNELS)  # which axis; empty in settings (the slot says it)
-    variable      str   (opt)      # which variable this applies to (the "variable rule", §4.2)
-    # NO `hold` here — its dimension is the axis's, so each channel class declares its
-    #   own (D19a). Unset = nothing asked of the channel: the neutral element (D8). No
-    #   control mode is stored either; it is derived over time (§4.4)
+    variable      str   (opt)      # which variable this applies to (the "variable rule", §4.2);
+                                   #   derived from the setpoint that is set, where only one can be
+    available_variables str[]      # DERIVED from the class table — what this axis can be asked
+                                   #   for, shown in the ELN beside `variable`
+    # NO setpoint here — its dimension is the axis's, and on a multi-variable axis the
+    #   variable's, so each channel class declares its own: `hold` where there is one
+    #   variable, one quantity named after each variable where there are several
+    #   (D19a, D19b). None set = nothing asked of the channel: the neutral element (D8).
+    #   No control mode is stored either; it is derived over time (§4.4)
     monitor       bool             # acquire data here (D9)
-    monitored     str[] (opt)      # which variables; default: every monitorable one
+    monitored     str[] (opt)      # which variables; default: every monitorable one.
+                                   #   A QUANTITY — so no python property may take this
+                                   #   name: `bool(monitor)` is already the boolean
     sample_every  float [s]  ┐     # "60 s"  -> discrete measurements  } author at most
     sampling_rate float [Hz] ┘     # "10 Hz" -> a stream               } one; the other is
                                    #   derived as its reciprocal (neither: unspecified)
@@ -242,10 +251,14 @@ TemperatureChannelCommand(ChannelCommand)         # one per CHANNELS member: the
                                            #   `channel_settings` block, the run-wide extras
     # --- quantities
     hold           float [K]       # authored as "65 °C" — the setpoint, in the unit only
-                                   #   this class knows (D19a)
+                                   #   this class knows (D19a). One variable, so it is
+                                   #   spelled `hold`; a multi-variable channel names each
+                                   #   variable instead — ElectricalLoadChannelCommand
+                                   #   declares voltage [V], current [A], resistance [Ω],
+                                   #   and reads `{variable: voltage, hold: 0.8 V}` into
+                                   #   the first of them (D19b)
     limits         Any    (opt)    # {variable: [min, max]} as unit strings;
                                    #   plain [min, max] allowed for single-variable channels
-    variables      str[]           # DERIVED from the class table (shown in the ELN)
     is_controlled  bool            # DERIVED: here or some step asks this channel for a
                                    #   value (D8)
     is_monitored   bool            # DERIVED: here or some step carries a monitor tag (D9)
@@ -256,9 +269,9 @@ TemperatureChannelCommand(ChannelCommand)         # one per CHANNELS member: the
 ChannelSettings(ArchiveSection)     # authored as `channel_settings:`
     temperature      TemperatureChannelCommand      ┐  one NON-repeating slot per member of
     irradiation      IrradiationChannelCommand      │  CHANNELS; each optional, and omitting one
-    atmosphere       AtmosphereChannel       │  means "all defaults" (D7 stays structural)
-    electrical_load  ElectricalLoadChannel   │
-    mechanical       MechanicalChannel       ┘
+    atmosphere       AtmosphereChannelCommand       │  means "all defaults" (D7 stays structural)
+    electrical_load  ElectricalLoadChannelCommand   │
+    mechanical       MechanicalChannelCommand       ┘
 
 RegulationLaw(ArchiveSection)                    # metadata only
     kind enum{open_loop, pid, on_off, external};  kp, ki, kd, hysteresis
@@ -368,9 +381,9 @@ instrument.
 |---|---|---|---|---|---|
 | `TemperatureChannelCommand` (`temperature`) | `temperature` (K, °C) | {temperature} | — | — | ✅ |
 | `IrradiationChannelCommand` (`irradiation`) | `irradiance` (W/m², W/m²) | {irradiance} | `dark` = `0 W/m²` (named value, D8a) | `spectrum` str (`AM1.5G`) | ✅ |
-| `AtmosphereChannel` (`atmosphere`) | `humidity` (multi-kind), `oxygen` (multi-kind), `total_pressure` (Pa, mbar) | {humidity}, {oxygen}, {total_pressure} | — | `balance_gas` str (`N2`, `air`, `Ar`) | ✅ |
-| `ElectricalLoadChannel` (`electrical_load`) | `voltage` (V), `current` (A), `resistance` (Ω, control only) | {voltage, current, resistance} | `track`, `sweep`; `open_circuit` (named value, no number, D8a) | — | ✅ |
-| `MechanicalChannel` (`mechanical`) | `bend_radius` (m, mm), `strain` (dimensionless, %) | {bend_radius, strain} | — | — | ❌ |
+| `AtmosphereChannelCommand` (`atmosphere`) | `humidity` (multi-kind), `oxygen` (multi-kind), `total_pressure` (Pa, mbar) | {humidity}, {oxygen}, {total_pressure} | — | `balance_gas` str (`N2`, `air`, `Ar`) | ✅ |
+| `ElectricalLoadChannelCommand` (`electrical_load`) | `voltage` (V), `current` (A), `resistance` (Ω, control only) | {voltage, current, resistance} | `track`, `sweep`; `open_circuit` (named value, no number, D8a) | — | ✅ |
+| `MechanicalChannelCommand` (`mechanical`) | `bend_radius` (m, mm), `strain` (dimensionless, %) | {bend_radius, strain} | — | — | ❌ |
 
 All variables are controllable and monitorable unless noted. Generic states
 (`hold`, `ramp`, `cycle`, `tabulated`) are accepted by every channel, as is asking nothing.
@@ -386,36 +399,91 @@ the measurement's summary later.
 @dataclass(frozen=True)
 class Variable:                       # a schema constant, NOT metainfo
     kinds: tuple[Kind, ...] | str     # a str is shorthand for one kind with that unit
+                                      #   — built as `unit: str`, the only form step 2b
+                                      #   needs; step 2c widens it to the kind table
     display: str | None = None        # plot unit, e.g. 'degC'
     control: bool = True
     monitor: bool = True
+    field: str | None = None          # the quantity carrying this variable's setpoint;
+                                      #   None = the variable's own name (D19b). Only a
+                                      #   single-variable channel sets it, to 'hold'
+    name: str | None = None           # stamped by the group that owns it, never written
 
-class AtmosphereChannel(Channel):
-    variables = {
-        'humidity':       Variable(HUMIDITY_KINDS),
-        'oxygen':         Variable(OXYGEN_KINDS),
-        'total_pressure': Variable('Pa', display='mbar'),
-    }
-    control_groups = [{'humidity'}, {'oxygen'}, {'total_pressure'}]
+    @property
+    def setpoint_field(self) -> str:  # D19b — asked of the variable, which knows both
+        return self.field or self.name
+
+class ControlGroup:                   # variables one device cannot set independently
+    def __init__(self, *, numberless=(), tied_by=None, **variables: Variable):
+        # the keywords ARE the variables, in ELN order — so `numberless` and `tied_by`
+        # are the two names a variable may not have. The keyword IS the name, so the
+        # group stamps it on and a Variable can answer for itself; `replace` copies,
+        # so nothing the caller wrote is mutated and equality stays sane.
+        self.variables = {n: replace(v, name=n) for n, v in variables.items()}
+
+class AtmosphereChannelCommand(ChannelCommand):
+    control_groups = (           # ONE authored table per channel (D4c): the group owns
+        ControlGroup(humidity=Variable(HUMIDITY_KINDS)),          # its variables, so
+        ControlGroup(oxygen=Variable(OXYGEN_KINDS)),              # there is no second
+        ControlGroup(total_pressure=Variable('Pa', display='mbar')),   # table to desync
+    )
     accepted_states = GENERIC_STATES
     always_reported = True
     # Named setpoints (D8a) are NOT here: a word belongs to the field it can be
     # written into, so it is declared on that quantity's own type —
     #   hold = Quantity(type=StabilityUnitAwareFloat(named={'dark': '0 W/m²'}), unit='W/m²')
+    # — except a word standing for no number at all (`open_circuit`), which no unit-ful
+    # quantity can hold. That one is a boolean field of its own, and it is the GROUP
+    # that lists it: it releases every variable the group ties, not one of them (D8a).
+
+class ElectricalLoadChannelCommand(ChannelCommand):
+    control_groups = (
+        ControlGroup(
+            voltage=Variable('V'), current=Variable('A'),
+            resistance=Variable('ohm', monitor=False),   # set, never read back
+            numberless=('open_circuit',),
+            tied_by='the cell I-V curve: commanding one leaves the others measured',
+        ),
+    )
 ```
 
 **Base-class interface** (implemented once):
 
 ```
-can_control(variable) / can_monitor(variable) -> bool
-group_of(variable)                            -> frozenset
-parse(variable, text)                         -> (kind, canonical float)   # §6
+variables()            -> {name: Variable}   # DERIVED on demand: the groups flattened,
+                                            #   in order. The lookup IS the channel's answer:
+                                            #   `.get(name) is None` means "not on this
+                                            #   channel", and the Variable answers the rest
+                                            #   — `.control`, `.monitor`, `.setpoint_field`
+group_of(variable)     -> ControlGroup | None   # `.names` is the set tied to it. The one
+                                            #   question no Variable can answer alone: a
+                                            #   search, not a lookup — and §5's written set
+                                            #   W(node) is defined over what it returns
+parse(variable, text)  -> (kind, canonical float)   # §6
 # resolving a named setpoint is NOT here: it belongs to the field's type (D8a, §6)
 ```
 
-Control groups encode physics: humidity and oxygen are set independently by a gas mixer
-(separate groups — both can be held in parallel); a cell's voltage and current are tied by its
-I–V curve (one group — commanding `voltage` makes `current` measured-only for that span).
+**No `can_control` / `can_monitor` / `setpoint_field` on the base class.** Each was a `.get()`
+welded to an attribute the `Variable` already carries, and the weld bought only the `None` case
+— which `variables.get(name) is None` states directly, and more precisely: a caller can then
+tell *this channel has no such variable* from *it has it, but monitor-only*, which one boolean
+cannot. Nothing is lost by asking the object that knows.
+
+**What a control group encodes is *actuation*, not physics** — which variables one device
+cannot set independently of one another. Humidity and oxygen are separate groups because a gas
+mixer sets them independently, even though their partial pressures do sum to the total; a cell's
+voltage and current are one group because its I–V curve ties them, so commanding `voltage`
+leaves `current` measured-only for that span. `tied_by` says why **in words, never as an
+equation**. Two relations sit behind that one case and only one of them is writable: `V = I·R`
+is the *load's* definition (a resistive load obeys it by construction; on a sourcemeter `R` is
+just the ratio), while what the run measures — and what actually decides where on that load
+line it sits — is the cell's own I–V curve, which is data, not a constant the schema could
+carry (D1). Carrying the first without the second buys nothing: a protocol holds **exactly
+one** of the three, which is what a control group *is*, so there is never a second value for a
+formula to consume. A formula nothing evaluates is also what the "no hardware maxima" argument
+above already rejected. *An evaluable `law=lambda …` on the group was proposed and is parked as
+**O12**, with the case for and against; the place it would pay is §4.4's timeline, over measured
+arrays.*
 
 #### Quantity kinds (humidity, oxygen)
 
@@ -616,6 +684,13 @@ Three sweeps in a row: `repetitions: 3` on the sweep's node.
 atmosphere channel, `hold: 5 mol%` would fit humidity *and* oxygen). `track` acts on the whole
 channel and takes no `variable`. A release — a command that asks nothing — acts on the whole
 channel too, and may optionally name one `variable` to release just that.)
+
+The rule is about the **authored** `hold`, and D19b is what makes it enforceable rather than
+guesswork: the value has to be moved into one variable's own quantity to be stored at all, so a
+`hold` with nowhere to go is reported (§7) instead of read as a guess. Writing the variable as
+the key — `{channel: electrical_load, voltage: 0.8 V}` — says the same thing and needs no rule.
+Where the channel has one controllable variable, `variable` is optional in both directions:
+`hold` needs no name, and `normalize()` fills `variable` in from whichever setpoint is set.
 
 #### 4.2.1 Stop conditions — `conditions.py`
 
@@ -1191,9 +1266,11 @@ src/nomad_pv_stability_measurements/
     conditions.py     stop_when tokenizer + parser -> IR                     (§4.2.1)
     routine.py        CHANNELS, Variable, Kind, StabilityUnitAwareSection (reports
                       what a StabilityUnitAwareFloat could not read), RoutineCommand,
-                      ChannelCommand, Subroutine, Routine, RegulationLaw
+                      ChannelCommand (Variable, ControlGroup, and the `hold`
+                      rewriting of D19b), Subroutine, Routine, RegulationLaw
     channel_commands.py  the channel vocabulary's 5 classes (TemperatureChannelCommand,
-                      IrradiationChannelCommand, …) and CHANNEL_CLASSES, split out of
+                      IrradiationChannelCommand, …) — each one's variable table and the
+                      unit-ful quantity per variable — and CHANNEL_CLASSES, split out of
                       routine.py so the two grow independently
     utils.py          with_m_def and other small cross-module helpers (D11a)
     states.py         Ramp, Cycle, Tabulated, Sweep
@@ -1219,11 +1296,11 @@ Suggested order — each step is testable on its own:
      per-channel table of words that stand for values, resolved by the same setter that reads
      the written unit (D19). `IrradiationChannelCommand` carries `dark` and `spectrum`.
    - **2b — variables and control groups.** The `Variable` table, `variable` on a command,
-     `can_control` / `can_monitor` / `group_of`. `MechanicalChannel` (two variables) and
-     `ElectricalLoadChannel` (three in one group, plus the numberless `open_circuit`) are what
+     the derived `variables` view and `group_of`. `MechanicalChannelCommand` (two variables) and
+     `ElectricalLoadChannelCommand` (three in one group, plus the numberless `open_circuit`) are what
      exercise them.
    - **2c — quantity kinds (§6 step 3).** The dimensionless token table, bare `%` ambiguity,
-     `ppm` = molar. `AtmosphereChannel` and its `balance_gas` are what need them.
+     `ppm` = molar. `AtmosphereChannelCommand` and its `balance_gas` are what need them.
    - **2d — envelope and provenance.** `limits`, `RegulationLaw`, `instrument`, `monitored`.
      `is_controlled` / `is_monitored` are derived over the whole tree, so they land with step 4.
 3. **`simulation/`** — IR, expander, validation; test with plain dataclasses, no archive.
@@ -1249,6 +1326,7 @@ always-reported set, one protocol per upload).
 |---|---|---|
 | O9 | **Cross-kind search** — a best-effort `water_molar_ratio_mean` in the summary, computed only when temperature is *controlled* over the span and null otherwise (never guessed from an uncontrolled channel)? | left out; revisit after the first real data |
 | O11 | **Bare number on offset unit** — `hold: 65` on temperature reads as 65 K = −208 °C, because D6-as-amended requires a plain YAML number to read in the declared unit to preserve round-trip. Unfixable without breaking `m_to_dict` and reload. Worth recording in §9 as a second residual cost, alongside the `display` annotation? | decision: document, do not fix |
+| O12 | **An evaluable law on a control group** — `ControlGroup(..., law=lambda …)`, a general hook on the class overridden per group, so that `V = I·R` is carried as arithmetic rather than as `tied_by` prose. *Against:* the relation is true but near tautological (it is the load's definition — a resistive load obeys it by construction, and on a sourcemeter `R` is simply the ratio), and it is inapplicable where the schema lives: it relates three quantities of which a protocol holds **exactly one**, which is what a control group *is*. Commanding `resistance` fixes the load line; where the run sits on it is the intersection with the cell's own I–V curve, which the experiment measures — so the lambda could never fire at authoring time, and the only document carrying two of the three is one §4.2 already rejects. A lambda also does not serialize (invisible to the archive, the ELN, search and every non-Python reader of the schema — D1), it is a *relation* rather than a function (`R = U/I` is one of three rearrangements, so one lambda is a third of one), and it would be a general mechanism with exactly one possible user: of the 5 control groups today and 8 once atmosphere lands (2c), only the electrical load has more than one variable — humidity, oxygen and total pressure are separate groups precisely *because* nothing ties them. *Where it would pay:* §4.4's timeline, over measured arrays, where two of the three do exist — a resistance row derived from logged `V` and `I`. That is the measurement layer, over data, not the protocol's class table. *Cheap half-step meanwhile:* put the formula into `tied_by`, which already reaches the ELN and the validation messages, stating the physics without pretending the schema evaluates it. | open; not built — revisit with §4.4 (step 5), where the data the law needs first exists |
 
 ## 12. Deferred on purpose
 

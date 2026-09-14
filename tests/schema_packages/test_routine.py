@@ -7,7 +7,9 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.channel_commands import (
     CHANNEL_CLASSES,
+    ElectricalLoadChannelCommand,
     IrradiationChannelCommand,
+    MechanicalChannelCommand,
     TemperatureChannelCommand,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import ChannelSettings
@@ -81,13 +83,16 @@ def test_asking_nothing_is_the_neutral_element():
     # No setpoint means the channel is not regulated, which is also what it is
     # wherever nothing says otherwise. Blank text asks nothing either, so it leaves
     # the field unset rather than failing to parse (D19a).
-    assert TemperatureChannelCommand().controlled is False
-    assert TemperatureChannelCommand.m_from_dict({'hold': '65 °C'}).controlled is True
+    assert TemperatureChannelCommand().asks_for_anything is False
+    assert (
+        TemperatureChannelCommand.m_from_dict({'hold': '65 °C'}).asks_for_anything
+        is True
+    )
 
     for blank in ['', ' ', '\t', '\n']:
         channel = TemperatureChannelCommand.m_from_dict({'hold': blank})
 
-        assert (channel.hold, channel.controlled) == (None, False)
+        assert (channel.hold, channel.asks_for_anything) == (None, False)
 
 
 def test_channel_is_a_closed_vocabulary():
@@ -97,8 +102,10 @@ def test_channel_is_a_closed_vocabulary():
 
 
 def test_monitored_follows_the_tag():
-    assert TemperatureChannelCommand().monitored is False
-    assert TemperatureChannelCommand.m_from_dict({'monitor': True}).monitored is True
+    # No property wraps this: `monitor` is already the boolean, and §4.1 gives the name
+    # `monitored` to the list of variables a command logs (2d).
+    assert TemperatureChannelCommand().monitor is None
+    assert TemperatureChannelCommand.m_from_dict({'monitor': True}).monitor is True
 
 
 def test_a_block_commands_channels_through_its_commands_list():
@@ -111,7 +118,7 @@ def test_a_block_commands_channels_through_its_commands_list():
     command = node.commands[0]
 
     assert isinstance(command, TemperatureChannelCommand)
-    assert (command.controlled, command.monitored) == (True, True)
+    assert (command.asks_for_anything, bool(command.monitor)) == (True, True)
 
 
 def test_two_commands_on_one_channel_are_not_merged(normalized, log):
@@ -237,7 +244,7 @@ def test_logging_is_orthogonal_to_the_setpoint():
     # A channel nobody regulates can still be logged, and vice versa.
     logged = TemperatureChannelCommand.m_from_dict({'monitor': True})
 
-    assert (logged.controlled, logged.monitored) == (False, True)
+    assert (logged.asks_for_anything, bool(logged.monitor)) == (False, True)
 
 
 def test_settings_take_no_time_varying_state():
@@ -263,7 +270,7 @@ def test_entry_loads_settings_and_a_command_that_overrides_them():
     # `500 h` is hours, not Planck's constant (§6 step 2).
     assert command.duration.to(ureg.hour).magnitude == pytest.approx(500)
     # The second asks nothing of the channel — it only names it and a span.
-    assert archive.data.routine.commands[1].controlled is False
+    assert archive.data.routine.commands[1].asks_for_anything is False
 
 
 def test_a_command_is_built_as_the_class_its_channel_names():
@@ -332,18 +339,40 @@ def test_a_corrected_value_clears_the_complaint(normalized, log):
     assert log.errors == []
 
 
-def test_each_channel_declares_its_own_hold_unit():
-    # `hold` cannot sit on ChannelCommand: it is kelvin on one axis and W/m² on the
-    # next. That is the whole reason it lives on the channel class (D19a).
+def test_each_variable_declares_its_own_setpoint_unit():
+    # A setpoint cannot sit on ChannelCommand: it is kelvin on one axis and W/m² on the
+    # next, and volts, amps or ohms within one axis. That is why every variable carries
+    # its own unit-ful quantity on its own channel class (D19a, D19b).
     units = {
-        name: str(cls.m_def.all_quantities['hold'].unit)
-        for name, cls in CHANNEL_CLASSES.items()
+        (channel, variable): str(cls.m_def.all_quantities[declared.setpoint_field].unit)
+        for channel, cls in CHANNEL_CLASSES.items()
+        for variable, declared in cls.variables().items()
     }
 
     assert units == {
-        'temperature': 'kelvin',
-        'irradiation': 'watt / meter ** 2',
+        ('temperature', 'temperature'): 'kelvin',
+        ('irradiation', 'irradiance'): 'watt / meter ** 2',
+        ('electrical_load', 'voltage'): 'volt',
+        ('electrical_load', 'current'): 'ampere',
+        ('electrical_load', 'resistance'): 'ohm',
+        ('mechanical', 'bend_radius'): 'meter',
+        ('mechanical', 'strain'): 'dimensionless',
     }
+
+
+def test_a_channel_with_one_variable_spells_its_setpoint_hold():
+    # There is no second variable to tell it from, so the axis's own name would only
+    # repeat the channel: `{channel: temperature, temperature: 65 °C}` (D19b).
+    assert TemperatureChannelCommand.variables()['temperature'].setpoint_field == 'hold'
+    assert IrradiationChannelCommand.variables()['irradiance'].setpoint_field == 'hold'
+    # A channel with several names each of them instead.
+    assert (
+        ElectricalLoadChannelCommand.variables()['voltage'].setpoint_field == 'voltage'
+    )
+    assert MechanicalChannelCommand.variables()['strain'].setpoint_field == 'strain'
+    # Nothing is invented for a variable the channel does not have: the channel answers
+    # that part by not holding the name, and there is no Variable left to ask (D4c).
+    assert 'voltage' not in TemperatureChannelCommand.variables()
 
 
 def test_a_named_setpoint_becomes_the_value_it_stands_for():
@@ -352,7 +381,7 @@ def test_a_named_setpoint_becomes_the_value_it_stands_for():
     channel = IrradiationChannelCommand.m_from_dict({'hold': 'dark'})
 
     assert channel.hold.to(ureg.watt / ureg.meter**2).magnitude == pytest.approx(0)
-    assert channel.controlled is True
+    assert channel.asks_for_anything is True
 
 
 def test_a_named_setpoint_belongs_to_one_channel(normalized, log):
@@ -360,7 +389,7 @@ def test_a_named_setpoint_belongs_to_one_channel(normalized, log):
     # stays text, no unit reads it, and it is reported like any other typo (D8a, §7).
     channel = normalized(TemperatureChannelCommand.m_from_dict({'hold': 'dark'}))
 
-    assert (channel.hold, channel.controlled) == (None, False)
+    assert (channel.hold, channel.asks_for_anything) == (None, False)
     assert len(log.errors) == 1
     assert 'hold' in log.errors[0]
 
@@ -394,7 +423,7 @@ def test_entry_loads_a_named_setpoint_and_a_sun():
     assert isinstance(dark, IrradiationChannelCommand)
     assert dark.hold.to(irradiance).magnitude == pytest.approx(0)
     # Deliberately dark is a condition somebody chose, so it counts as controlled.
-    assert dark.controlled is True
+    assert dark.asks_for_anything is True
 
 
 def test_a_value_is_read_however_the_field_is_set():
@@ -422,6 +451,152 @@ def test_a_named_setpoint_belongs_to_its_own_field(normalized, log):
 
     assert command.duration is None
     assert 'not a number followed by a unit' in log.errors[0]
+
+
+def test_entry_loads_a_setpoint_written_beside_its_variable():
+    # The whole path through NOMAD's own parse: the §8 spelling reaches the variable's
+    # own quantity, and a word standing for no number reaches its own field (D19b).
+    archive = parse(os.path.join(DATA_DIR, 'channels.archive.yaml'))[0]
+    normalize_all(archive)
+    held, released = archive.data.routine.commands[3:5]
+
+    assert isinstance(held, ElectricalLoadChannelCommand)
+    assert held.voltage.to(ureg.volt).magnitude == pytest.approx(0.8)
+    assert held.variable == 'voltage'
+    assert (released.open_circuit, released.asks_for_anything) == (True, True)
+    # The settings log the channel without ever asking it for a value (D9).
+    settings = archive.data.channel_settings.electrical_load
+    assert (settings.asks_for_anything, bool(settings.monitor)) == (False, True)
+
+
+def test_a_channel_says_what_it_can_be_asked_for():
+    # The class table is the capability (§4.1 role 2): what a routine may ask of this
+    # axis, and therefore what validation has to accept. Two questions, asked of two
+    # objects — the channel says whether it has the variable at all, and the variable
+    # says what may be done with it (D4c).
+    assert MechanicalChannelCommand.variables()['strain'].control is True
+    assert MechanicalChannelCommand.variables().get('humidity') is None
+    # Nothing measures a load resistance: it is set, and a voltage and a current come
+    # back — so it is controllable without being monitorable.
+    resistance = ElectricalLoadChannelCommand.variables()['resistance']
+    assert (resistance.control, resistance.monitor) == (True, False)
+    assert ElectricalLoadChannelCommand.variables()['voltage'].monitor is True
+
+
+def test_control_groups_say_what_one_device_cannot_set_independently():
+    # A cell's I–V curve ties its three: commanding one leaves the others measured.
+    load = ElectricalLoadChannelCommand.group_of('voltage')
+
+    assert load.names == frozenset({'voltage', 'current', 'resistance'})
+    assert 'I-V curve' in load.tied_by
+    # Bending a device says nothing about stretching it, so each stands alone.
+    assert MechanicalChannelCommand.group_of('strain').names == frozenset({'strain'})
+    assert [group.names for group in MechanicalChannelCommand.control_groups] == [
+        frozenset({'bend_radius'}),
+        frozenset({'strain'}),
+    ]
+    assert MechanicalChannelCommand.group_of('voltage') is None
+
+
+def test_the_groups_are_the_only_table_a_channel_writes():
+    # `variables()` and `numberless()` are flattened from `control_groups` whenever
+    # they are asked for, so there is no second table to disagree with it (D4c) — and
+    # no class-creation hook building one behind the declaration's back.
+    assert list(ElectricalLoadChannelCommand.variables()) == [
+        'voltage',
+        'current',
+        'resistance',
+    ]
+    assert ElectricalLoadChannelCommand.numberless() == ('open_circuit',)
+    assert MechanicalChannelCommand.numberless() == ()
+    # A word standing for no number releases the whole group, so the group owns it.
+    assert ElectricalLoadChannelCommand.control_groups[0].numberless == (
+        'open_circuit',
+    )
+    # And each variable is stamped with the keyword it was written under, which is how
+    # it can answer `setpoint_field` without being told its own name.
+    assert ElectricalLoadChannelCommand.variables()['current'].name == 'current'
+
+
+def test_a_setpoint_is_written_either_as_the_variable_or_as_hold():
+    # One field, two spellings: §8 writes `variable:` beside `hold:`, and the variable
+    # as the key says the same thing without an index to keep in sync (D19b).
+    as_key = MechanicalChannelCommand.m_from_dict({'strain': '2 %'})
+    as_hold = MechanicalChannelCommand.m_from_dict(
+        {'variable': 'strain', 'hold': '2 %'}
+    )
+
+    for command in [as_key, as_hold]:
+        assert command.strain.magnitude == pytest.approx(0.02)
+        assert command.asks_for_anything is True
+    # `hold` is not a field of its own — it was moved, not stored beside the variable.
+    assert 'hold' not in MechanicalChannelCommand.m_def.all_quantities
+    assert as_hold.m_to_dict()['strain'] == pytest.approx(0.02)
+
+
+def test_a_hold_with_no_variable_to_go_to_is_reported(normalized, log):
+    # `0.8 V` fits voltage and nothing else, but the schema does not guess from the
+    # dimension — the file says which variable it means, or hears about it (§7).
+    command = normalized(ElectricalLoadChannelCommand.m_from_dict({'hold': '0.8 V'}))
+
+    assert command.setpoints == {}
+    assert len(log.errors) == 1
+    assert 'voltage, current, resistance' in log.errors[0]
+
+
+def test_a_single_variable_channel_needs_no_variable_named():
+    # Only one thing `hold` could mean, in both directions: it needs no name, and
+    # `variable` is filled in from the setpoint that is set.
+    command = MechanicalChannelCommand.m_from_dict({'bend_radius': '5 mm'})
+    command.normalize(None, utils.get_logger(__name__))
+
+    assert command.variable == 'bend_radius'
+    assert command.setpoints == {'bend_radius': command.bend_radius}
+    assert command.available_variables == ['bend_radius', 'strain']
+
+
+def test_a_variable_the_channel_does_not_have_is_reported(normalized, log):
+    command = normalized(
+        MechanicalChannelCommand.m_from_dict({'variable': 'voltage', 'strain': '2 %'})
+    )
+
+    # Reported, never repaired: the setpoint stands as authored.
+    assert command.strain.magnitude == pytest.approx(0.02)
+    assert len(log.errors) == 1
+    assert 'bend_radius, strain' in log.errors[0]
+
+
+def test_a_word_standing_for_no_number_is_still_a_setpoint():
+    # `open_circuit` is neither 0 V nor 0 A, so no unit-ful field can hold it — but
+    # asking for it is asking for something, so the channel counts as controlled (D8a).
+    for command in [
+        ElectricalLoadChannelCommand.m_from_dict({'hold': 'open_circuit'}),
+        ElectricalLoadChannelCommand.m_from_dict({'open_circuit': True}),
+    ]:
+        assert command.open_circuit is True
+        assert command.setpoints == {}
+        assert command.asks_for_anything is True
+
+
+def test_the_electrical_load_reads_the_isos_l_2_form():
+    # §8's JV sweep command, minus the sweep: the variable is named beside the value.
+    node = Subroutine.m_from_dict(
+        {
+            'commands': [
+                {
+                    'channel': 'electrical_load',
+                    'variable': 'voltage',
+                    'hold': '0.8 V',
+                    'sampling_rate': '10 Hz',
+                }
+            ]
+        }
+    )
+    command = node.commands[0]
+
+    assert isinstance(command, ElectricalLoadChannelCommand)
+    assert command.voltage.to(ureg.volt).magnitude == pytest.approx(0.8)
+    assert command.sampling_rate.to(ureg.hertz).magnitude == pytest.approx(10)
 
 
 def test_the_schema_still_declares_a_plain_float():

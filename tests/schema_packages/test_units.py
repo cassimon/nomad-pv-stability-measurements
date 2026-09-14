@@ -6,7 +6,7 @@ from nomad_pv_stability_measurements.schema_packages.units import (
     parse,
     parse_duration,
     parse_frequency,
-    split,
+    split_match_convert,
 )
 
 
@@ -53,13 +53,13 @@ def test_unreadable_text_fails():
 
 def test_split_handles_human_characters():
     # A true minus and a non-breaking space, as pasted from a document.
-    assert split('−40 °C') == (-40.0, '°C')
+    assert split_match_convert('−40 °C') == (-40.0, '°C')
 
 
 def test_split_leaves_units_that_pint_already_reads():
     # Only an exact `h`/`min`/`d` is aliased, so `ms` is not read as minutes.
-    assert split('100 ms') == (100.0, 'ms')
-    assert split('10 Hz') == (10.0, 'Hz')
+    assert split_match_convert('100 ms') == (100.0, 'ms')
+    assert split_match_convert('10 Hz') == (10.0, 'Hz')
 
 
 def test_a_sun_is_an_irradiance():

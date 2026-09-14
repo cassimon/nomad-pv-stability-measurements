@@ -37,7 +37,7 @@ _NUMBER_AND_UNIT = re.compile(
 )
 
 
-def split(text: str) -> tuple[float, str]:
+def split_match_convert(text: str) -> tuple[float, str]:
     """`'24 h'` as `(24.0, 'hour')`, `'2 d'` as `(48.0, 'hour')`.
 
     A bare number is an error. Splitting the number off ourselves is also what
@@ -61,7 +61,7 @@ def split(text: str) -> tuple[float, str]:
 
 def parse(text: str, expected) -> ureg.Quantity:
     """`text` as a quantity in `expected`'s unit; a wrong dimension raises (§6 step 5)."""
-    number, unit = split(text)
+    number, unit = split_match_convert(text)
     return ureg.Quantity(number, unit).to(expected)
 
 

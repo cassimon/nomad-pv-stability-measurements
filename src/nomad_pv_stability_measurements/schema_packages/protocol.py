@@ -3,7 +3,9 @@ from nomad.datamodel.metainfo.basesections import BaseSection
 from nomad.metainfo import SchemaPackage, SubSection
 
 from nomad_pv_stability_measurements.schema_packages.channel_commands import (
+    ElectricalLoadChannelCommand,
     IrradiationChannelCommand,
+    MechanicalChannelCommand,
     TemperatureChannelCommand,
 )
 from nomad_pv_stability_measurements.schema_packages.routine import Routine
@@ -22,6 +24,8 @@ class ChannelSettings(ArchiveSection):
 
     temperature = SubSection(section_def=TemperatureChannelCommand)
     irradiation = SubSection(section_def=IrradiationChannelCommand)
+    electrical_load = SubSection(section_def=ElectricalLoadChannelCommand)
+    mechanical = SubSection(section_def=MechanicalChannelCommand)
 
 
 class StabilityProtocol(BaseSection, EntryData):

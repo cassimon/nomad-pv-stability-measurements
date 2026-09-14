@@ -11,6 +11,9 @@ data:
       spectrum: AM1.5G
       monitor: true
       sample_every: 60 s
+    electrical_load:
+      monitor: true
+      sampling_rate: 1 Hz
   routine:
     name: soak
     commands:
@@ -23,3 +26,10 @@ data:
       - channel: irradiation        # deliberately dark, and counted (D8a)
         hold: dark
         duration: 100 h
+      - channel: electrical_load    # §8's form: the variable named beside the value
+        variable: voltage
+        hold: 0.8 V
+        duration: 24 h
+      - channel: electrical_load    # a word standing for no number at all (D8a)
+        hold: open_circuit
+        duration: 1 h
