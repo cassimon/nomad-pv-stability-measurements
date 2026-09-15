@@ -1,35 +1,42 @@
 data:
   m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
   name: steady soak
-  channel_settings:
-    temperature:
-      hold: 65 °C
-      monitor: true
-      sample_every: 60 s
-    irradiation:
-      hold: 1 sun
-      spectrum: AM1.5G
-      monitor: true
-      sample_every: 60 s
-    electrical_load:
-      monitor: true
-      sampling_rate: 1 Hz
-  routine:
+  steps:
+  - m_def: nomad_pv_stability_measurements.schema_packages.steps.TemperatureStep
+    monitor: true
+    sample_every: 60.0
+    setpoint: 338.15
+    control: true
+  - m_def: nomad_pv_stability_measurements.schema_packages.steps.IrradianceStep
+    spectrum: AM1.5G
+    monitor: true
+    sample_every: 60.0
+    setpoint: 1000.0
+    control: true
+  - m_def: nomad_pv_stability_measurements.schema_packages.steps.VoltageStep
+    monitor: true
+    sampling_rate: 1.0
+  - m_def: nomad_pv_stability_measurements.schema_packages.steps.CurrentStep
+    monitor: true
+    sampling_rate: 1.0
+  - m_def: nomad_pv_stability_measurements.schema_packages.steps.ResistanceStep
+    monitor: true
+    sampling_rate: 1.0
+  - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
     name: soak
-    commands:
-      - channel: temperature        # an episode: 500 h at 85 °C, logged fast
-        hold: 85 °C
-        duration: 500 h
-        sampling_rate: 10 Hz
-      - channel: temperature        # no setpoint: left to drift for 100 h
-        duration: 100 h
-      - channel: irradiation        # deliberately dark, and counted (D8a)
-        hold: dark
-        duration: 100 h
-      - channel: electrical_load    # §8's form: the variable named beside the value
-        variable: voltage
-        hold: 0.8 V
-        duration: 24 h
-      - channel: electrical_load    # a word standing for no number at all (D8a)
-        hold: open_circuit
-        duration: 1 h
+    steps:
+    - m_def: nomad_pv_stability_measurements.schema_packages.steps.TemperatureStep
+      estimated_duration: 1800000.0
+      sampling_rate: 10.0
+      setpoint: 358.15
+      control: true
+    - m_def: nomad_pv_stability_measurements.schema_packages.steps.TemperatureStep
+      estimated_duration: 360000.0
+    - m_def: nomad_pv_stability_measurements.schema_packages.steps.IrradianceStep
+      estimated_duration: 360000.0
+      setpoint: 0.0
+      control: true
+    - m_def: nomad_pv_stability_measurements.schema_packages.steps.VoltageStep
+      estimated_duration: 86400.0
+      setpoint: 0.8
+      control: true

@@ -1,18 +1,16 @@
 from nomad.config.models.plugins import ParserEntryPoint
-from pydantic import Field
 
 
-class NewParserEntryPoint(ParserEntryPoint):
-    parameter: int = Field(0, description='Custom configuration parameter')
-
+class StabilityYamlParserEntryPoint(ParserEntryPoint):
     def load(self):
-        from nomad_pv_stability_measurements.parsers.parser import NewParser
+        from nomad_pv_stability_measurements.parsers.parser import StabilityYamlParser
 
-        return NewParser(**self.model_dump())
+        return StabilityYamlParser(**self.model_dump())
 
 
-parser_entry_point = NewParserEntryPoint(
-    name='NewParser',
-    description='New parser entry point configuration.',
-    mainfile_name_re=r'.*\.newmainfilename',
+parser_entry_point = StabilityYamlParserEntryPoint(
+    name='StabilityYamlParser',
+    description='Reads an authored PV stability protocol (`*.stability.yaml`) into a '
+    'StabilityProtocol entry.',
+    mainfile_name_re=r'.*\.stability\.ya?ml$',
 )

@@ -2,7 +2,7 @@ import pint
 import pytest
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.units import (
+from nomad_pv_stability_measurements.parsers.units import (
     parse,
     parse_duration,
     parse_frequency,

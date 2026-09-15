@@ -43,12 +43,12 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | D4 | **The channels are a closed, hard-coded vocabulary — one per stress axis, never authored.** A channel is a Python class holding a table of named *variables* — each controllable and/or monitorable — plus *control groups* (which variables can be commanded at the same time). All behaviour lives once in the base class. The routine names a channel through an **enum** (`channel: temperature`), so there are no user-invented keys and no `channels:` section in the file. A new channel = a new class plus an enum member, i.e. a plugin change that everybody then shares. |
 | D4a | **`channel_settings:` carries each channel's run-wide conditions** — one optional block per channel: a setpoint (`hold`), a monitor tag with its rate, plus `limits`, regulation, instrument, spectrum … It holds wherever the routine is silent; a step overrides it for its span. **Only static conditions** live there — a constant `hold` is the settings' whole vocabulary; the time-varying shapes (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) are only ever set by the routine, never a field of a settings block (§4.1). |
 | D4b | **The routine overrides the settings, and the warning says where.** One precedence rule for states and for monitoring: the innermost step that speaks wins for its span, the settings hold everywhere else. Because a shadowed setting is invisible in the file, `normalize()` reports it: a *warning* per (channel, field) that some step overrides, and a louder one for a setting that is **never** in effect. This must also be said in plain words in the field descriptions and the README (§10). |
-| D4c | **A channel declares one table, and the control group is it.** `control_groups` is the whole of a channel's capability (§4.1 role 2): each `ControlGroup` **owns** its variables, so the grouping cannot name a variable that does not exist and `variables` is derived by flattening the groups in declaration order rather than written a second time — **on demand, by a classmethod that reads `control_groups`**. Not cached onto the class by an `__init_subclass__` hook, and not built in `normalize()`: D19b's `hold` rewriting runs while the entry loads, *before* any normalize, so a table built there would be built too late, and would have an instance writing state that belongs to the class. A channel has three variables at most; walking them costs nothing, and `control_groups` stays the only place the capability is either written or read. Group-level facts live on the group — which variables are tied, why (`tied_by`), and the words that stand for no number at all (`open_circuit` releases every variable the group ties, not one of them, D8a). Variable-level facts stay on the `Variable`, and are **asked of it**: `resistance` is settable but not readable *inside* the same group where `voltage` is both, so `control` / `monitor` cannot move up — and neither can they be re-exported as base-class predicates, since the channel's own part of the answer is just whether `variables` holds the name. The group stamps each variable with its own name when it takes it, which is what lets a `Variable` answer `setpoint_field` for itself (D19b). *Supersedes three parallel class tables (`variables`, `control_groups` as name-sets, `numberless`), which said one thing three times and could disagree.* |
+| D4c | *Superseded by §14: `ControlGroup` and `control_groups` are gone. Which variables are alternatives for one degree of freedom is `VariableSet` data (`variable_sets.py`), and each variable is its own small section with its unit-ful `setpoint`.* *Amended by §13: `Variable.field` / `setpoint_field` are gone. Every variable's quantity carries the variable's own name, and `hold` is a word only the translator reads. Amended again after §13: every method about variables lives on `ControlGroup`, and `ChannelCommand` only declares `control_groups`. `ControlGroup.variables_of(groups)` and `ControlGroup.numberless_of(groups)` flatten a channel's groups. `group_of`, `names` and `__contains__` are gone, since nothing but tests called them. `Variable` is gone too. Once `unit`, `display` and `name` had nothing reading them, it held only two flags that defaulted to `True`, and only `resistance` ever differed. `ControlGroup` is now a frozen dataclass of static data: `variables` (names, in ELN order), `unmonitored` (set, never read back), `numberless` and `tied_by`. Every variable is controllable. A variable that is monitored but never commanded would return as one more tuple (`uncontrolled`), not as a class. The instances stay on each channel class, beside the quantities they name, and not in `schema_packages/__init__.py`: that module is NOMAD's entry point, which must not import metainfo at configuration time, and moving them there would split the table from its quantities.* **A channel declares one table, and the control group is it.** `control_groups` is the whole of a channel's capability (§4.1 role 2): each `ControlGroup` **owns** its variables, so the grouping cannot name a variable that does not exist and `variables` is derived by flattening the groups in declaration order rather than written a second time — **on demand, by a classmethod that reads `control_groups`**. Not cached onto the class by an `__init_subclass__` hook, and not built in `normalize()`: D19b's `hold` rewriting runs while the entry loads, *before* any normalize, so a table built there would be built too late, and would have an instance writing state that belongs to the class. A channel has three variables at most; walking them costs nothing, and `control_groups` stays the only place the capability is either written or read. Group-level facts live on the group — which variables are tied, why (`tied_by`), and the words that stand for no number at all (`open_circuit` releases every variable the group ties, not one of them, D8a). Variable-level facts stay on the `Variable`, and are **asked of it**: `resistance` is settable but not readable *inside* the same group where `voltage` is both, so `control` / `monitor` cannot move up — and neither can they be re-exported as base-class predicates, since the channel's own part of the answer is just whether `variables` holds the name. The group stamps each variable with its own name when it takes it, which is what lets a `Variable` answer `setpoint_field` for itself (D19b). *Supersedes three parallel class tables (`variables`, `control_groups` as name-sets, `numberless`), which said one thing three times and could disagree.* |
 | D5 | **Variables have physical names** (`humidity`, `oxygen`, `temperature` …); **the unit selects the quantity kind** (relative, molar ratio, dew point …). Values stay in the kind they were given — no cross-kind conversion. |
 | D6 | **Every value is a unit string** (`65 °C`, `85 %RH`, `1 sun`), parsed and dimension-checked against its variable. **Ambiguity is an error:** bare numbers, and bare `%` on humidity/oxygen. The one documented convention: `ppm`/`ppb` are molar (ppmv) — the glovebox standard. The string is the *authored* form only: it is read into the field's own unit-ful quantity on the way in (D19). A bare number **written as text** stays an error; a plain YAML number is read in the quantity's declared unit — which is what NOMAD itself writes back when it serializes. |
 | D7 | **The four ISOS stress axes are always reported.** Since the vocabulary is fixed (D4), this is structural: a channel no routine touches appears in the derived layers as *uncontrolled and unmonitored*. UV content is a property of the irradiation spectrum, not a channel; encapsulation belongs to the sample. |
-| D8 | **A command says what is *asked* of a channel; the control *state* is derived, never authored.** A `ChannelCommand` carries a setpoint (`hold`) or a time-varying shape (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) and nothing that names a control mode. **Asking nothing is the neutral element**: a channel no command in scope touches is not regulated, which is also what it is wherever nothing says otherwise, so every channel still has a defined state at every instant (D7). Two booleans follow per channel, **computed over time when commands are expanded into a time series, not stored on a command**: **`controlled`** (some command in scope asks for a value) and **`monitored`** (a monitor tag is in effect) — timeline rows, plottable next to the values (§4.4). On a command itself, `controlled` is only "does this ask for anything" — and it is **spelled `asks_for_anything` there**, for two reasons. The same class also carries the derived `is_controlled` (§4.1), and two names one letter apart for two different questions is a misreading waiting to happen. And the question is an `any`, not an `all`: one setpoint out of a channel's three makes it true — asking for *more* than one is a contradiction (§4.2), not a fuller answer — while `open_circuit` makes it true with no setpoint at all, since a word standing for no number is still something somebody asked for (D8a). `has_setpoint` would have been wrong on both counts. *Supersedes `control = MEnum('off', 'hold', 'active')` (and, before that, the `uncontrolled`/`off` split): `hold` already said `hold`, and `active` was a label for time-varying behaviour that a single static command cannot know — a command is one clause, and what a channel is doing at hour 700 follows from all the clauses in scope. **Explicitly released** is still writable, structurally: a command that **names a channel and asks nothing of it** says "not regulated here" out loud, as against a channel nobody mentions (§4.1, "Untouched channels").* |
-| D8a | **Named setpoints: a field may declare words that stand for values.** Irradiation's `hold` declares `dark` (= `0 W/m²`); the electrical load's declares `open_circuit`. They are written wherever a value is written — `hold: dark`, `cycle: {low: dark, high: 1 sun}`, `ramp: {from: dark, to: 1 sun}` — and the table is declared **on the field's own type**, `StabilityUnitAwareFloat(named={'dark': '0 W/m²'})`, which resolves the word **before** parsing it (D19, §6). *Resolution moved twice: out of `normalize()` when D19 made a word have to become a value before the field is set, and then off the section onto the field — a word belongs to the quantity it can be written into, not to every unit-ful field the section happens to declare, which is what kept `duration: dark` from reading as an irradiance.* Per field, never global: `dark` is meaningless on the temperature axis and is rejected there. Where a state section takes endpoints of the same dimension (`ramp: {from: dark}`, states.py), that section's own endpoint fields declare the same table. A name that stands for a number becomes one, so the timeline plots `dark` as 0 instead of a NaN hole; a name that stands for no number at all (`open_circuit` is neither 0 V nor 0 A) stays NaN, like `track`. **Asking for a named setpoint is asking for something**, so `controlled` is true — that is how "deliberately dark" is said out loud *and counted*, the one thing the old irradiation-only `off` state did that D8 alone does not (§4.1). **Spelled `dark`, never `off`:** a bare `off` is a YAML 1.1 boolean (§9), so that spelling arrives as `False` and would silently invert the very flag it exists to set — and `dark` is ISOS's own word. **There is no `on`:** `dark` has a defined value and an illuminated state does not, and the irradiance is exactly what ISOS reporting needs, so it is written as a number (`hold: 1 sun`). |
+| D8 | *Amended after §13: `setpoints` and `asks_for_anything` are removed from `ChannelCommand`. Nothing outside tests called them, and §3 puts the expander on plain dataclasses. Deriving "asks for anything" (a setpoint, or a word standing for no number such as `open_circuit`) moves to the IR builder in step 3. The meaning below is unchanged.* **A command says what is *asked* of a channel; the control *state* is derived, never authored.** A `ChannelCommand` carries a setpoint (`hold`) or a time-varying shape (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) and nothing that names a control mode. **Asking nothing is the neutral element**: a channel no command in scope touches is not regulated, which is also what it is wherever nothing says otherwise, so every channel still has a defined state at every instant (D7). Two booleans follow per channel, **computed over time when commands are expanded into a time series, not stored on a command**: **`controlled`** (some command in scope asks for a value) and **`monitored`** (a monitor tag is in effect) — timeline rows, plottable next to the values (§4.4). On a command itself, `controlled` is only "does this ask for anything" — and it is **spelled `asks_for_anything` there**, for two reasons. The same class also carries the derived `is_controlled` (§4.1), and two names one letter apart for two different questions is a misreading waiting to happen. And the question is an `any`, not an `all`: one setpoint out of a channel's three makes it true — asking for *more* than one is a contradiction (§4.2), not a fuller answer — while `open_circuit` makes it true with no setpoint at all, since a word standing for no number is still something somebody asked for (D8a). `has_setpoint` would have been wrong on both counts. *Supersedes `control = MEnum('off', 'hold', 'active')` (and, before that, the `uncontrolled`/`off` split): `hold` already said `hold`, and `active` was a label for time-varying behaviour that a single static command cannot know — a command is one clause, and what a channel is doing at hour 700 follows from all the clauses in scope. **Explicitly released** is still writable, structurally: a command that **names a channel and asks nothing of it** says "not regulated here" out loud, as against a channel nobody mentions (§4.1, "Untouched channels").* |
+| D8a | *Superseded in mechanism by §13: the words (`dark`, `hold: open_circuit`) are resolved by the translator (`parsers/channels.py`), not by the field's type. What they mean is unchanged, and `open_circuit` stays a boolean quantity of the schema.* **Named setpoints: a field may declare words that stand for values.** Irradiation's `hold` declares `dark` (= `0 W/m²`); the electrical load's declares `open_circuit`. They are written wherever a value is written — `hold: dark`, `cycle: {low: dark, high: 1 sun}`, `ramp: {from: dark, to: 1 sun}` — and the table is declared **on the field's own type**, `StabilityUnitAwareFloat(named={'dark': '0 W/m²'})`, which resolves the word **before** parsing it (D19, §6). *Resolution moved twice: out of `normalize()` when D19 made a word have to become a value before the field is set, and then off the section onto the field — a word belongs to the quantity it can be written into, not to every unit-ful field the section happens to declare, which is what kept `duration: dark` from reading as an irradiance.* Per field, never global: `dark` is meaningless on the temperature axis and is rejected there. Where a state section takes endpoints of the same dimension (`ramp: {from: dark}`, states.py), that section's own endpoint fields declare the same table. A name that stands for a number becomes one, so the timeline plots `dark` as 0 instead of a NaN hole; a name that stands for no number at all (`open_circuit` is neither 0 V nor 0 A) stays NaN, like `track`. **Asking for a named setpoint is asking for something**, so `controlled` is true — that is how "deliberately dark" is said out loud *and counted*, the one thing the old irradiation-only `off` state did that D8 alone does not (§4.1). **Spelled `dark`, never `off`:** a bare `off` is a YAML 1.1 boolean (§9), so that spelling arrives as `False` and would silently invert the very flag it exists to set — and `dark` is ISOS's own word. **There is no `on`:** `dark` has a defined value and an illuminated state does not, and the irradiance is exactly what ISOS reporting needs, so it is written as a number (`hold: 1 sun`). |
 | D9 | **Monitoring is a tag, not a state.** Acquiring data is an action, so it is said where the condition is said: `monitor: true` with an optional `sample_every: 60 s` or `sampling_rate: 10 Hz` — in a channel's settings (the whole run) or on a node (its span, D13). It is orthogonal to the setpoint, so the same place may set a state *and* monitor, and monitoring alone logs a channel nobody controls. |
 | D10 | **The regulation law (PID, on/off …) is a channel setting**, orthogonal to the setpoint shape. |
 
@@ -56,8 +56,8 @@ routine:                                   # ISOS-L-2 (full file in §8)
 
 | # | Decision |
 |---|---|
-| D11 | **One base, two kinds of command, single inheritance throughout: `RoutineCommand` → `ChannelCommand` \| `Subroutine` → `Routine`.** A `ChannelCommand` *acts* on one axis; a `Subroutine` is a *block* that contains commands of its own. **Both live in one authored list, `commands:`** — a channel command holds for its block's whole span, a block runs where `mode` puts it. `Routine` is the root: a block authored under the protocol. **Three keywords carry the whole tree: `commands`, `channel`, `name`.** A node needs no `subroutine:` tag — a block is simply a command that names no `channel`, and it labels itself with the `name` every command already has. |
-| D11a | **The mixed list decides its `m_def` by key, then lets NOMAD load it natively.** Verified: a repeating sub-section typed to a common base instantiates *the base* and silently drops whatever the subclass added, unless every entry carries the ~70-char qualified `m_def:` — schema boilerplate in every file, and the only native discriminator NOMAD has (no short form: a bare class name fails to resolve, verified). `Subroutine.m_update_from_dict` reads the keys — **a `channel` names that channel's own class, `channel: temperature` → `m_def: …TemperatureChannelCommand` (D19a); anything else means `m_def: …Subroutine`** — writes that one field into each entry, then calls NOMAD's own, unmodified `m_update_from_dict` to do the actual building. No hand-built sections, no round-trip asymmetry (`m_to_dict` already wrote `m_def`; loading now agrees), and a nested block's own `commands` get their `m_def` too, since NOMAD calls back into this same method when it builds that block. An entry that already carries `m_def` is left alone — the sniff only fills a gap. |
+| D11 | *Amended again by §14: the two kinds are `PlannedMonitorControlStep` and `PlannedSubroutineStep`, both under `PlannedProcessStep`. There is no `Routine`: the protocol's own `steps` are the root list, and an authored `routine:` becomes a subroutine step.* *Amended by §13.6 step 8: `RoutineCommand` → `PlannedActivityStep` (now deriving from NOMAD's own `ActivityStep`, §2), `ChannelCommand` → `MeasurementStep`, `Subroutine` → `SubroutineStep`. `Routine` keeps its name. The chain and its meaning below are unchanged.* **One base, two kinds of command, single inheritance throughout: `RoutineCommand` → `ChannelCommand` \| `Subroutine` → `Routine`.** A `ChannelCommand` *acts* on one axis; a `Subroutine` is a *block* that contains commands of its own. **Both live in one authored list, `commands:`** — a channel command holds for its block's whole span, a block runs where `mode` puts it. `Routine` is the root: a block authored under the protocol. **Three keywords carry the whole tree: `commands`, `channel`, `name`.** A node needs no `subroutine:` tag — a block is simply a command that names no `channel`, and it labels itself with the `name` every command already has. |
+| D11a | *Superseded by §13: the translator writes each entry's `m_def`, and the schema loads a bare archive with no override.* **The mixed list decides its `m_def` by key, then lets NOMAD load it natively.** Verified: a repeating sub-section typed to a common base instantiates *the base* and silently drops whatever the subclass added, unless every entry carries the ~70-char qualified `m_def:` — schema boilerplate in every file, and the only native discriminator NOMAD has (no short form: a bare class name fails to resolve, verified). `Subroutine.m_update_from_dict` reads the keys — **a `channel` names that channel's own class, `channel: temperature` → `m_def: …TemperatureChannelCommand` (D19a); anything else means `m_def: …Subroutine`** — writes that one field into each entry, then calls NOMAD's own, unmodified `m_update_from_dict` to do the actual building. No hand-built sections, no round-trip asymmetry (`m_to_dict` already wrote `m_def`; loading now agrees), and a nested block's own `commands` get their `m_def` too, since NOMAD calls back into this same method when it builds that block. An entry that already carries `m_def` is left alone — the sniff only fills a gap. |
 | D12 | **`mode: sequential \| parallel`** on a node says how the *blocks* in its `commands` run — channel commands are conditions, not moments, so each holds for the node's whole span either way. Children of a `parallel` node must write disjoint control groups (rule R3). **Join-all:** a parallel block ends when its longest bounded child ends. |
 | D13 | **Lifetime by lexical scope, with `duration` on the command itself.** No start/stop pairs. A command that gives a `duration` is an **episode** — it takes its turn in the order `mode` gives. A channel command that gives none is a **condition**, holding for its block's whole span; a block without one lasts as long as what it contains. Because `duration` sits on `RoutineCommand`, an episode needs no block wrapped around it purely to be given a lifetime. |
 | D13a | **Two commands on one channel are never merged — they must be truly subsequent.** Siblings in one `commands` list have *equal* scope, so nothing in the file decides between them: `{channel: temperature, hold: 85 °C}` beside `{channel: temperature, monitor: true}` is **not** read as "hold and log", and no reader may assume it is. Two commands on the same channel are legal in one block only when each carries its own `duration` and the block is `sequential` — then they genuinely follow one another (rule R4). Everything else overlaps and is an **error**: two commands without a `duration` both span the block, a command without one covers an episode beside it, and under `mode: parallel` every child is simultaneous by definition. There is nothing to merge *because asking nothing is itself a statement* — a command that names a channel and asks nothing of it says "not regulated here" (D8), so the pair above is a contradiction, not two half-filled forms. The fix is one command carrying all the keys, or explicit nesting: where scopes differ, D4b's innermost-wins does decide, and that is the only reason this rule can be a cheap per-block set check instead of interval arithmetic. Overlaps are **reported, never repaired** — the authored file is left as written and expansion is skipped (§7). A command the block's `duration` leaves no time for is reported too (*warning*, R5).
@@ -71,10 +71,10 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | # | Decision |
 |---|---|
 | D18 | **Named state slots** (`hold:`, `ramp:` …) instead of polymorphic sub-sections — `m_def` is never hand-written except at the root. |
-| D19 | **One field per value: the quantity itself, with the written unit read by its own type.** Every authored value is a real `Quantity(type=StabilityUnitAwareFloat(), unit=…)` — no `type=str` beside it, no twin. NOMAD's stock float refuses `duration: 500 h` (**verified**: it rejects `'24 h'` outright, reads a bare number as its declared unit, and honours no `__unit:` escape hatch anywhere in its source), so the plugin declares **its own `Datatype`** (§6) — the extension point NOMAD itself uses for this, exactly as its stock `Datetime` type accepts a written-out date and stores a canonical one. `StabilityUnitAwareFloat.normalize` parses the string against the field's own `unit=` and hands `super()` a pint quantity, which NOMAD's own number type already knows how to convert and store (`500 h` → `1800000.0 s`, `65 °C` → `338.15 K`, **verified**). Because `Quantity.__set__` calls `self.type.normalize` unconditionally, **every** way of setting the field is covered — `m_from_dict`, `m_update_from_dict`, `Section(**kwargs)`, an ELN edit *and* a plain `section.hold = '65 °C'` (**verified**). The file keeps the unit it was written with, the archive keeps a number, and unit switching, numeric search, plots and a loud `DimensionalityError` all come free from the declaration. The schema still serializes as a plain float quantity, so nothing downstream needs to know (**verified**). *Supersedes two earlier drafts: the string-plus-twin pair (the twin existed only to buy back what the string cost), and then a section-wide `m_set` override — which worked, but intercepted every field of every section to serve the few that declare a unit, and still missed plain attribute assignment.* |
-| D19a | **Where the dimension depends on the channel, the field is declared on the channel class.** `hold` cannot sit on `ChannelCommand`: it is kelvin for temperature and W/m² for irradiation. So `ChannelCommand` does not declare it at all and each channel class declares its own — `TemperatureChannelCommand.hold` in `K` — which is also how a channel whose setpoint is not a number at all declares an `MEnum` instead (`dark`, `open_circuit`, D8a). **Verified:** a subclass may declare what its base does not, and NOMAD then **silently drops** an authored `hold` when the same dict is loaded as the base class. That makes D11a's per-entry dispatch load-bearing rather than a convenience: it must resolve the `channel:` *value* to that channel's class (`channel: temperature` → `TemperatureChannelCommand`), or the setpoint disappears without a word. Text the file writes that §6 cannot read is remembered where it was written and reported by `normalize()` (§7), never raised — a typo must not stop an entry from loading; an empty or blank string leaves the field unset, since asking nothing is the neutral element (D8). |
-| D19b | **Where the dimension depends on the *variable*, the field is declared per variable — and `variable:` + `hold:` stays the authored spelling.** D19a's argument does not stop at the channel: the electrical load holds volts, amps *or* ohms, and the mechanical channel metres *or* a dimensionless strain, so one `hold` quantity cannot carry them either — a NOMAD `Quantity` has exactly one unit, and `shape=['*']` gives a list of *volts*, not a list of one of each. So a channel with several variables declares **one unit-ful quantity per variable, named after it** (`voltage` in `V`, `strain` in `dimensionless`), and the `variable` a command names says which. A channel with a single variable keeps `hold` — there is no variable to name — which the variable's table entry records as `field='hold'`. **The two spellings are one field:** `{variable: strain, hold: 2 %}` (§8) and `{strain: 2 %}` both land in `strain`, because `ChannelCommand.m_update_from_dict` moves an authored `hold` into the named variable's own quantity before NOMAD loads it — the same per-entry rewriting D11a already does for `m_def`. A `hold` with no variable to go to (several controllable, none named) is remembered and reported like an unreadable value (D19a, §7), never dropped in silence. *Considered and rejected: a repeating `hold` ordered by a `variables` list. It does not solve the dimension problem (the list is still all one unit), it makes `hold[i]` meaningful only through `variables[i]` — so adding a variable to a class silently re-targets stored values — and §4.1 already decided one command sets at most one variable, which is the only thing the list would buy.* |
-| D20 | **References by enum value** (`channel: temperature`) — never `#/data/...` paths, and never a free string that each lab spells differently. |
+| D19 | *Superseded by §13: `StabilityUnitAwareFloat` is gone. Every value is a plain `np.float64` quantity, and the translator reads the written unit into a number in the declared unit. One field per value still holds.* **One field per value: the quantity itself, with the written unit read by its own type.** Every authored value is a real `Quantity(type=StabilityUnitAwareFloat(), unit=…)` — no `type=str` beside it, no twin. NOMAD's stock float refuses `duration: 500 h` (**verified**: it rejects `'24 h'` outright, reads a bare number as its declared unit, and honours no `__unit:` escape hatch anywhere in its source), so the plugin declares **its own `Datatype`** (§6) — the extension point NOMAD itself uses for this, exactly as its stock `Datetime` type accepts a written-out date and stores a canonical one. `StabilityUnitAwareFloat.normalize` parses the string against the field's own `unit=` and hands `super()` a pint quantity, which NOMAD's own number type already knows how to convert and store (`500 h` → `1800000.0 s`, `65 °C` → `338.15 K`, **verified**). Because `Quantity.__set__` calls `self.type.normalize` unconditionally, **every** way of setting the field is covered — `m_from_dict`, `m_update_from_dict`, `Section(**kwargs)`, an ELN edit *and* a plain `section.hold = '65 °C'` (**verified**). The file keeps the unit it was written with, the archive keeps a number, and unit switching, numeric search, plots and a loud `DimensionalityError` all come free from the declaration. The schema still serializes as a plain float quantity, so nothing downstream needs to know (**verified**). *Supersedes two earlier drafts: the string-plus-twin pair (the twin existed only to buy back what the string cost), and then a section-wide `m_set` override — which worked, but intercepted every field of every section to serve the few that declare a unit, and still missed plain attribute assignment.* |
+| D19a | *Amended by §13: the per-channel class stays, but choosing it from `channel:` and reporting unreadable text move to the translator.* **Where the dimension depends on the channel, the field is declared on the channel class.** `hold` cannot sit on `ChannelCommand`: it is kelvin for temperature and W/m² for irradiation. So `ChannelCommand` does not declare it at all and each channel class declares its own — `TemperatureChannelCommand.hold` in `K` — which is also how a channel whose setpoint is not a number at all declares an `MEnum` instead (`dark`, `open_circuit`, D8a). **Verified:** a subclass may declare what its base does not, and NOMAD then **silently drops** an authored `hold` when the same dict is loaded as the base class. That makes D11a's per-entry dispatch load-bearing rather than a convenience: it must resolve the `channel:` *value* to that channel's class (`channel: temperature` → `TemperatureChannelCommand`), or the setpoint disappears without a word. Text the file writes that §6 cannot read is remembered where it was written and reported by `normalize()` (§7), never raised — a typo must not stop an entry from loading; an empty or blank string leaves the field unset, since asking nothing is the neutral element (D8). |
+| D19b | *Amended by §13: one quantity per variable stays, now named after the variable on every channel (`temperature`, `irradiance`). Both spellings, `variable:` + `hold:` and the variable as the key, are read by the translator.* **Where the dimension depends on the *variable*, the field is declared per variable — and `variable:` + `hold:` stays the authored spelling.** D19a's argument does not stop at the channel: the electrical load holds volts, amps *or* ohms, and the mechanical channel metres *or* a dimensionless strain, so one `hold` quantity cannot carry them either — a NOMAD `Quantity` has exactly one unit, and `shape=['*']` gives a list of *volts*, not a list of one of each. So a channel with several variables declares **one unit-ful quantity per variable, named after it** (`voltage` in `V`, `strain` in `dimensionless`), and the `variable` a command names says which. A channel with a single variable keeps `hold` — there is no variable to name — which the variable's table entry records as `field='hold'`. **The two spellings are one field:** `{variable: strain, hold: 2 %}` (§8) and `{strain: 2 %}` both land in `strain`, because `ChannelCommand.m_update_from_dict` moves an authored `hold` into the named variable's own quantity before NOMAD loads it — the same per-entry rewriting D11a already does for `m_def`. A `hold` with no variable to go to (several controllable, none named) is remembered and reported like an unreadable value (D19a, §7), never dropped in silence. *Considered and rejected: a repeating `hold` ordered by a `variables` list. It does not solve the dimension problem (the list is still all one unit), it makes `hold[i]` meaningful only through `variables[i]` — so adding a variable to a class silently re-targets stored values — and §4.1 already decided one command sets at most one variable, which is the only thing the list would buy.* |
+| D20 | *Superseded in part by §14: `channel:` now resolves to a `variable_set`, which the schema stores again as an enum; `channel: mechanical` names two sets and is resolved by the variable written.* *Amended by §13: `channel:` is an authored word only, resolved by the translator to the channel's class. The bare schema has no `channel` quantity, because the class is the axis.* **References by enum value** (`channel: temperature`) — never `#/data/...` paths, and never a free string that each lab spells differently. |
 
 **Derived outputs and provenance** (§4.3–§4.5)
 
@@ -103,13 +103,21 @@ All ship with `nomad-lab`. Import paths **verified**:
 | `HDF5Reference`, `HDF5Dataset` | `nomad.datamodel.hdf5` | large result arrays |
 | `Quantity`, `SubSection`, `SectionProxy`, `Section`, `MEnum`, `Any`, `SchemaPackage` | `nomad.metainfo` | |
 | `ureg` | `nomad.units` | the shared pint registry (read-only use!) |
+| `ActivityStep` | `nomad.datamodel.metainfo.basesections.v2` | base of `PlannedActivityStep` (§13.6 step 8): `name`, `start_time`, `description`, `to_task()` |
 
 **Deliberately not used:**
 - **`Activity` as protocol base** — its `normalize()` appends to `results.eln.methods` and
   *overwrites* `workflow2.tasks`. A protocol is a plan, not something that happened.
-- **`ActivityStep` / `ProcessStep` as node base** — `start_time` is an absolute `Datetime`;
-  protocol time is relative to t₀.
+- **`ProcessStep`** — `ActivityStep` (below) already covers the tree's node base; `ProcessStep`
+  adds nothing this schema needs.
 - **`SolarCellJV`** (core ELN) — reusable for JV snapshots later, but heavy for iteration 1.
+
+**Reconsidered (§13.6 step 8):** `ActivityStep` as the node base was rejected above for its
+absolute `start_time`. The tree's own base (`RoutineCommand`, now `PlannedActivityStep`) never
+sets it, so an unused optional field is the whole cost, and deriving from it gains NOMAD's own
+step vocabulary — `name`, `description`, and `to_task()` for workflow visualization — for free.
+Protocol time stays relative to t₀, carried entirely by `duration`, which `ActivityStep` does not
+declare and `PlannedActivityStep` adds itself.
 
 There is no `Protocol`/`Recipe` base section in NOMAD core — this is new ground.
 
@@ -1160,6 +1168,12 @@ writing `{}` would say "released, nobody's driving it", which is not what ISOS-D
 
 ## 9. YAML ergonomics — why the file looks like §8
 
+> **Since §13, this is the translator's concern, not the schema's.** The file still looks like
+> §8, but `.stability.yaml` is read by `parsers/translate.py` into a bare archive. The loading
+> tricks below (`m_def` sniffing, the unit-reading datatype, `hold` rewriting) no longer run
+> inside the schema. The NOMAD facts stay true and explain why the translator exists. The
+> unknown-key pitfall is now closed by the translator.
+
 **Named slots instead of `m_def` — verified.** For a polymorphic sub-section `state: State`:
 
 | YAML | Result |
@@ -1256,34 +1270,43 @@ needs no `m_def`. Tests that compare against authored dicts strip it.
 
 ```
 src/nomad_pv_stability_measurements/
-  schema_packages/
+  schema_packages/    the bare schema: plain NOMAD, no loading hooks, never imports
+                      parsers/ (§13)
     __init__.py       the entry point; it loads `protocol.m_package`, whose imports pull
                       in the modules below (each module carries its own SchemaPackage —
                       a package cannot span modules)
-    units.py          parse / parse_duration / parse_rate, kind tables, and the
-                      StabilityUnitAwareFloat datatype that reads a written unit on
-                      the way in (§6, D19)
-    conditions.py     stop_when tokenizer + parser -> IR                     (§4.2.1)
-    routine.py        CHANNELS, Variable, Kind, StabilityUnitAwareSection (reports
-                      what a StabilityUnitAwareFloat could not read), RoutineCommand,
-                      ChannelCommand (Variable, ControlGroup, and the `hold`
-                      rewriting of D19b), Subroutine, Routine, RegulationLaw
-    channel_commands.py  the channel vocabulary's 5 classes (TemperatureChannelCommand,
-                      IrradiationChannelCommand, …) — each one's variable table and the
-                      unit-ful quantity per variable — and CHANNEL_CLASSES, split out of
-                      routine.py so the two grow independently
-    utils.py          with_m_def and other small cross-module helpers (D11a)
+    general.py        PlannedProcess, PlannedProcessStep: extensions of NOMAD's own
+                      Process / ProcessStep with the plan/record split (was_executed,
+                      the estimated_* fields), specific to no PV concept (§15.5)
+    routine.py        PlannedMonitorControlStep (monitor, control, setpoint),
+                      PlannedSubroutineStep (execution_mode, steps); the checks that
+                      hold for any archive (R4, R5, the sampling pair) (§15.1)
+    steps.py          one PlannedMonitorControlStep per quantity, each fixing the unit
+                      of its setpoint (TemperatureStep, IrradianceStep, ...) (§15.1)
+    utils.py          the checks a block and the protocol share: R4, R5, and R6, which
+                      fits steps to their block's duration (§15.4)
     states.py         Ramp, Cycle, Tabulated, Sweep
-    protocol.py       ChannelSettings, StabilityProtocol, ProtocolSummary,
-                      normalize pipeline, plot
+    protocol.py       StabilityProtocol (steps only), ProtocolSummary, normalize
+                      pipeline, plot
     timeline.py       ProtocolTimeline
     results.py        StabilityMeasurement, StabilityResult, …                (iteration 2)
+  parsers/            everything that reads an authored `.stability.yaml` (§13)
+    __init__.py       the parser entry point (`*.stability.yaml`)
+    parser.py         StabilityYamlParser: translate -> archive.data
+    translate.py      translate / translate_section -> Translation(archive, problems)
+    channels.py       authoring words: variable keys (`bend_radius` -> BendRadius),
+                      channel words (`mechanical` -> two sets), §13's old class names
+    units.py          parse / parse_duration / parse_frequency, the alias tables (§6)
+    conditions.py     stop_when tokenizer + parser -> IR     (§4.2.1; see O13)
   simulation/
     ir.py             plain dataclasses the expander works on
     expander.py       §5 — pure Python, no metainfo
     validate.py       §7
 tests/
-  data/               the two §8 examples as .archive.yaml
+  data/               each example as `.stability.yaml` (authored) and `.archive.yaml` (bare)
+  schema_packages/    the schema's meaning, tested on bare dicts
+  parsers/            the translator, the units, the old-format compatibility suite
+                      (§13.1a), and the end-to-end path through StabilityYamlParser
 ```
 
 Suggested order — each step is testable on its own:
@@ -1327,6 +1350,7 @@ always-reported set, one protocol per upload).
 | O9 | **Cross-kind search** — a best-effort `water_molar_ratio_mean` in the summary, computed only when temperature is *controlled* over the span and null otherwise (never guessed from an uncontrolled channel)? | left out; revisit after the first real data |
 | O11 | **Bare number on offset unit** — `hold: 65` on temperature reads as 65 K = −208 °C, because D6-as-amended requires a plain YAML number to read in the declared unit to preserve round-trip. Unfixable without breaking `m_to_dict` and reload. Worth recording in §9 as a second residual cost, alongside the `display` annotation? | decision: document, do not fix |
 | O12 | **An evaluable law on a control group** — `ControlGroup(..., law=lambda …)`, a general hook on the class overridden per group, so that `V = I·R` is carried as arithmetic rather than as `tied_by` prose. *Against:* the relation is true but near tautological (it is the load's definition — a resistive load obeys it by construction, and on a sourcemeter `R` is simply the ratio), and it is inapplicable where the schema lives: it relates three quantities of which a protocol holds **exactly one**, which is what a control group *is*. Commanding `resistance` fixes the load line; where the run sits on it is the intersection with the cell's own I–V curve, which the experiment measures — so the lambda could never fire at authoring time, and the only document carrying two of the three is one §4.2 already rejects. A lambda also does not serialize (invisible to the archive, the ELN, search and every non-Python reader of the schema — D1), it is a *relation* rather than a function (`R = U/I` is one of three rearrangements, so one lambda is a third of one), and it would be a general mechanism with exactly one possible user: of the 5 control groups today and 8 once atmosphere lands (2c), only the electrical load has more than one variable — humidity, oxygen and total pressure are separate groups precisely *because* nothing ties them. *Where it would pay:* §4.4's timeline, over measured arrays, where two of the three do exist — a resistance row derived from logged `V` and `I`. That is the measurement layer, over data, not the protocol's class table. *Cheap half-step meanwhile:* put the formula into `tied_by`, which already reaches the ELN and the validation messages, stating the physics without pretending the schema evaluates it. | open; not built — revisit with §4.4 (step 5), where the data the law needs first exists |
+| O13 | **Where does `stop_when` get parsed, after §13?** D15 stores the readable text and parses it in `normalize()`, but the value parser it reuses (`units.parse`) now lives in `parsers/`, which the schema must not import. Either the translator parses it and the schema stores the structured form beside the text, or the parser moves to a module both sides may import. | open; decide when `conditions.py` is built |
 
 ## 12. Deferred on purpose
 
@@ -1352,3 +1376,454 @@ All additive — none reworks the core.
 - **More channels** — enclosure, reverse-bias polarity; and a **second device on one axis**
   (heated chuck *and* chamber air) as a curated enum member such as `ambient_temperature`,
   never as a free key (D4).
+
+---
+
+## 13. Proposed — a bare schema, and a translator from `.stability.yaml`
+
+**Status: implemented (steps 1–5 of 13.6). It supersedes the parts of D4c, D8a, D11a, D19,
+D19a, D19b, D20 and §9 that it names.**
+
+**Goal: a clear separation between the schema and the parsing.** The schema describes the
+data and nothing else. Every convenience of the authored file lives in the parser, and the
+file format written today stays readable through the parser (13.1a).
+
+### 13.1 The idea
+
+Today one set of metainfo classes does two jobs: it *is* the data model, and it *reads a
+human-written file*. The second job is where most of the code lives, and all of it runs
+inside NOMAD's loading hooks (`m_update_from_dict`, `Datatype.normalize`, `m_cache`), which is
+why every rule needs a NOMAD fact **verified** before it can be written down.
+
+Split the jobs:
+
+```
+  tests/data/soak.stability.yaml      pretty: units, `hold`, `dark`, no m_def
+            │
+            ▼   translate(doc) -> (archive_dict, problems)     pure Python, no metainfo
+  tests/data/soak.archive.yaml        bare: explicit m_def, numbers in the declared unit
+            │
+            ▼   StabilityProtocol.m_from_dict(...)             plain NOMAD, no overrides
+  archive.data                        normalize() checks meaning only
+```
+
+**The dividing test:** a rule belongs to the translator if it only exists because a person
+writes the file. It belongs to the schema if it would still be needed for an archive that
+came from anywhere else, such as an ELN edit, an API upload or a future instrument log.
+
+**The dependency runs one way.** `parsers/` may import `schema_packages/`, for class paths and
+`control_groups`. `schema_packages/` never imports `parsers/`. A test checks this, so the
+separation cannot erode in silence. Both are ordinary NOMAD plugin entry-point packages;
+there is no third package.
+
+### 13.1a Compatibility — the old format stays readable
+
+Every file the schema accepts today must still load, now through the translator, and mean
+the same thing. Concretely, the translator accepts all of the following:
+
+- `channel: temperature` with no `m_def`, and entries that already carry a qualified `m_def`;
+- values with units (`65 °C`, `500 h`, `1 sun`, `2 %`) and plain YAML numbers in the
+  declared unit;
+- `hold:` on a single-variable channel; `variable: voltage` with `hold: 0.8 V`; `voltage: 0.8 V`;
+- the named words `hold: dark` and `hold: open_circuit` (also `open_circuit: true`);
+- `sample_every` or `sampling_rate`;
+- nested blocks, `mode`, `duration`, `name`, and `channel_settings` slots.
+
+The translator also accepts **the bare format itself**: `translate(bare) == bare`. The new
+format is then a subset of what the parser reads, and an `archive.yaml` written out by hand or
+by NOMAD is a valid `.stability.yaml` as well.
+
+**How this is checked:** every YAML input in today's tests
+(`channels.archive.yaml`, `tree.archive.yaml`, and the inline dicts in `test_routine.py` and
+`test_protocol.py`) becomes a translator fixture before the schema is stripped (step 2). Each
+fixture keeps its expected meaning, now asserted on the translated and loaded archive.
+
+**The one thing that cannot stay:** the file *name*. NOMAD's own archive parser claims
+`*.archive.yaml` and loads it straight into the schema, which no longer understands the pretty
+form. Old files are renamed to `*.stability.yaml`.
+
+**Verified in step 5, not built:** a plugin parser *could* claim pretty `*.archive.yaml` files.
+`nomad.parsing.parsers` appends every plugin parser before `TabularDataParser` and
+`ArchiveParser`, and `match_parser` returns the first match. A name pattern alone would take
+every other plugin's archive files too, so it would need a content pattern as well, for
+example `mainfile_contents_re` matching `StabilityProtocol`. Bare files would then also pass
+through the translator, which is harmless because `translate(bare) == bare`. This is left for
+review, since it changes which files the plugin claims.
+
+### 13.2 What moves out of the schema
+
+| Today (file) | Only there so the YAML reads well? | Goes to |
+|---|---|---|
+| `Subroutine.m_update_from_dict`, `utils.with_m_def` (D11a): `channel:` fills in `m_def` | yes. `archive.yaml` carries `m_def`, because it is generated. | translator |
+| `ChannelCommand.m_update_from_dict`, `_route_hold` (D19b): `hold` goes to `voltage` | yes | translator |
+| `hold: open_circuit` becomes `open_circuit: true` | yes | translator. `numberless()` itself stays in the schema (13.4). |
+| `StabilityUnitAwareFloat(named={'dark': …})` (D8a): `dark` becomes `0 W/m^2` | yes | translator |
+| `StabilityUnitAwareFloat`, `UNREADABLE_VALUES`, `StabilityUnitAwareSection` (D19): `'65 °C'` becomes `338.15` | yes | translator. `units.py` keeps the pure parser and loses the datatype. |
+| `variable` quantity, inferred from the setpoint | yes. Which field is set already says it. | translator (dropped from the schema) |
+| `channel` quantity, `CHANNELS` enum (D20) | yes. `m_def` names the class, and the class is the axis. | translator: `channel:` stays an authored word, resolved to a class. Dropped from the schema (13.5 b). |
+| `CHANNEL_CLASSES` (word → class) | yes | translator |
+| `Variable.field` / `setpoint_field`, the `hold` quantity | yes. Each variable's field carries its own name (13.5 d). | translator: `hold` is an authored word only |
+| `available_variables` | largely: the ELN shows it | dropped (13.5 c) |
+| unknown-key detection (§9 pitfall, planned) | yes | translator, where it is a plain set difference |
+
+**Not moved:** the `sample_every` / `sampling_rate` pair. Both are stored (13.5 a). Deriving
+one from the other holds for any archive, including an ELN edit that sets only one, so it stays
+in the schema's `normalize()`. The translator only reads the units of whichever was written.
+
+### 13.3 What stays in the schema
+
+- **The tree:** `StabilityProtocol`, `ChannelSettings`, `PlannedActivityStep`
+  (deriving from NOMAD's own `ActivityStep`, §2, §13.6 step 8), `MeasurementStep` → the
+  per-channel classes, `SubroutineStep` / `Routine`, `commands`
+  (`SubSection`, `repeats=True`), `mode`, `duration`, `name`.
+- **One plain quantity per variable, named after the variable:**
+  `temperature = Quantity(type=np.float64, unit='K')`,
+  `irradiance` (`W/m^2`), `voltage` / `current` / `resistance`, `bend_radius`, `strain`. Plus
+  `open_circuit: bool`, `spectrum: str`, `monitor: bool`, and **both** `sample_every` (`s`) and
+  `sampling_rate` (`Hz`).
+- **Derivations that hold for any archive, in `normalize()`:** whichever of `sample_every` and
+  `sampling_rate` is missing is computed from the other. The same method is kept as today.
+- **Semantic checks in `normalize()`**, because they hold for any archive:
+  - R4, overlapping commands. It groups by the command's class instead of by `channel`.
+  - R5, commands that never run.
+  - A command loaded as the base `MeasurementStep`, which names no axis. This replaces the
+    "command without a `channel`" check.
+  - One setpoint per control group (§4.2, not yet built).
+- **The capability tables** (`ControlGroup`, a frozen dataclass, and `control_groups` on each
+  channel class, D4c). The semantic checks read them, and so does the translator, which imports them
+  (13.5 c). Every question about variables is asked of `ControlGroup`
+  (`variables_of`, `numberless_of`), never of the channel command.
+
+**What this deletes from the schema:** both `m_update_from_dict` overrides, `utils.py`, the
+`StabilityUnitAwareFloat` datatype and its `m_cache` bookkeeping, `StabilityUnitAwareSection`,
+`CHANNELS` and the `channel` quantity, `CHANNEL_CLASSES` (moved), `units.py` (moved),
+`variable`, `available_variables`, and `Variable.field` / `setpoint_field`. Of
+`ChannelCommand.normalize` only the sampling derivation is left. `routine.py` shrinks from 438
+lines to roughly 200. Every remaining schema line is ordinary NOMAD, so the **verified** caveats
+in D11a, D19 and §9 stop being load-bearing for the schema.
+
+### 13.4 The translator
+
+The translator lives in the plugin's own `parsers/` package, next to the parser that is its
+only user. It works on plain dicts and never builds sections. It reads the schema's
+*definitions* only: class paths for `m_def`, each quantity's declared `unit` (the only source
+of units), and `control_groups`.
+
+```
+parsers/
+  parser.py      StabilityYamlParser, the thin NOMAD wrapper below
+  translate.py   translate(doc) / translate_section(dct, cls) -> Translation(archive, problems):
+                 the tree walk, m_def dispatch, hold routing, units, unknown keys
+  channels.py    CHANNEL_CLASSES (`temperature` -> TemperatureChannelCommand), and the named
+                 words per field: `dark` -> irradiance 0 W/m^2
+  units.py       moved from schema_packages/, minus the datatype
+```
+
+`numberless` (the words that stand for no number, such as `open_circuit`) stays on
+`ControlGroup` in the schema. It is a fact about the device. Only the spelling
+`hold: open_circuit` belongs to the translator.
+
+- **Errors are collected, never raised.** `Problem(path='routine.commands[3].hold', message=…)`
+  replaces `m_cache[UNREADABLE_VALUES]`. Each message says where in the file it happened,
+  which today's section-local complaints cannot.
+- **It is strict where NOMAD is silent.** An unknown key is a problem with a did-you-mean,
+  not a dropped key.
+- **It is testable without NOMAD.** A test gives it a dict and gets back a dict and a list.
+
+**Naming: this is a *parser*, not a normalizer.** In NOMAD a `Normalizer` runs on an archive
+that already exists. Turning a raw upload file into an archive is a `MatchingParser`'s job.
+The plugin already has a parser template (`parsers/parser.py`). The wrapper is thin:
+
+```python
+class StabilityYamlParser(MatchingParser):          # mainfile_name_re=r'.*\.stability\.ya?ml$'
+    def parse(self, mainfile, archive, logger, child_archives=None):
+        translation = translate(yaml.safe_load(open(mainfile)))
+        for problem in translation.problems:
+            logger.error(problem.message, path=problem.path)
+        archive.data = StabilityProtocol.m_from_dict(translation.archive['data'])
+```
+
+`archive.yaml` as a *file* is then the translator's output, dumped. It is used as the golden
+file in tests. There is no command line: the plugin is only what NOMAD loads. The upload
+itself needs only the `.stability.yaml` (see 13.5 f).
+
+### 13.5 Decisions — settled in review
+
+| | Question | Decision |
+|---|---|---|
+| a | Which sampling field does the bare schema store? | **Both**, `sample_every` (`s`) and `sampling_rate` (`Hz`). Whichever is missing is calculated from the other, in the schema's `normalize()`, because that holds for any archive (13.2). |
+| b | Keep the `channel` enum in the bare schema, now that `m_def` names the class? | **No.** The class is the axis. `channel:` survives only as an authored word, which the translator resolves to a class. D20's point, no free strings and no paths, still holds in the file. |
+| c | Where do `control_groups` live? | **On each channel class** (D4c unchanged). The translator imports them. `available_variables` is dropped. |
+| d | Single-variable channels: field named `hold`, or after the variable? | **After the variable** (`temperature`, `irradiance`). Every channel is uniform, `Variable.field` goes away, and `hold` is a translator-only word. |
+| e | ELN edits lose `'65 °C'` text input. | **Accepted.** NOMAD's numeric widget with unit switching takes its place. |
+| f | Should the parser fill `archive.data` directly, or write an `.archive.yaml` into the upload? | **Directly.** Writing a file would create a second entry for the same protocol. |
+
+### 13.6 Order, each step reviewed on its own
+
+The order is chosen so the compatibility check (13.1a) exists **before** anything is deleted,
+and no step leaves the old format unreadable for longer than one review.
+
+1. **Design.md only.** Mark D4c (`Variable.field`), D8a, D11a, D19, D19a, D19b, D20 and §9 as
+   superseded where 13.2 says so, and update §10's layout.
+2. **Freeze the old format.** Move the pretty files to `tests/data/*.stability.yaml`. Collect
+   every authored input from today's tests as fixtures, each with the meaning it must keep.
+   Add the test that `schema_packages/` does not import `authoring/`. For now the fixtures
+   are still loaded by the current schema, so everything stays green.
+3. **Translator, pure Python, written against the current schema.** Four substeps, each with
+   its own tests:
+   - 3a: `m_def` dispatch and the tree walk, with `translate(bare) == bare`;
+   - 3b: units, through `units.parse`;
+   - 3c: `hold` routing and named words;
+   - 3d: unknown keys with did-you-mean.
+   Each fixture from step 2 must translate without problems.
+4. **Bare schema.** Delete what 13.2 lists and rename the single-variable fields (13.5 d).
+   Write the golden `*.archive.yaml` files in the bare form. The fixture tests now go
+   file → translator → schema and must keep every meaning from step 2. Schema tests load only
+   bare dicts. `test_units.py` keeps the parser tests and drops the datatype tests.
+5. **Parser and entry point.** Replace the `NewParser` template. Add an end-to-end test that
+   parses a `.stability.yaml`, runs normalize, and checks that problems are logged with their
+   path. **Verified:** `ArchiveParser` matches only `.*(archive|metainfo)\.(json|yaml|yml)$`, so
+   `.stability.yaml` reaches this parser through NOMAD's own matching (tested). Whether
+   pretty `*.archive.yaml` files can be claimed is answered in 13.1a.
+6. **Back to §10's roadmap.** States, the expander and the timeline build on the bare schema,
+   and each new authoring convenience lands in the translator.
+7. **Kept strictly a plugin (after review).** The separate `authoring/` package of steps 2–5
+   was folded into `parsers/`, since it only serves the parser, and its `__main__.py`
+   command line was dropped. The one-way dependency is now `parsers/` → `schema_packages/`.
+8. **The tree's base now derives from NOMAD's own `ActivityStep` (after review).**
+   `RoutineCommand` → `PlannedActivityStep(ActivityStep)` (`basesections.v2`, §2), gaining
+   `name`, `start_time` (left unset — protocol time stays relative to t₀, carried by
+   `duration`) and `description` for free, and declaring `duration` itself, since
+   `ActivityStep` does not. `ChannelCommand` → `MeasurementStep`, `Subroutine` →
+   `SubroutineStep`; `Routine` keeps its name (D11). Nothing about the tree's shape,
+   `commands`, or the checks in `normalize()` changes — only the names and the base.
+
+---
+
+## 14. One `PlannedMonitorControlStep`, variables as sections, the protocol as steps
+
+**Status: settled in review (14.4), built in the order of 14.5.** It supersedes 13.5 b (the class
+is the axis), the per-channel classes of D19a, `ControlGroup` / `control_groups` (D4c), D8a's
+separate list of words standing for no number, the `channel` amendment of D20, and
+`channel_settings` / `routine` as parts of the schema. The bare-schema/parser split of §13 is
+unchanged.
+
+### 14.1 The idea
+
+Today an axis is a class. Adding one touches four places: a `*ChannelCommand` class, a
+`ChannelSettings` slot, `CHANNEL_CLASSES` and `NAMED_VALUES` in `parsers/channels.py`.
+
+Instead:
+
+- **one step class, `PlannedMonitorControlStep`.** It names its axis in `variable_set` and holds
+  what it commands in a single `variable` sub-section;
+- **one small section class per variable** (`schema_packages/variables.py`). Each declares its one
+  unit-ful `setpoint` in NOMAD's unit system, exactly as the channel commands' quantities do today,
+  plus the physical properties that belong to it (`Irradiance.spectrum`);
+- **the variable sets as data** (`schema_packages/variable_sets.py`). A new variable is one small
+  class and one registry line; a new axis is one registry entry;
+- **the protocol is only `steps`.** `channel_settings` and `routine` stay words of the authored
+  YAML, and the parser turns them into steps.
+
+A **`VariableSet`** is one physical degree of freedom. Its variables are alternative ways to
+command it, not independent settings: voltage, current, resistance and open circuit are tied by
+the cell's I–V curve. A step commands at most one of them, which the single `variable` sub-section
+makes structural.
+
+A **`Variable`** knows its unit (on its `setpoint`), whether an instrument reads it back
+(`monitored`), and its **alternative setpoints**: words that stand for a value (`dark` → 0 W/m²).
+A variable without a `setpoint` stands for no number at all (`OpenCircuit`); it is commanded by
+being there (D8a).
+
+```python
+# schema_packages/variables.py — NOMAD sections
+class Variable(ArchiveSection):
+    alternative_setpoints: Mapping[str, float] = {}  # class data, in the setpoint's unit
+    monitored: bool = True                           # False: set, never read back
+    def is_commanded(self) -> bool                   # has a setpoint, or needs none
+
+class Temperature(Variable):   setpoint = Quantity(type=np.float64, unit='K')
+class Irradiance(Variable):    setpoint [W/m^2], spectrum: str; alternative_setpoints = {'dark': 0}
+class Voltage [V], Current [A], Resistance [ohm] (monitored = False), OpenCircuit (no setpoint)
+class BendRadius [m], Strain [dimensionless]
+
+# schema_packages/variable_sets.py — plain data
+@dataclass(frozen=True)
+class VariableSet:
+    name: str
+    variables: tuple[type[Variable], ...]
+    tied_by: str | None = None
+
+VARIABLE_SETS = {temperature: (Temperature,), irradiation: (Irradiance,),
+                 electrical_load: (Voltage, Current, Resistance, OpenCircuit),
+                 bending: (BendRadius,), stretching: (Strain,)}
+```
+
+### 14.2 The schema
+
+```python
+class PlannedMonitorControlStep(PlannedProcessStep):
+    variable_set   MEnum(*VARIABLE_SETS)   # the axis
+    variable       SubSection(Variable)    # what is commanded, if anything; m_def picks the class
+    monitor, sample_every, sampling_rate   # unchanged
+
+class PlannedSubroutineStep(PlannedProcessStep)     # unchanged: mode, commands
+class StabilityProtocol(PlannedProcess, EntryData)  # steps only (PlannedProcess.steps)
+```
+
+`Routine`, `ChannelSettings`, `channel_commands.py` and `ControlGroup` are deleted.
+
+**Verified** (scratch test): a non-repeating `SubSection(section_def=Variable)` loads whichever
+subclass the entry's `m_def` names, keeps its unit, and writes the `m_def` back, so it
+round-trips. An empty `OpenCircuit` round-trips as `{m_def: …}`. A protocol's own `normalize()`
+needs an `EntryArchive` with `metadata`, not `None`.
+
+**Checks in `normalize()`**, because they hold for any archive:
+
+- A missing `variable_set` is derived from the `variable`'s class, like the sampling pair. A
+  `variable` of another set, or a bare `Variable` of no set, is an error, and so is a step with no
+  `variable_set` at all. This replaces "a command built as the base class names no axis".
+- R4 groups sibling steps by `variable_set`: in a block's `commands`, and now also in the
+  protocol's `steps`, which run in sequence.
+- R5 (never runs) and the sampling derivation are unchanged.
+
+### 14.3 The parser
+
+- `channel_settings: {temperature: {...}}` becomes one step per slot, **first in `steps`, without a
+  `duration`**: a condition that holds for the whole protocol (D13). Authored `steps:` follow, then
+  `routine:` as a `PlannedSubroutineStep`. The routine's commands sit one block deeper, so they win
+  for their span: D4b's precedence, now by lexical scope. R4 compares siblings only, so it does
+  not fire.
+- `channel: temperature` → `variable_set: temperature`. `channel: mechanical` becomes `bending` or
+  `stretching`, chosen by the variable written.
+- `hold`, `variable: voltage`, and the variable as its own key (`voltage: 0.8 V`,
+  `open_circuit: true`) become the `variable` sub-section; `spectrum` moves into its `Irradiance`.
+  Alternative setpoints are read from `Variable.alternative_setpoints`. `hold: open_circuit` names
+  the variable that needs no number.
+- An entry whose `m_def` names one of the four deleted channel classes is read as that channel, so
+  §13's bare archives still translate. NOMAD's own `ArchiveParser` cannot load those old files any
+  more (13.1a's caveat); the golden files are regenerated.
+- `parsers/channels.py` keeps only authoring words: the variable keys (`bend_radius` →
+  `BendRadius`), the channel words (`mechanical` → two sets), and the old class names.
+
+### 14.4 Decisions — settled in review
+
+| | Question | Decision |
+|---|---|---|
+| a | Where does a setpoint's value live? | One unit-ful field per variable, in NOMAD's unit system: a small `Variable` subclass per variable, each with its `setpoint`. |
+| b | `channel_settings` | Not part of the schema any more; an authored word only. The parser turns it into leading steps, and the protocol is only `steps`. `routine` goes the same way. |
+| c | `spectrum` | A property field of its variable (`Irradiance.spectrum`), like any other physical property. |
+| d | Mechanical | Split into `bending` and `stretching`. |
+| e | `control: str` | Dropped: whether a set is controlled is derived from whether its variable is commanded (D8). |
+| f | Class name | `PlannedMonitorControlStep`. |
+
+### 14.5 Order
+
+Tests and ruff run after every step, against a stated expectation.
+
+1. **Design.md** (this section).
+2. **`variables.py` and `variable_sets.py`**, with tests on them alone. Nothing else changes.
+3. **The switch**, in one step, because the protocol's shape changes under every test at once.
+   `PlannedMonitorControlStep` takes `variable_set` / `variable`; `Routine`, `ChannelSettings`,
+   `channel_commands.py` and `ControlGroup` go; the parser emits the new form; the golden files are
+   regenerated. Every test moves to the new shape, and the compatibility suite (13.1a) keeps every
+   meaning.
+4. **§10's layout**, and the superseded decisions marked.
+
+---
+
+## 15. Plain monitor/control steps, no physics in the schema
+
+**Status: settled in review, built.** It supersedes §14's `variables.py`, `variable_sets.py`,
+`variable_set` / `variable`, the alternative setpoints, `OpenCircuit`, `monitored` and
+`tied_by`. §14's protocol-as-steps and the parser's `channel_settings` / `routine` stay.
+
+### 15.1 The idea
+
+The schema describes data only. Physics is logic: which quantities are tied, what `dark` means,
+which of a load's quantities an instrument reads. It belongs in a `normalize()` once it is
+needed, or in the parser, not in the shape of the data model.
+
+- **`PlannedMonitorControlStep`** (`routine.py`) carries two tags, `monitor` and `control`, a
+  `setpoint` with no unit on the base, and `sample_every` / `sampling_rate`.
+- **`steps.py`** holds one subclass per quantity. Each only fixes the unit of its `setpoint`:
+  `TemperatureStep` (K), `IrradianceStep` (W/m², plus `spectrum`), `VoltageStep` (V),
+  `CurrentStep` (A), `ResistanceStep` (Ω), `BendRadiusStep` (m), `StrainStep` (dimensionless).
+  **Verified** (scratch test): a subclass may redeclare `setpoint` with a unit, the base's stays
+  unit-less, and the step round-trips.
+- **The class is the axis again.** R4 groups sibling steps by class; a bare
+  `PlannedMonitorControlStep` names no quantity and is reported.
+- **`estimated_duration` replaces `duration`** for planning: R4, R5 and D13's episodes read it.
+  `ProcessStep.duration` is left for what actually happened.
+- **A block's list is `steps`**, like the protocol's.
+
+### 15.2 The parser
+
+- `channel` and a variable (`variable:` or its key) choose the step class; `hold` or the key
+  becomes `setpoint`, and a written setpoint sets `control: true`.
+- `duration` → `estimated_duration` and `commands` → `steps`, on every step.
+- A channel with several variables and no setpoint (`electrical_load: {monitor: true}`) becomes
+  one step per variable, each with the same tags.
+- `dark` stays an authoring word of the parser (`IrradianceStep`, setpoint 0).
+- `open_circuit` has no place in the schema: it is reported, and its step left out. The example
+  file keeps it, so its translation carries exactly that one problem.
+
+### 15.3 Calls made while building, for review
+
+| | Call | Why |
+|---|---|---|
+| a | The base stays in `routine.py`; the subclasses live in `steps.py`, which imports it | The block's checks need the base; the other direction would be an import cycle. |
+| b | Class names `TemperatureStep`, `IrradianceStep`, … | One class per quantity, named as the step it is. |
+| c | The parser sets `control: true` with a setpoint; `normalize()` checks nothing about the tags | Logic is added later, when needed (15.1). |
+| d | A channel logged without a setpoint becomes one step per variable | The schema no longer knows which of a load's quantities are read back. |
+| e | `open_circuit` is reported and its step left out | It is a pre-defined setpoint with no field to go to. |
+| f | `dark` is kept, in the parser | It is an authoring word only; the schema stores `0`. |
+
+### 15.4 Steps fitted to their block, and the shared checks
+
+**R6 — a step that would outlast its block is shortened.** When a block has an
+`estimated_duration`, its `normalize()` fits the steps into it:
+
+- in a `sequential` block, the step during which the time runs out is shortened to the time left;
+- in a `parallel` block, every step longer than the block is shortened to the block's length;
+- a step with no time left at all is not touched: R5 already warns that it never runs;
+- a step without a duration is not touched either. It is a condition and already lasts exactly
+  as long as the block (D13); giving it a duration would make it an episode that takes a turn.
+
+This is a repair, where R4 and R5 only report (D13a). Each shortening is therefore logged as a
+warning that names the step, both lengths and the block.
+
+**The checks live in `schema_packages/utils.py`** — R4 (`report_overlapping_steps`), R5
+(`report_steps_that_never_run`) and R6 (`fit_steps_to_duration`) — because a block
+(`routine.py`) and the protocol (`protocol.py`) run them the same way. They are plain functions
+over steps. `utils.py` imports no schema module, since `routine.py` imports it; it recognises a
+monitor/control step by its `setpoint` field instead of by its class.
+
+**The protocol does the same with its own `steps`**, which run in sequence: R4, R5 and R6
+against its `estimated_duration`.
+
+**A missing `estimated_duration` is derived from the steps**, for a block and for the protocol,
+as D13 already says a block without one lasts as long as what it contains: the sum of the steps'
+durations in a sequential list, the longest in a parallel block. Steps without a duration are
+conditions and add nothing; with no duration among the steps it stays empty. NOMAD normalizes
+nested sections first (verified), so a nested block's derived duration is in place before its
+parent adds it up. It is a derivation, like the sampling pair, so it is not logged.
+`normalize_steps(section, mode, logger)` in `utils.py` runs all four for both.
+
+### 15.5 `PlannedProcess` and `PlannedProcessStep` moved to `general.py`
+
+Both are extensions of NOMAD's own base classes only — `was_executed` and the `estimated_*`
+fields the plan/record split needs (§14.1) — and name no PV concept, unlike everything else in
+`routine.py` and `protocol.py`. Moved out to say so: `general.py` imports only NOMAD and
+`nomad.common`, and both `PlannedMonitorControlStep` (`routine.py`) and `StabilityProtocol`
+(`protocol.py`) import from it, the same class either way. `PlannedProcessStep` is defined first
+in the file, so `PlannedProcess.steps` (`SubSection(section_def=PlannedProcessStep, ...)`) can
+reference it directly, without a `SectionProxy` string reference.
+
+### 15.6 `mode` renamed to `execution_mode`
+
+`PlannedSubroutineStep.mode` is now `execution_mode`, to say plainly that it is *how the block
+runs its steps*, not a mode of the block itself. `mode` stays a readable authoring word: `RENAMED`
+in the translator (§15.2) maps it to `execution_mode`, the same as `duration` /
+`estimated_duration` and `commands` / `steps`, so old files keep loading and the bare archive
+always shows the current name.

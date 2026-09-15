@@ -1,38 +1,27 @@
-from nomad.datamodel.data import ArchiveSection, EntryData
-from nomad.datamodel.metainfo.basesections import BaseSection
-from nomad.metainfo import SchemaPackage, SubSection
+from nomad.datamodel.data import EntryData
+from nomad.metainfo import SchemaPackage
 
-from nomad_pv_stability_measurements.schema_packages.channel_commands import (
-    ElectricalLoadChannelCommand,
-    IrradiationChannelCommand,
-    MechanicalChannelCommand,
-    TemperatureChannelCommand,
-)
-from nomad_pv_stability_measurements.schema_packages.routine import Routine
+# The protocol's steps name these classes; importing them registers them with NOMAD.
+from nomad_pv_stability_measurements.schema_packages.general import PlannedProcess
+from nomad_pv_stability_measurements.schema_packages.utils import normalize_steps
 
 m_package = SchemaPackage()
 
 
-class ChannelSettings(ArchiveSection):
+class StabilityProtocol(PlannedProcess, EntryData):
+    """A PV stability test protocol: the steps that run, in order.
+
+    The first steps usually set what holds for the whole run: monitor/control steps
+    without an `estimated_duration`. For increased reability,
+    `.stability.yaml` distinguishes `channel_settings` and `routine`. However, in the schema,
+    they are all just different steps, and the protocol's own steps run in sequence as assumed by the
+    parent classes.
     """
-    The baseline: one optional block per channel, holding for the whole run.
 
-    A routine command on the same channel overrides it for that command's span.
-    A channel with no block is unregulated and unlogged — which is also what it
-    is wherever nothing says otherwise.
-    """
-
-    temperature = SubSection(section_def=TemperatureChannelCommand)
-    irradiation = SubSection(section_def=IrradiationChannelCommand)
-    electrical_load = SubSection(section_def=ElectricalLoadChannelCommand)
-    mechanical = SubSection(section_def=MechanicalChannelCommand)
-
-
-class StabilityProtocol(BaseSection, EntryData):
-    """A PV stability test protocol: channel settings and the routine that runs."""
-
-    channel_settings = SubSection(section_def=ChannelSettings)
-    routine = SubSection(section_def=Routine)
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        # The protocol's own steps run in sequence, like a sequential block's (§15.4).
+        normalize_steps(self, 'sequential', logger)
 
 
 m_package.__init_metainfo__()

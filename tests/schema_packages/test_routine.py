@@ -1,160 +1,99 @@
+"""The steps and the block, tested on bare dicts: `m_def` written out, numbers in the
+declared unit (Design.md §15.1). How an authored file gets here is tests/parsers."""
+
 import os
 
 import pytest
-from nomad import utils
 from nomad.client import normalize_all, parse
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.channel_commands import (
-    CHANNEL_CLASSES,
-    ElectricalLoadChannelCommand,
-    IrradiationChannelCommand,
-    MechanicalChannelCommand,
-    TemperatureChannelCommand,
-)
-from nomad_pv_stability_measurements.schema_packages.protocol import ChannelSettings
+from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
 from nomad_pv_stability_measurements.schema_packages.routine import (
-    CHANNELS,
-    ChannelCommand,
-    RoutineCommand,
-    Subroutine,
+    PlannedMonitorControlStep,
+    PlannedSubroutineStep,
+)
+from nomad_pv_stability_measurements.schema_packages.activity_steps import (
+    Current,
+    Irradiance,
+    Resistance,
+    Temperature,
+    Voltage,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+BLOCK = PlannedSubroutineStep
 
 
-def test_every_channel_has_a_settings_slot():
-    slots = ChannelSettings.m_def.all_sub_sections
+def entry(cls, **fields) -> dict:
+    """One section as the bare archive writes it, naming its class."""
+    return {'m_def': f'{cls.__module__}.{cls.__name__}', **fields}
 
-    assert tuple(slots) == CHANNELS
+
+@pytest.mark.parametrize(
+    ('written', 'derived', 'expected'),
+    [
+        ({'sample_every': 60}, 'sampling_rate', 1 / 60),
+        ({'sampling_rate': 10}, 'sample_every', 0.1),
+    ],
+)
+def test_both_sampling_figures_are_stored(normalized, written, derived, expected):
+    # Whichever the archive holds, the other is calculated from it (13.5 a).
+    step = normalized(Temperature.m_from_dict(written))
+
+    assert getattr(step, derived).magnitude == pytest.approx(expected)
 
 
-def test_settings_carry_conditions_for_the_whole_run():
-    channel = TemperatureChannelCommand.m_from_dict(
-        {'hold': '65 °C', 'monitor': True, 'sample_every': '60 s'}
+def test_both_kinds_of_step_share_one_base():
+    assert issubclass(PlannedMonitorControlStep, PlannedProcessStep)
+    assert issubclass(BLOCK, PlannedProcessStep)
+    assert {'name', 'estimated_duration'} <= set(
+        PlannedProcessStep.m_def.all_quantities
     )
 
-    # The file writes the unit, the field holds the number, and there is only the
-    # one field (D19).
-    assert channel.hold.to(ureg.degC).magnitude == pytest.approx(65)
-    assert channel.monitor is True
-    assert channel.sample_every.to(ureg.second).magnitude == pytest.approx(60)
-    assert channel.sampling_rate is None
 
-    channel.normalize(None, utils.get_logger(__name__))
+def test_only_monitor_control_steps_carry_tags():
+    tags = {'monitor', 'control', 'setpoint', 'sample_every', 'sampling_rate'}
 
-    # Whichever of the two the file wrote, the other follows from it.
-    assert channel.sample_every.to(ureg.second).magnitude == pytest.approx(60)
-    assert channel.sampling_rate.to(ureg.hertz).magnitude == pytest.approx(1 / 60)
+    assert tags <= set(PlannedMonitorControlStep.m_def.all_quantities)
+    assert tags.isdisjoint(BLOCK.m_def.all_quantities)
 
 
-def test_a_channel_slot_holds_one_block_and_needs_no_m_def():
-    settings = ChannelSettings.m_from_dict({'temperature': {'hold': '65 °C'}})
+def test_a_step_built_as_the_base_names_no_quantity(normalized, log):
+    normalized(PlannedMonitorControlStep(name='stray'))
 
-    assert isinstance(settings.temperature, TemperatureChannelCommand)
-    assert settings.temperature.hold.to(ureg.degC).magnitude == pytest.approx(65)
-
-
-def test_settings_are_optional():
-    assert ChannelSettings().temperature is None
+    [error] = log.errors
+    assert 'stray is a bare `PlannedMonitorControlStep`' in error
 
 
-def test_only_channel_commands_carry_conditions():
-    # The vocabulary sits on ChannelCommand, so a settings block has it and a
-    # block does not — that is what splitting the two classes bought.
-    conditions = {'monitor', 'sample_every', 'sampling_rate'}
-
-    assert conditions <= set(ChannelCommand.m_def.all_quantities)
-    assert conditions <= set(TemperatureChannelCommand.m_def.all_quantities)
-    assert conditions.isdisjoint(Subroutine.m_def.all_quantities)
-    # `hold` is the exception: its dimension is the axis's, so only the axis's own
-    # class declares it, and it knows the unit (D19a).
-    assert 'hold' not in ChannelCommand.m_def.all_quantities
-    assert str(TemperatureChannelCommand.m_def.all_quantities['hold'].unit) == 'kelvin'
-
-
-def test_both_kinds_of_command_share_one_base():
-    assert issubclass(ChannelCommand, RoutineCommand)
-    assert issubclass(Subroutine, RoutineCommand)
-    assert 'name' in RoutineCommand.m_def.all_quantities
-
-
-def test_asking_nothing_is_the_neutral_element():
-    # No setpoint means the channel is not regulated, which is also what it is
-    # wherever nothing says otherwise. Blank text asks nothing either, so it leaves
-    # the field unset rather than failing to parse (D19a).
-    assert TemperatureChannelCommand().asks_for_anything is False
-    assert (
-        TemperatureChannelCommand.m_from_dict({'hold': '65 °C'}).asks_for_anything
-        is True
-    )
-
-    for blank in ['', ' ', '\t', '\n']:
-        channel = TemperatureChannelCommand.m_from_dict({'hold': blank})
-
-        assert (channel.hold, channel.asks_for_anything) == (None, False)
-
-
-def test_channel_is_a_closed_vocabulary():
-    assert ChannelCommand(channel='temperature').channel == 'temperature'
-    with pytest.raises(ValueError):
-        ChannelCommand(channel='chuck_T')
-
-
-def test_monitored_follows_the_tag():
-    # No property wraps this: `monitor` is already the boolean, and §4.1 gives the name
-    # `monitored` to the list of variables a command logs (2d).
-    assert TemperatureChannelCommand().monitor is None
-    assert TemperatureChannelCommand.m_from_dict({'monitor': True}).monitor is True
-
-
-def test_a_block_commands_channels_through_its_commands_list():
-    node = Subroutine.m_from_dict(
-        {
-            'name': 'hot phase',
-            'commands': [{'channel': 'temperature', 'hold': '85 °C', 'monitor': True}],
-        }
-    )
-    command = node.commands[0]
-
-    assert isinstance(command, TemperatureChannelCommand)
-    assert (command.asks_for_anything, bool(command.monitor)) == (True, True)
-
-
-def test_two_commands_on_one_channel_are_not_merged(normalized, log):
-    # Not "hold and log": the second names the channel and asks nothing of it, which
-    # says *not regulated here* (D8). Siblings have equal scope, so nothing decides
-    # between them — a contradiction, not two halves of one command (D13a, R4).
+def test_two_steps_on_one_quantity_are_not_merged(normalized, log):
+    # Not "hold and log": siblings have equal scope, so nothing decides between them —
+    # a contradiction, not two halves of one step (D13a, R4).
     node = normalized(
-        Subroutine.m_from_dict(
+        BLOCK.m_from_dict(
             {
                 'name': 'hot phase',
-                'commands': [
-                    {'channel': 'temperature', 'hold': '85 °C'},
-                    {'channel': 'temperature', 'monitor': True},
+                'steps': [
+                    entry(Temperature, control=True, setpoint=358.15),
+                    entry(Temperature, monitor=True),
                 ],
             }
         )
     )
 
-    assert len(log.errors) == 1
-    assert 'overlap' in log.errors[0]
-    assert 'not merged' in log.errors[0]
-    # Reported, never repaired: the commands stay as authored.
-    assert [command.channel for command in node.commands] == [
-        'temperature',
-        'temperature',
-    ]
+    [error] = log.errors
+    assert '2 TemperatureStep steps overlap in hot phase' in error
+    assert 'not merged' in error
+    # Reported, never repaired: the steps stay as authored.
+    assert [step.monitor for step in node.steps] == [None, True]
 
 
-def test_two_commands_on_one_channel_may_be_truly_subsequent(normalized, log):
-    # Each has its own turn in a sequential block, so they never overlap (R4).
+def test_two_steps_on_one_quantity_may_be_truly_subsequent(normalized, log):
     normalized(
-        Subroutine.m_from_dict(
+        BLOCK.m_from_dict(
             {
-                'commands': [
-                    {'channel': 'temperature', 'hold': '25 °C', 'duration': '1 h'},
-                    {'channel': 'temperature', 'hold': '85 °C', 'duration': '500 h'},
+                'steps': [
+                    entry(Temperature, estimated_duration=3600),
+                    entry(Temperature, estimated_duration=7200),
                 ]
             }
         )
@@ -163,61 +102,62 @@ def test_two_commands_on_one_channel_may_be_truly_subsequent(normalized, log):
     assert log.errors == []
 
 
-def test_a_parallel_block_cannot_command_one_channel_twice(normalized, log):
-    # Durations do not help here: a parallel block runs its commands at the same time.
+def test_steps_on_different_quantities_do_not_overlap(normalized, log):
+    # Voltage and current are tied by the cell, but that is physics, and the schema
+    # holds none (§15.1).
     normalized(
-        Subroutine.m_from_dict(
+        BLOCK.m_from_dict(
+            {'steps': [entry(Voltage), entry(Current), entry(Irradiance)]}
+        )
+    )
+
+    assert log.errors == []
+
+
+def test_a_parallel_block_cannot_run_one_quantity_twice(normalized, log):
+    normalized(
+        BLOCK.m_from_dict(
             {
-                'mode': 'parallel',
-                'commands': [
-                    {'channel': 'temperature', 'hold': '25 °C', 'duration': '1 h'},
-                    {'channel': 'temperature', 'hold': '85 °C', 'duration': '1 h'},
+                'execution_mode': 'parallel',
+                'steps': [
+                    entry(Resistance, estimated_duration=3600),
+                    entry(Resistance, estimated_duration=3600),
                 ],
             }
         )
     )
 
-    assert len(log.errors) == 1
-    assert 'parallel' in log.errors[0]
+    [error] = log.errors
+    assert 'parallel' in error
 
 
-def test_a_command_the_block_leaves_no_time_for_is_flagged(normalized, log):
-    # Subsequent, so R4 is satisfied — but the block's own `duration` is spent before
-    # the second command's turn comes, so it is authored and never executed (R5).
+def test_a_step_the_block_leaves_no_time_for_is_flagged(normalized, log):
     normalized(
-        Subroutine.m_from_dict(
+        BLOCK.m_from_dict(
             {
                 'name': 'phase',
-                'duration': '500 h',
-                'commands': [
-                    {'channel': 'temperature', 'hold': '85 °C', 'duration': '500 h'},
-                    {
-                        'name': 'cool down',
-                        'channel': 'temperature',
-                        'hold': '25 °C',
-                        'duration': '1 h',
-                    },
+                'estimated_duration': 1800000,
+                'steps': [
+                    entry(Temperature, estimated_duration=1800000),
+                    entry(Temperature, name='cool down', estimated_duration=3600),
                 ],
             }
         )
     )
 
     assert log.errors == []
-    assert len(log.warnings) == 1
-    assert 'cool down' in log.warnings[0]
-    assert 'never runs' in log.warnings[0]
+    [warning] = log.warnings
+    assert 'cool down never runs' in warning
 
 
-def test_a_command_without_a_duration_takes_no_turn(normalized, log):
-    # A condition holds for the whole span instead of queueing, so it spends none of
-    # the block's budget and what follows it still runs (D13, R5).
+def test_a_step_without_an_estimated_duration_takes_no_turn(normalized, log):
     normalized(
-        Subroutine.m_from_dict(
+        BLOCK.m_from_dict(
             {
-                'duration': '500 h',
-                'commands': [
-                    {'name': 'warm', 'channel': 'temperature', 'hold': '85 °C'},
-                    {'name': 'phase', 'duration': '500 h'},
+                'estimated_duration': 1800000,
+                'steps': [
+                    entry(Temperature, name='warm', control=True, setpoint=358.15),
+                    entry(BLOCK, name='phase', estimated_duration=1800000),
                 ],
             }
         )
@@ -226,383 +166,162 @@ def test_a_command_without_a_duration_takes_no_turn(normalized, log):
     assert (log.errors, log.warnings) == ([], [])
 
 
-def test_a_command_carries_its_own_duration():
-    # No block is needed just to give a command a lifetime: `duration` is on
-    # RoutineCommand, so both kinds have it.
-    episode = TemperatureChannelCommand.m_from_dict(
-        {'channel': 'temperature', 'hold': '85 °C', 'duration': '24 h'}
-    )
-    block = Subroutine.m_from_dict({'name': 'phase', 'duration': '24 h'})
-
-    assert episode.duration.to(ureg.hour).magnitude == pytest.approx(24)
-    assert block.duration.to(ureg.hour).magnitude == pytest.approx(24)
-    # A command without one is a condition, not an episode.
-    assert ChannelCommand.m_from_dict({'channel': 'temperature'}).duration is None
+# R6: steps fitted to their block's duration (§15.4).
 
 
-def test_logging_is_orthogonal_to_the_setpoint():
-    # A channel nobody regulates can still be logged, and vice versa.
-    logged = TemperatureChannelCommand.m_from_dict({'monitor': True})
-
-    assert (logged.asks_for_anything, bool(logged.monitor)) == (False, True)
-
-
-def test_settings_take_no_time_varying_state():
-    # A ramp belongs in the routine, where time lives (Design.md §4.1).
-    assert 'ramp' not in TemperatureChannelCommand.m_def.all_properties
-
-
-def test_entry_loads_settings_and_a_command_that_overrides_them():
-    archive = parse(os.path.join(DATA_DIR, 'channels.archive.yaml'))[0]
-    normalize_all(archive)
-    settings = archive.data.channel_settings.temperature
-    command = archive.data.routine.commands[0]
-
-    assert settings.hold.to(ureg.degC).magnitude == pytest.approx(65)
-    assert settings.monitor is True
-    assert settings.sample_every.to(ureg.second).magnitude == pytest.approx(60)
-    # The command stands directly in `commands`, with its own duration — no
-    # block wrapped around it — and it is the temperature axis's own class (D19a).
-    assert isinstance(command, TemperatureChannelCommand)
-    assert command.channel == 'temperature'
-    assert command.hold.to(ureg.degC).magnitude == pytest.approx(85)
-    assert command.sampling_rate.to(ureg.hertz).magnitude == pytest.approx(10)
-    # `500 h` is hours, not Planck's constant (§6 step 2).
-    assert command.duration.to(ureg.hour).magnitude == pytest.approx(500)
-    # The second asks nothing of the channel — it only names it and a span.
-    assert archive.data.routine.commands[1].asks_for_anything is False
-
-
-def test_a_command_is_built_as_the_class_its_channel_names():
-    # The `channel:` value picks the class, not just the key: only the axis's own
-    # class declares `hold`, and NOMAD drops without a word what the class it builds
-    # does not declare (D19a, D11a).
-    node = Subroutine.m_from_dict(
-        {'commands': [{'channel': 'temperature', 'hold': '85 °C'}]}
-    )
-
-    assert isinstance(node.commands[0], TemperatureChannelCommand)
-    assert node.commands[0].hold.to(ureg.degC).magnitude == pytest.approx(85)
-
-
-def test_a_value_written_unreadably_is_reported_not_raised(normalized, log):
-    # The entry still loads: `normalize()` complains and the field stays unset (§7).
-    command = normalized(
-        TemperatureChannelCommand.m_from_dict(
-            {'hold': '85 °C', 'duration': 'a fortnight'}
+def test_a_step_that_outlasts_a_sequential_block_is_shortened(normalized, log):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'name': 'phase',
+                'estimated_duration': 3600,
+                'steps': [
+                    entry(Temperature, name='warm', estimated_duration=1800),
+                    entry(Temperature, name='hot', estimated_duration=3600),
+                ],
+            }
         )
     )
 
-    assert command.duration is None
-    assert command.hold.to(ureg.degC).magnitude == pytest.approx(85)
-    assert len(log.errors) == 1
-    assert 'duration' in log.errors[0]
-
-
-def test_a_bare_number_written_as_text_is_still_ambiguous(normalized, log):
-    # D6 survives the move: the file must say what unit it means.
-    command = normalized(TemperatureChannelCommand.m_from_dict({'duration': '500'}))
-
-    assert command.duration is None
-    assert 'bare number' in log.errors[0]
-
-
-def test_a_wrong_dimension_is_reported(normalized, log):
-    command = normalized(TemperatureChannelCommand.m_from_dict({'duration': '10 Hz'}))
-
-    assert command.duration is None
-    assert len(log.errors) == 1
-
-
-def test_the_archive_holds_a_number_that_reloads_unchanged():
-    # What the file writes with a unit, the archive keeps as a number in the unit the
-    # field declares — which is what buys search, plots and unit switching (D19).
-    data = TemperatureChannelCommand.m_from_dict(
-        {'hold': '85 °C', 'duration': '500 h'}
-    ).m_to_dict()
-
-    assert data['duration'] == pytest.approx(1800000)
-    assert data['hold'] == pytest.approx(358.15)
-    reloaded = TemperatureChannelCommand.m_from_dict(data)
-    assert reloaded.hold.to(ureg.degC).magnitude == pytest.approx(85)
-    assert reloaded.duration.to(ureg.hour).magnitude == pytest.approx(500)
-
-
-def test_a_corrected_value_clears_the_complaint(normalized, log):
-    # The ELN edits a field by setting it again, so a fixed typo must not keep
-    # reporting itself (§7 is idempotent).
-    command = TemperatureChannelCommand.m_from_dict({'duration': 'a fortnight'})
-    command.m_update_from_dict({'duration': '500 h'})
-    normalized(command)
-
-    assert command.duration.to(ureg.hour).magnitude == pytest.approx(500)
+    # The time runs out during `hot`, so only `hot` is shortened, to what is left.
+    assert [step.estimated_duration.magnitude for step in node.steps] == [1800, 1800]
+    [warning] = log.warnings
+    assert 'hot is shortened from 3600 s to 1800 s' in warning
+    assert 'phase' in warning
     assert log.errors == []
 
 
-def test_each_variable_declares_its_own_setpoint_unit():
-    # A setpoint cannot sit on ChannelCommand: it is kelvin on one axis and W/m² on the
-    # next, and volts, amps or ohms within one axis. That is why every variable carries
-    # its own unit-ful quantity on its own channel class (D19a, D19b).
-    units = {
-        (channel, variable): str(cls.m_def.all_quantities[declared.setpoint_field].unit)
-        for channel, cls in CHANNEL_CLASSES.items()
-        for variable, declared in cls.variables().items()
-    }
-
-    assert units == {
-        ('temperature', 'temperature'): 'kelvin',
-        ('irradiation', 'irradiance'): 'watt / meter ** 2',
-        ('electrical_load', 'voltage'): 'volt',
-        ('electrical_load', 'current'): 'ampere',
-        ('electrical_load', 'resistance'): 'ohm',
-        ('mechanical', 'bend_radius'): 'meter',
-        ('mechanical', 'strain'): 'dimensionless',
-    }
-
-
-def test_a_channel_with_one_variable_spells_its_setpoint_hold():
-    # There is no second variable to tell it from, so the axis's own name would only
-    # repeat the channel: `{channel: temperature, temperature: 65 °C}` (D19b).
-    assert TemperatureChannelCommand.variables()['temperature'].setpoint_field == 'hold'
-    assert IrradiationChannelCommand.variables()['irradiance'].setpoint_field == 'hold'
-    # A channel with several names each of them instead.
-    assert (
-        ElectricalLoadChannelCommand.variables()['voltage'].setpoint_field == 'voltage'
+def test_a_step_that_outlasts_a_parallel_block_is_shortened(normalized, log):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'name': 'fork',
+                'execution_mode': 'parallel',
+                'estimated_duration': 3600,
+                'steps': [
+                    entry(Temperature, name='long', estimated_duration=7200),
+                    entry(Irradiance, name='short', estimated_duration=1800),
+                ],
+            }
+        )
     )
-    assert MechanicalChannelCommand.variables()['strain'].setpoint_field == 'strain'
-    # Nothing is invented for a variable the channel does not have: the channel answers
-    # that part by not holding the name, and there is no Variable left to ask (D4c).
-    assert 'voltage' not in TemperatureChannelCommand.variables()
+
+    assert [step.estimated_duration.magnitude for step in node.steps] == [3600, 1800]
+    [warning] = log.warnings
+    assert 'long is shortened from 7200 s to 3600 s' in warning
 
 
-def test_a_named_setpoint_becomes_the_value_it_stands_for():
-    # `dark` is a setpoint somebody chose and reported, so it resolves to a number and
-    # the channel counts as controlled — as against nobody mentioning it at all (D8a).
-    channel = IrradiationChannelCommand.m_from_dict({'hold': 'dark'})
-
-    assert channel.hold.to(ureg.watt / ureg.meter**2).magnitude == pytest.approx(0)
-    assert channel.asks_for_anything is True
-
-
-def test_a_named_setpoint_belongs_to_one_channel(normalized, log):
-    # Per channel, never global: nothing on the temperature axis resolves `dark`, so it
-    # stays text, no unit reads it, and it is reported like any other typo (D8a, §7).
-    channel = normalized(TemperatureChannelCommand.m_from_dict({'hold': 'dark'}))
-
-    assert (channel.hold, channel.asks_for_anything) == (None, False)
-    assert len(log.errors) == 1
-    assert 'hold' in log.errors[0]
-
-
-def test_a_block_commands_the_irradiation_axis():
-    node = Subroutine.m_from_dict(
-        {
-            'commands': [
-                {'channel': 'irradiation', 'hold': '1 sun', 'spectrum': 'AM1.5G'}
-            ]
-        }
+def test_a_condition_keeps_lasting_as_long_as_its_block(normalized, log):
+    # Giving it a duration would turn it into an episode that takes a turn (D13).
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'estimated_duration': 3600,
+                'steps': [entry(Temperature, monitor=True)],
+            }
+        )
     )
-    command = node.commands[0]
 
-    assert isinstance(command, IrradiationChannelCommand)
-    assert command.hold.to(ureg.watt / ureg.meter**2).magnitude == pytest.approx(1000)
-    assert command.spectrum == 'AM1.5G'
+    assert node.steps[0].estimated_duration is None
+    assert log.warnings == []
 
 
-def test_entry_loads_a_named_setpoint_and_a_sun():
-    # The whole path, through NOMAD's own parse: a word stands for a value, and a unit
-    # this registry does not define is read anyway (D8a, §6 step 4).
+# A missing duration is derived from the steps (§15.4).
+
+
+def test_a_sequential_block_lasts_as_long_as_its_steps_together(normalized, log):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'steps': [
+                    entry(Irradiance, monitor=True),
+                    entry(Temperature, estimated_duration=1800),
+                    entry(Voltage, estimated_duration=3600),
+                ]
+            }
+        )
+    )
+
+    # The condition adds nothing: it lasts as long as the block (D13).
+    assert node.estimated_duration.magnitude == pytest.approx(5400)
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_a_parallel_block_lasts_as_long_as_its_longest_step(normalized):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'execution_mode': 'parallel',
+                'steps': [
+                    entry(Temperature, estimated_duration=7200),
+                    entry(Irradiance, estimated_duration=1800),
+                ],
+            }
+        )
+    )
+
+    assert node.estimated_duration.magnitude == pytest.approx(7200)
+
+
+def test_a_block_whose_steps_have_no_duration_stays_without_one(normalized):
+    node = normalized(
+        BLOCK.m_from_dict({'steps': [entry(Temperature, monitor=True)]})
+    )
+
+    assert node.estimated_duration is None
+
+
+def test_a_nested_block_is_measured_before_its_parent_adds_it_up(normalized):
+    # NOMAD normalizes nested sections first (verified), so `inner` has its length when
+    # the outer block adds it up.
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'steps': [
+                    entry(
+                        BLOCK,
+                        name='inner',
+                        steps=[
+                            entry(Temperature, estimated_duration=1800),
+                            entry(Irradiance, estimated_duration=1800),
+                        ],
+                    ),
+                    entry(Voltage, estimated_duration=600),
+                ]
+            }
+        )
+    )
+
+    assert [step.estimated_duration.magnitude for step in node.steps] == [3600, 600]
+    assert node.estimated_duration.magnitude == pytest.approx(4200)
+
+
+def test_entry_loads_the_bare_archive_file():
     archive = parse(os.path.join(DATA_DIR, 'channels.archive.yaml'))[0]
     normalize_all(archive)
-    settings = archive.data.channel_settings.irradiation
-    dark = archive.data.routine.commands[2]
-    irradiance = ureg.watt / ureg.meter**2
+    *settings, soak = archive.data.steps
 
-    assert settings.hold.to(irradiance).magnitude == pytest.approx(1000)
-    assert settings.spectrum == 'AM1.5G'
-    assert isinstance(dark, IrradiationChannelCommand)
-    assert dark.hold.to(irradiance).magnitude == pytest.approx(0)
-    # Deliberately dark is a condition somebody chose, so it counts as controlled.
-    assert dark.asks_for_anything is True
-
-
-def test_a_value_is_read_however_the_field_is_set():
-    # Parsing lives in the field's own type, which `Quantity.__set__` calls on every
-    # assignment, so there is no path that stores text unread — a plain attribute
-    # assignment included, which the earlier section-level override could not reach.
-    assigned = TemperatureChannelCommand()
-    assigned.hold = '65 °C'
-    updated = TemperatureChannelCommand()
-    updated.m_update_from_dict({'hold': '65 °C'})
-
-    for channel in [
-        assigned,
-        updated,
-        TemperatureChannelCommand(hold='65 °C'),
-        TemperatureChannelCommand.m_from_dict({'hold': '65 °C'}),
-    ]:
-        assert channel.hold.to(ureg.degC).magnitude == pytest.approx(65)
-
-
-def test_a_named_setpoint_belongs_to_its_own_field(normalized, log):
-    # The word table is declared on the quantity, not on the section, so `dark` is
-    # readable where an irradiance belongs and nowhere else (D8a).
-    command = normalized(IrradiationChannelCommand.m_from_dict({'duration': 'dark'}))
-
-    assert command.duration is None
-    assert 'not a number followed by a unit' in log.errors[0]
-
-
-def test_entry_loads_a_setpoint_written_beside_its_variable():
-    # The whole path through NOMAD's own parse: the §8 spelling reaches the variable's
-    # own quantity, and a word standing for no number reaches its own field (D19b).
-    archive = parse(os.path.join(DATA_DIR, 'channels.archive.yaml'))[0]
-    normalize_all(archive)
-    held, released = archive.data.routine.commands[3:5]
-
-    assert isinstance(held, ElectricalLoadChannelCommand)
-    assert held.voltage.to(ureg.volt).magnitude == pytest.approx(0.8)
-    assert held.variable == 'voltage'
-    assert (released.open_circuit, released.asks_for_anything) == (True, True)
-    # The settings log the channel without ever asking it for a value (D9).
-    settings = archive.data.channel_settings.electrical_load
-    assert (settings.asks_for_anything, bool(settings.monitor)) == (False, True)
-
-
-def test_a_channel_says_what_it_can_be_asked_for():
-    # The class table is the capability (§4.1 role 2): what a routine may ask of this
-    # axis, and therefore what validation has to accept. Two questions, asked of two
-    # objects — the channel says whether it has the variable at all, and the variable
-    # says what may be done with it (D4c).
-    assert MechanicalChannelCommand.variables()['strain'].control is True
-    assert MechanicalChannelCommand.variables().get('humidity') is None
-    # Nothing measures a load resistance: it is set, and a voltage and a current come
-    # back — so it is controllable without being monitorable.
-    resistance = ElectricalLoadChannelCommand.variables()['resistance']
-    assert (resistance.control, resistance.monitor) == (True, False)
-    assert ElectricalLoadChannelCommand.variables()['voltage'].monitor is True
-
-
-def test_control_groups_say_what_one_device_cannot_set_independently():
-    # A cell's I–V curve ties its three: commanding one leaves the others measured.
-    load = ElectricalLoadChannelCommand.group_of('voltage')
-
-    assert load.names == frozenset({'voltage', 'current', 'resistance'})
-    assert 'I-V curve' in load.tied_by
-    # Bending a device says nothing about stretching it, so each stands alone.
-    assert MechanicalChannelCommand.group_of('strain').names == frozenset({'strain'})
-    assert [group.names for group in MechanicalChannelCommand.control_groups] == [
-        frozenset({'bend_radius'}),
-        frozenset({'strain'}),
+    # What held for the whole run comes first, as conditions without a duration.
+    assert [type(step) for step in settings] == [
+        Temperature,
+        Irradiance,
+        Voltage,
+        Current,
+        Resistance,
     ]
-    assert MechanicalChannelCommand.group_of('voltage') is None
+    temperature, irradiance, voltage = settings[:3]
+    assert temperature.estimated_duration is None
+    assert (temperature.control, temperature.monitor) == (True, True)
+    assert temperature.setpoint.to(ureg.degC).magnitude == pytest.approx(65)
+    assert irradiance.spectrum == 'AM1.5G'
+    assert (voltage.control, voltage.setpoint, voltage.monitor) == (None, None, True)
 
-
-def test_the_groups_are_the_only_table_a_channel_writes():
-    # `variables()` and `numberless()` are flattened from `control_groups` whenever
-    # they are asked for, so there is no second table to disagree with it (D4c) — and
-    # no class-creation hook building one behind the declaration's back.
-    assert list(ElectricalLoadChannelCommand.variables()) == [
-        'voltage',
-        'current',
-        'resistance',
+    assert isinstance(soak, BLOCK)
+    assert [type(step) for step in soak.steps] == [
+        Temperature,
+        Temperature,
+        Irradiance,
+        Voltage,
     ]
-    assert ElectricalLoadChannelCommand.numberless() == ('open_circuit',)
-    assert MechanicalChannelCommand.numberless() == ()
-    # A word standing for no number releases the whole group, so the group owns it.
-    assert ElectricalLoadChannelCommand.control_groups[0].numberless == (
-        'open_circuit',
-    )
-    # And each variable is stamped with the keyword it was written under, which is how
-    # it can answer `setpoint_field` without being told its own name.
-    assert ElectricalLoadChannelCommand.variables()['current'].name == 'current'
-
-
-def test_a_setpoint_is_written_either_as_the_variable_or_as_hold():
-    # One field, two spellings: §8 writes `variable:` beside `hold:`, and the variable
-    # as the key says the same thing without an index to keep in sync (D19b).
-    as_key = MechanicalChannelCommand.m_from_dict({'strain': '2 %'})
-    as_hold = MechanicalChannelCommand.m_from_dict(
-        {'variable': 'strain', 'hold': '2 %'}
-    )
-
-    for command in [as_key, as_hold]:
-        assert command.strain.magnitude == pytest.approx(0.02)
-        assert command.asks_for_anything is True
-    # `hold` is not a field of its own — it was moved, not stored beside the variable.
-    assert 'hold' not in MechanicalChannelCommand.m_def.all_quantities
-    assert as_hold.m_to_dict()['strain'] == pytest.approx(0.02)
-
-
-def test_a_hold_with_no_variable_to_go_to_is_reported(normalized, log):
-    # `0.8 V` fits voltage and nothing else, but the schema does not guess from the
-    # dimension — the file says which variable it means, or hears about it (§7).
-    command = normalized(ElectricalLoadChannelCommand.m_from_dict({'hold': '0.8 V'}))
-
-    assert command.setpoints == {}
-    assert len(log.errors) == 1
-    assert 'voltage, current, resistance' in log.errors[0]
-
-
-def test_a_single_variable_channel_needs_no_variable_named():
-    # Only one thing `hold` could mean, in both directions: it needs no name, and
-    # `variable` is filled in from the setpoint that is set.
-    command = MechanicalChannelCommand.m_from_dict({'bend_radius': '5 mm'})
-    command.normalize(None, utils.get_logger(__name__))
-
-    assert command.variable == 'bend_radius'
-    assert command.setpoints == {'bend_radius': command.bend_radius}
-    assert command.available_variables == ['bend_radius', 'strain']
-
-
-def test_a_variable_the_channel_does_not_have_is_reported(normalized, log):
-    command = normalized(
-        MechanicalChannelCommand.m_from_dict({'variable': 'voltage', 'strain': '2 %'})
-    )
-
-    # Reported, never repaired: the setpoint stands as authored.
-    assert command.strain.magnitude == pytest.approx(0.02)
-    assert len(log.errors) == 1
-    assert 'bend_radius, strain' in log.errors[0]
-
-
-def test_a_word_standing_for_no_number_is_still_a_setpoint():
-    # `open_circuit` is neither 0 V nor 0 A, so no unit-ful field can hold it — but
-    # asking for it is asking for something, so the channel counts as controlled (D8a).
-    for command in [
-        ElectricalLoadChannelCommand.m_from_dict({'hold': 'open_circuit'}),
-        ElectricalLoadChannelCommand.m_from_dict({'open_circuit': True}),
-    ]:
-        assert command.open_circuit is True
-        assert command.setpoints == {}
-        assert command.asks_for_anything is True
-
-
-def test_the_electrical_load_reads_the_isos_l_2_form():
-    # §8's JV sweep command, minus the sweep: the variable is named beside the value.
-    node = Subroutine.m_from_dict(
-        {
-            'commands': [
-                {
-                    'channel': 'electrical_load',
-                    'variable': 'voltage',
-                    'hold': '0.8 V',
-                    'sampling_rate': '10 Hz',
-                }
-            ]
-        }
-    )
-    command = node.commands[0]
-
-    assert isinstance(command, ElectricalLoadChannelCommand)
-    assert command.voltage.to(ureg.volt).magnitude == pytest.approx(0.8)
-    assert command.sampling_rate.to(ureg.hertz).magnitude == pytest.approx(10)
-
-
-def test_the_schema_still_declares_a_plain_float():
-    # The type is ours, but it serializes as what it is — a float64 with a unit — so
-    # an archive, the GUI and any other client need know nothing about it (D19).
-    hold = TemperatureChannelCommand.m_def.all_quantities['hold']
-
-    assert hold.type.serialize_self() == {'type_kind': 'numpy', 'type_data': 'float64'}
-    assert str(hold.unit) == 'kelvin'
+    hot = soak.steps[0]
+    assert hot.estimated_duration.to(ureg.hour).magnitude == pytest.approx(500)

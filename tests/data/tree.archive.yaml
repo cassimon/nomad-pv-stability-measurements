@@ -1,13 +1,19 @@
 data:
   m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
   name: my protocol
-  routine:
+  steps:
+  - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
     name: example
-    commands:
-      - name: A
-      - name: fork
-        mode: parallel
-        commands:
-          - name: B
-          - name: C
-      - name: D
+    steps:
+    - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+      name: A
+    - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+      name: fork
+      execution_mode: parallel
+      steps:
+      - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+        name: B
+      - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+        name: C
+    - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+      name: D

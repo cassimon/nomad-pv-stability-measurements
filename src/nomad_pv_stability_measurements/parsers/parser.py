@@ -10,16 +10,20 @@ if TYPE_CHECKING:
         BoundLogger,
     )
 
-from nomad.config import config
-from nomad.datamodel.metainfo.workflow import Workflow
+import yaml
 from nomad.parsing.parser import MatchingParser
 
-configuration = config.get_plugin_entry_point(
-    'nomad_pv_stability_measurements.parsers:parser_entry_point'
-)
+from nomad_pv_stability_measurements.parsers.translate import translate
+from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 
 
-class NewParser(MatchingParser):
+class StabilityYamlParser(MatchingParser):
+    """An authored `.stability.yaml`, translated into the bare archive (Design.md §13).
+
+    Only glue: the translator reads the file, the schema loads what it produced, and
+    NOMAD's own normalize pass checks the meaning afterwards.
+    """
+
     def parse(
         self,
         mainfile: str,
@@ -27,6 +31,9 @@ class NewParser(MatchingParser):
         logger: 'BoundLogger',
         child_archives: dict[str, 'EntryArchive'] = None,
     ) -> None:
-        logger.info('NewParser.parse', parameter=configuration.parameter)
-
-        archive.workflow2 = Workflow(name='test')
+        with open(mainfile, encoding='utf-8') as file:
+            translation = translate(yaml.safe_load(file))
+        for problem in translation.problems:
+            logger.error(problem.message, path=problem.path)
+        if 'data' in translation.archive:
+            archive.data = StabilityProtocol.m_from_dict(translation.archive['data'])

@@ -1,0 +1,13 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: my protocol
+  routine:
+    name: example
+    commands:
+      - name: A
+      - name: fork
+        mode: parallel
+        commands:
+          - name: B
+          - name: C
+      - name: D
