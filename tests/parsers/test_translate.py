@@ -10,18 +10,18 @@ from nomad_pv_stability_measurements.parsers.translate import (
     translate,
     translate_section,
 )
-from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
-from nomad_pv_stability_measurements.schema_packages.routine import (
-    PlannedSubroutineStep,
-)
 from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    BendRadiusStep,
+    BendRadius,
     Current,
     Irradiance,
     Resistance,
-    StrainStep,
+    Strain,
     Temperature,
     Voltage,
+)
+from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
+from nomad_pv_stability_measurements.schema_packages.routine import (
+    PlannedSubroutineStep,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
@@ -66,7 +66,7 @@ def test_a_channel_and_a_variable_name_the_step_class():
             entry(
                 BLOCK,
                 name='phase',
-                steps=[entry(BendRadiusStep, control=True, setpoint=2.0)],
+                steps=[entry(BendRadius, control=True, setpoint=2.0)],
             ),
         ]
     }
@@ -274,7 +274,7 @@ def test_a_variable_the_channel_does_not_have_is_a_problem():
     )
 
     assert translation.archive == {
-        'steps': [entry(StrainStep, control=True, setpoint=pytest.approx(0.02))]
+        'steps': [entry(Strain, control=True, setpoint=pytest.approx(0.02))]
     }
     [problem] = translation.problems
     assert 'bend_radius, strain' in problem.message

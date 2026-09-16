@@ -9,12 +9,12 @@ from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.parsers.parser import StabilityYamlParser
-from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 from nomad_pv_stability_measurements.schema_packages.activity_steps import (
     Irradiance,
     Temperature,
     Voltage,
 )
+from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 #: The routine's block comes after the five settings steps (§15.2).

@@ -69,6 +69,13 @@ class PlannedProcess(Process):
         description='How long this is planned to take, for a process not yet run. '
         'Use `datetime` / `end_time` once it actually has.',
     )
+    estimated_end_time = Quantity(
+            type=np.float64,
+            unit='s',
+            description='How long this is planned to take, for a process not yet run. '
+            'Use `datetime` / `end_time` once it actually has.',
+        )
+    
     steps = SubSection(
         section_def=PlannedProcessStep,
         repeats=True,

@@ -242,6 +242,10 @@ class _Words:
             retired.append((_at(path, 'hold'), hold.strip()))
             hold = None
         variable = authored.get('variable')
+        if isinstance(variable, str) and variable.strip() in RETIRED_WORDS:
+            retired.append((_at(path, 'variable'), variable.strip()))
+            authored.pop('variable')
+            variable = None
         return cls(
             channel=authored.pop('channel', None),
             named=authored.pop('variable') if isinstance(variable, str) else None,

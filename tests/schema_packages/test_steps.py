@@ -3,12 +3,14 @@
 import pytest
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.routine import (
-    PlannedMonitorControlStep,
-)
 from nomad_pv_stability_measurements.schema_packages.activity_steps import (
     Irradiance,
+    OxygenFraction,
     Temperature,
+    WaterVaporFraction,
+)
+from nomad_pv_stability_measurements.schema_packages.routine import (
+    PlannedMonitorControlStep,
 )
 
 STEPS = PlannedMonitorControlStep.__subclasses__()
@@ -16,13 +18,15 @@ STEPS = PlannedMonitorControlStep.__subclasses__()
 
 def test_each_step_class_is_one_quantity():
     assert [cls.__name__ for cls in STEPS] == [
-        'TemperatureStep',
-        'IrradianceStep',
-        'VoltageStep',
-        'CurrentStep',
-        'ResistanceStep',
-        'BendRadiusStep',
-        'StrainStep',
+        'Temperature',
+        'Irradiance',
+        'Voltage',
+        'Current',
+        'Resistance',
+        'BendRadius',
+        'Strain',
+        'WaterVaporFraction',
+        'OxygenFraction',
     ]
 
 
@@ -37,13 +41,16 @@ def test_each_setpoint_uses_nomads_unit_system():
     }
 
     assert units == {
-        'TemperatureStep': 'kelvin',
-        'IrradianceStep': 'watt / meter ** 2',
-        'VoltageStep': 'volt',
-        'CurrentStep': 'ampere',
-        'ResistanceStep': 'ohm',
-        'BendRadiusStep': 'meter',
-        'StrainStep': 'dimensionless',
+        'Temperature': 'kelvin',
+        'Irradiance': 'watt / meter ** 2',
+        'Voltage': 'volt',
+        'Current': 'ampere',
+        'Resistance': 'ohm',
+        'BendRadius': 'meter',
+        'Strain': 'dimensionless',
+        # The atmosphere is a volume ratio, so its unit is the fraction (§15.7).
+        'WaterVaporFraction': 'dimensionless',
+        'OxygenFraction': 'dimensionless',
     }
     # The base names no quantity, so its setpoint has no unit (verified, §15.1).
     assert PlannedMonitorControlStep.m_def.all_quantities['setpoint'].unit is None
@@ -74,3 +81,30 @@ def test_the_schema_holds_no_physics():
         properties = set(cls.m_def.all_properties)
         assert {'variable_set', 'variable', 'channel', 'hold'}.isdisjoint(properties)
         assert not hasattr(cls, 'alternative_setpoints')
+
+
+# The atmosphere, as an absolute volume ratio (§15.7).
+
+
+def test_a_glovebox_and_the_open_air_land_on_one_axis():
+    # ppm and % are both dimensionless here, so one field takes either and stores one
+    # number — no kinds, no conversion table.
+    glovebox = OxygenFraction(setpoint=0.1 * ureg.ppm)
+    air = OxygenFraction(setpoint=21 * ureg.percent)
+
+    assert glovebox.setpoint.magnitude == pytest.approx(1e-7)
+    assert air.setpoint.magnitude == pytest.approx(0.21)
+
+
+def test_an_atmosphere_step_round_trips_as_the_fraction():
+    data = {'monitor': True, 'control': True, 'setpoint': 5e-4}
+
+    assert WaterVaporFraction.m_from_dict(data).m_to_dict() == data
+
+
+def test_no_atmosphere_step_knows_relative_humidity():
+    # It is a property of the water content and the temperature together, so it is no
+    # field of either step; a `normalize()` can derive it once something needs it.
+    for cls in [WaterVaporFraction, OxygenFraction]:
+        assert 'humidity' not in set(cls.m_def.all_properties)
+        assert str(cls.m_def.all_quantities['setpoint'].unit) == 'dimensionless'

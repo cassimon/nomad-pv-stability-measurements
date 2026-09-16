@@ -4,16 +4,16 @@ import pytest
 from nomad.client import normalize_all, parse
 from nomad.datamodel import EntryArchive, EntryMetadata
 
+from nomad_pv_stability_measurements.schema_packages.activity_steps import (
+    Irradiance,
+    Temperature,
+    Voltage,
+)
 from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 from nomad_pv_stability_measurements.schema_packages.routine import (
     PlannedMonitorControlStep,
     PlannedSubroutineStep,
-)
-from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    Irradiance,
-    Temperature,
-    Voltage,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')

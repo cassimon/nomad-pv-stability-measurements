@@ -7,17 +7,17 @@ import pytest
 from nomad.client import normalize_all, parse
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
-from nomad_pv_stability_measurements.schema_packages.routine import (
-    PlannedMonitorControlStep,
-    PlannedSubroutineStep,
-)
 from nomad_pv_stability_measurements.schema_packages.activity_steps import (
     Current,
     Irradiance,
     Resistance,
     Temperature,
     Voltage,
+)
+from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
+from nomad_pv_stability_measurements.schema_packages.routine import (
+    PlannedMonitorControlStep,
+    PlannedSubroutineStep,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')

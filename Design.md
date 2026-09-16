@@ -44,8 +44,8 @@ routine:                                   # ISOS-L-2 (full file in §8)
 | D4a | **`channel_settings:` carries each channel's run-wide conditions** — one optional block per channel: a setpoint (`hold`), a monitor tag with its rate, plus `limits`, regulation, instrument, spectrum … It holds wherever the routine is silent; a step overrides it for its span. **Only static conditions** live there — a constant `hold` is the settings' whole vocabulary; the time-varying shapes (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) are only ever set by the routine, never a field of a settings block (§4.1). |
 | D4b | **The routine overrides the settings, and the warning says where.** One precedence rule for states and for monitoring: the innermost step that speaks wins for its span, the settings hold everywhere else. Because a shadowed setting is invisible in the file, `normalize()` reports it: a *warning* per (channel, field) that some step overrides, and a louder one for a setting that is **never** in effect. This must also be said in plain words in the field descriptions and the README (§10). |
 | D4c | *Superseded by §14: `ControlGroup` and `control_groups` are gone. Which variables are alternatives for one degree of freedom is `VariableSet` data (`variable_sets.py`), and each variable is its own small section with its unit-ful `setpoint`.* *Amended by §13: `Variable.field` / `setpoint_field` are gone. Every variable's quantity carries the variable's own name, and `hold` is a word only the translator reads. Amended again after §13: every method about variables lives on `ControlGroup`, and `ChannelCommand` only declares `control_groups`. `ControlGroup.variables_of(groups)` and `ControlGroup.numberless_of(groups)` flatten a channel's groups. `group_of`, `names` and `__contains__` are gone, since nothing but tests called them. `Variable` is gone too. Once `unit`, `display` and `name` had nothing reading them, it held only two flags that defaulted to `True`, and only `resistance` ever differed. `ControlGroup` is now a frozen dataclass of static data: `variables` (names, in ELN order), `unmonitored` (set, never read back), `numberless` and `tied_by`. Every variable is controllable. A variable that is monitored but never commanded would return as one more tuple (`uncontrolled`), not as a class. The instances stay on each channel class, beside the quantities they name, and not in `schema_packages/__init__.py`: that module is NOMAD's entry point, which must not import metainfo at configuration time, and moving them there would split the table from its quantities.* **A channel declares one table, and the control group is it.** `control_groups` is the whole of a channel's capability (§4.1 role 2): each `ControlGroup` **owns** its variables, so the grouping cannot name a variable that does not exist and `variables` is derived by flattening the groups in declaration order rather than written a second time — **on demand, by a classmethod that reads `control_groups`**. Not cached onto the class by an `__init_subclass__` hook, and not built in `normalize()`: D19b's `hold` rewriting runs while the entry loads, *before* any normalize, so a table built there would be built too late, and would have an instance writing state that belongs to the class. A channel has three variables at most; walking them costs nothing, and `control_groups` stays the only place the capability is either written or read. Group-level facts live on the group — which variables are tied, why (`tied_by`), and the words that stand for no number at all (`open_circuit` releases every variable the group ties, not one of them, D8a). Variable-level facts stay on the `Variable`, and are **asked of it**: `resistance` is settable but not readable *inside* the same group where `voltage` is both, so `control` / `monitor` cannot move up — and neither can they be re-exported as base-class predicates, since the channel's own part of the answer is just whether `variables` holds the name. The group stamps each variable with its own name when it takes it, which is what lets a `Variable` answer `setpoint_field` for itself (D19b). *Supersedes three parallel class tables (`variables`, `control_groups` as name-sets, `numberless`), which said one thing three times and could disagree.* |
-| D5 | **Variables have physical names** (`humidity`, `oxygen`, `temperature` …); **the unit selects the quantity kind** (relative, molar ratio, dew point …). Values stay in the kind they were given — no cross-kind conversion. |
-| D6 | **Every value is a unit string** (`65 °C`, `85 %RH`, `1 sun`), parsed and dimension-checked against its variable. **Ambiguity is an error:** bare numbers, and bare `%` on humidity/oxygen. The one documented convention: `ppm`/`ppb` are molar (ppmv) — the glovebox standard. The string is the *authored* form only: it is read into the field's own unit-ful quantity on the way in (D19). A bare number **written as text** stays an error; a plain YAML number is read in the quantity's declared unit — which is what NOMAD itself writes back when it serializes. |
+| D5 | **Variables have physical names** (`humidity`, `oxygen`, `temperature` …); **the unit selects the quantity kind** (relative, molar ratio, dew point …). Values stay in the kind they were given — no cross-kind conversion. *Amended by §15.7: the atmosphere has one kind only — an absolute volume ratio — so no unit selects a kind there, and `humidity` is retired as an authoring word.* |
+| D6 | **Every value is a unit string** (`65 °C`, `85 %RH`, `1 sun`), parsed and dimension-checked against its variable. **Ambiguity is an error:** bare numbers, and bare `%` on humidity/oxygen. The one documented convention: `ppm`/`ppb` are molar (ppmv) — the glovebox standard. The string is the *authored* form only: it is read into the field's own unit-ful quantity on the way in (D19). A bare number **written as text** stays an error; a plain YAML number is read in the quantity's declared unit — which is what NOMAD itself writes back when it serializes. *Amended by §15.7: with one kind on the atmosphere axis a bare `%` is no longer ambiguous there, and `%RH`, `wt%`, `ppmw`, `ppbw` are refused with what to write instead.* |
 | D7 | **The four ISOS stress axes are always reported.** Since the vocabulary is fixed (D4), this is structural: a channel no routine touches appears in the derived layers as *uncontrolled and unmonitored*. UV content is a property of the irradiation spectrum, not a channel; encapsulation belongs to the sample. |
 | D8 | *Amended after §13: `setpoints` and `asks_for_anything` are removed from `ChannelCommand`. Nothing outside tests called them, and §3 puts the expander on plain dataclasses. Deriving "asks for anything" (a setpoint, or a word standing for no number such as `open_circuit`) moves to the IR builder in step 3. The meaning below is unchanged.* **A command says what is *asked* of a channel; the control *state* is derived, never authored.** A `ChannelCommand` carries a setpoint (`hold`) or a time-varying shape (`ramp`, `cycle`, `tabulated`, `sweep`, `track`) and nothing that names a control mode. **Asking nothing is the neutral element**: a channel no command in scope touches is not regulated, which is also what it is wherever nothing says otherwise, so every channel still has a defined state at every instant (D7). Two booleans follow per channel, **computed over time when commands are expanded into a time series, not stored on a command**: **`controlled`** (some command in scope asks for a value) and **`monitored`** (a monitor tag is in effect) — timeline rows, plottable next to the values (§4.4). On a command itself, `controlled` is only "does this ask for anything" — and it is **spelled `asks_for_anything` there**, for two reasons. The same class also carries the derived `is_controlled` (§4.1), and two names one letter apart for two different questions is a misreading waiting to happen. And the question is an `any`, not an `all`: one setpoint out of a channel's three makes it true — asking for *more* than one is a contradiction (§4.2), not a fuller answer — while `open_circuit` makes it true with no setpoint at all, since a word standing for no number is still something somebody asked for (D8a). `has_setpoint` would have been wrong on both counts. *Supersedes `control = MEnum('off', 'hold', 'active')` (and, before that, the `uncontrolled`/`off` split): `hold` already said `hold`, and `active` was a label for time-varying behaviour that a single static command cannot know — a command is one clause, and what a channel is doing at hour 700 follows from all the clauses in scope. **Explicitly released** is still writable, structurally: a command that **names a channel and asks nothing of it** says "not regulated here" out loud, as against a channel nobody mentions (§4.1, "Untouched channels").* |
 | D8a | *Superseded in mechanism by §13: the words (`dark`, `hold: open_circuit`) are resolved by the translator (`parsers/channels.py`), not by the field's type. What they mean is unchanged, and `open_circuit` stays a boolean quantity of the schema.* **Named setpoints: a field may declare words that stand for values.** Irradiation's `hold` declares `dark` (= `0 W/m²`); the electrical load's declares `open_circuit`. They are written wherever a value is written — `hold: dark`, `cycle: {low: dark, high: 1 sun}`, `ramp: {from: dark, to: 1 sun}` — and the table is declared **on the field's own type**, `StabilityUnitAwareFloat(named={'dark': '0 W/m²'})`, which resolves the word **before** parsing it (D19, §6). *Resolution moved twice: out of `normalize()` when D19 made a word have to become a value before the field is set, and then off the section onto the field — a word belongs to the quantity it can be written into, not to every unit-ful field the section happens to declare, which is what kept `duration: dark` from reading as an irradiance.* Per field, never global: `dark` is meaningless on the temperature axis and is rejected there. Where a state section takes endpoints of the same dimension (`ramp: {from: dark}`, states.py), that section's own endpoint fields declare the same table. A name that stands for a number becomes one, so the timeline plots `dark` as 0 instead of a NaN hole; a name that stands for no number at all (`open_circuit` is neither 0 V nor 0 A) stays NaN, like `track`. **Asking for a named setpoint is asking for something**, so `controlled` is true — that is how "deliberately dark" is said out loud *and counted*, the one thing the old irradiation-only `off` state did that D8 alone does not (§4.1). **Spelled `dark`, never `off`:** a bare `off` is a YAML 1.1 boolean (§9), so that spelling arrives as `False` and would silently invert the very flag it exists to set — and `dark` is ISOS's own word. **There is no `on`:** `dark` has a defined value and an illuminated state does not, and the irradiance is exactly what ISOS reporting needs, so it is written as a number (`hold: 1 sun`). |
@@ -1281,8 +1281,10 @@ src/nomad_pv_stability_measurements/
     routine.py        PlannedMonitorControlStep (monitor, control, setpoint),
                       PlannedSubroutineStep (execution_mode, steps); the checks that
                       hold for any archive (R4, R5, the sampling pair) (§15.1)
-    steps.py          one PlannedMonitorControlStep per quantity, each fixing the unit
-                      of its setpoint (TemperatureStep, IrradianceStep, ...) (§15.1)
+    activity_steps.py one PlannedMonitorControlStep per quantity, each fixing the unit
+                      of its setpoint (Temperature, Irradiance, ..., plus the atmosphere
+                      pair WaterVaporFraction / OxygenFraction, dimensionless volume
+                      ratios) (§15.1, §15.7)
     utils.py          the checks a block and the protocol share: R4, R5, and R6, which
                       fits steps to their block's duration (§15.4)
     states.py         Ramp, Cycle, Tabulated, Sweep
@@ -1810,6 +1812,14 @@ nested sections first (verified), so a nested block's derived duration is in pla
 parent adds it up. It is a derivation, like the sampling pair, so it is not logged.
 `normalize_steps(section, mode, logger)` in `utils.py` runs all four for both.
 
+Because they are plain functions over steps, they are tested as such, in
+`tests/schema_packages/test_utils.py`: each called directly on a list of steps, without a
+`normalize()` pass around it. That suite is where the boundaries live — what counts as an
+overlap, what "never runs" means against what R6 only shortens, what a condition is exempt
+from, and that R4 and R5 leave the steps exactly as authored while R6 alone writes to them.
+`test_routine.py` and `test_protocol.py` keep only the check that a block and the protocol
+do run them.
+
 ### 15.5 `PlannedProcess` and `PlannedProcessStep` moved to `general.py`
 
 Both are extensions of NOMAD's own base classes only — `was_executed` and the `estimated_*`
@@ -1827,3 +1837,45 @@ runs its steps*, not a mode of the block itself. `mode` stays a readable authori
 in the translator (§15.2) maps it to `execution_mode`, the same as `duration` /
 `estimated_duration` and `commands` / `steps`, so old files keep loading and the bare archive
 always shows the current name.
+
+### 15.7 The atmosphere, as an absolute volume ratio
+
+**`WaterVaporFraction` and `OxygenFraction`** (`activity_steps.py`) are the atmosphere's two
+steps, monitored, controlled or both like every other. Each declares its `setpoint` as
+`unit='dimensionless'`: the volume ratio itself, the plain fraction.
+
+**Why a ratio, and not relative humidity.** `%RH` is no property of the atmosphere alone — the
+same water content is 85 %RH at 25 °C and something else at 85 °C. A step holding `85 %RH`
+would therefore mean a different amount of water beside every temperature step, two protocols
+run at different temperatures could not be compared on the number they wrote, and R4's check
+that two steps do not contradict each other would be comparing figures that are not the same
+kind of thing. An absolute ratio is also what the sensor in a glovebox actually reports. So
+relative humidity is not a setpoint; it can be derived in a `normalize()` from the water
+fraction and the temperature if anything ever needs it, which is where logic belongs (§15.1).
+
+**Why dimensionless, and not a unit per spelling.** `nomad.units.ureg` knows `ppm` (1e-6) and
+`%` (1e-2), both dimensionless (**verified**), so one field takes either and stores one number:
+`500 ppm` is 5e-4, `2 %` is 0.02, and a glovebox figure compares with a vol-% figure with no
+conversion table and no "kind" to record. For an ideal gas the volume fraction and the mole
+fraction are the same number, so D6's glovebox convention (`ppm` is by volume) needs no second
+axis. This replaces §6's multi-kind treatment of humidity and oxygen (relative / molar / mass,
+and the ambiguity error on a bare `%`): with one kind on the axis, a bare `%` is unambiguous.
+
+**The parser fills the registry's gaps the way §6 step 2 does for time** — through the
+`(factor, unit)` alias table, never `ureg.define()`, since the registry is shared: `ppb`,
+`ppmv`, `ppbv` → `ppm`, and `vol%`, `mol%` → `percent`. Spellings this schema does not record
+are refused loudly, each naming what to write instead: `%RH` and `RH`, and the mass ratios
+`wt%`, `ppmw`, `ppbw`, which are not volume ratios and are not silently converted into one.
+
+**`humidity` is a retired authoring word**, like `open_circuit` (§15.2). Written as a key or as
+`variable:`, it is reported with `water_vapor` as what to write, and its step left out rather
+than half-translated. `_Words.take` now recognises a retired word in all three places a word can
+stand: as a key, as `hold:`, and as `variable:`.
+
+**The channel** `atmosphere` groups `water_vapor` and `oxygen`, so `channel: atmosphere` with no
+setpoint becomes one monitored step per variable, exactly as every other channel does.
+
+**Left out, for review:** `balance_gas` (`N2`, `air`, `Ar`), which describes the atmosphere as a
+whole rather than either fraction and so belongs to neither step; and `total_pressure`, a third
+quantity of another dimension. Neither is needed to write a soak, and both are one class or one
+field away.

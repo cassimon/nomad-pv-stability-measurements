@@ -71,3 +71,43 @@ def test_a_sun_is_an_irradiance():
     assert parse('0.5 sun', irradiance).magnitude == pytest.approx(500)
     # What pint already reads correctly is left alone.
     assert parse('100 mW/cm^2', irradiance).magnitude == pytest.approx(1000)
+
+
+# Volume ratios (§15.7): one dimensionless axis for every spelling of a ratio.
+
+
+@pytest.mark.parametrize(
+    ('text', 'fraction'),
+    [
+        # What this registry already reads: `ppm` and `%`, both dimensionless.
+        ('500 ppm', 5e-4),
+        ('2 %', 0.02),
+        ('21 %', 0.21),
+        # What it does not: aliased as the two it does, never `ureg.define()` (§6 step 2).
+        ('100 ppb', 1e-7),
+        ('1000 ppmv', 1e-3),
+        ('50 ppbv', 5e-8),
+        ('21 vol%', 0.21),
+        ('5 mol%', 0.05),
+        # A ratio written as the division it is.
+        ('0.001 mol/mol', 0.001),
+    ],
+)
+def test_parse_volume_ratio(text, fraction):
+    assert parse(text, ureg.dimensionless).magnitude == pytest.approx(fraction)
+
+
+@pytest.mark.parametrize('text', ['85 %RH', '85 %rh', '30 RH'])
+def test_relative_humidity_is_refused_with_what_to_write(text):
+    # It depends on the temperature, so it is not a value of the atmosphere alone.
+    with pytest.raises(ValueError, match='not a volume ratio'):
+        parse(text, ureg.dimensionless)
+
+    with pytest.raises(ValueError, match='500 ppm'):
+        parse(text, ureg.dimensionless)
+
+
+@pytest.mark.parametrize('text', ['10 wt%', '5 ppmw', '5 ppbw'])
+def test_a_mass_ratio_is_refused_rather_than_read_as_a_volume_ratio(text):
+    with pytest.raises(ValueError, match='mass ratio'):
+        parse(text, ureg.dimensionless)

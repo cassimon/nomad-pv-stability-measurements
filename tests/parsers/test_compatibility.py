@@ -16,18 +16,20 @@ from nomad_pv_stability_measurements.parsers.translate import (
     translate,
     translate_section,
 )
+from nomad_pv_stability_measurements.schema_packages.activity_steps import (
+    BendRadius,
+    Current,
+    Irradiance,
+    OxygenFraction,
+    Resistance,
+    Strain,
+    Temperature,
+    Voltage,
+    WaterVaporFraction,
+)
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 from nomad_pv_stability_measurements.schema_packages.routine import (
     PlannedSubroutineStep,
-)
-from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    BendRadiusStep,
-    Current,
-    Irradiance,
-    Resistance,
-    StrainStep,
-    Temperature,
-    Voltage,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
@@ -159,7 +161,7 @@ def test_a_setpoint_is_written_either_as_the_variable_or_as_hold(load, log):
     ]:
         [step] = load(authored)
 
-        assert isinstance(step, StrainStep)
+        assert isinstance(step, Strain)
         assert step.setpoint.magnitude == pytest.approx(0.02)
     assert log.errors == []
 
@@ -167,7 +169,7 @@ def test_a_setpoint_is_written_either_as_the_variable_or_as_hold(load, log):
 def test_a_single_variable_needs_no_variable_named(load, log):
     [step] = load({'channel': 'mechanical', 'bend_radius': '5 mm'})
 
-    assert isinstance(step, BendRadiusStep)
+    assert isinstance(step, BendRadius)
     assert magnitude(step.setpoint, ureg.mm) == pytest.approx(5)
     assert log.errors == []
 
@@ -282,3 +284,56 @@ def test_a_variable_the_channel_does_not_have_is_reported(load, log):
     assert step.setpoint.magnitude == pytest.approx(0.02)
     [error] = log.errors
     assert 'bend_radius, strain' in error
+
+
+# The atmosphere, written as an absolute volume ratio (§15.7).
+
+
+def test_the_atmosphere_channel_logs_both_its_variables(load, log):
+    water, oxygen = load({'channel': 'atmosphere', 'monitor': True})
+
+    assert (type(water), type(oxygen)) == (WaterVaporFraction, OxygenFraction)
+    assert [step.monitor for step in (water, oxygen)] == [True, True]
+    assert log.errors == []
+
+
+def test_a_glovebox_figure_and_a_volume_percent_share_one_axis(load, log):
+    [glovebox] = load({'channel': 'atmosphere', 'oxygen': '0.1 ppm'})
+    [ambient] = load({'channel': 'atmosphere', 'oxygen': '21 vol%'})
+
+    assert (type(glovebox), glovebox.control) == (OxygenFraction, True)
+    assert glovebox.setpoint.magnitude == pytest.approx(1e-7)
+    assert ambient.setpoint.magnitude == pytest.approx(0.21)
+    assert log.errors == []
+
+
+def test_water_vapour_is_written_either_as_the_variable_or_as_hold(load, log):
+    for authored in [
+        {'channel': 'atmosphere', 'water_vapor': '500 ppm'},
+        {'channel': 'atmosphere', 'variable': 'water_vapor', 'hold': '500 ppm'},
+    ]:
+        [step] = load(authored)
+
+        assert isinstance(step, WaterVaporFraction)
+        assert step.setpoint.magnitude == pytest.approx(5e-4)
+    assert log.errors == []
+
+
+def test_humidity_is_reported_with_what_to_write_instead(load, log):
+    # `85 %RH` says nothing without the temperature it was measured at, so it is never
+    # translated into a ratio: the step is left out, as `open_circuit` is (§15.2).
+    for authored in [
+        {'channel': 'atmosphere', 'humidity': '85 %RH'},
+        {'channel': 'atmosphere', 'variable': 'humidity', 'hold': '85 %RH'},
+    ]:
+        assert load(authored) == []
+    assert ['water_vapor' in error for error in log.errors] == [True, True]
+
+
+def test_a_relative_humidity_value_on_the_water_axis_is_refused(load, log):
+    [step] = load({'channel': 'atmosphere', 'water_vapor': '85 %RH'})
+
+    # Reported, never repaired: the step stays, without a setpoint nobody can read.
+    assert (isinstance(step, WaterVaporFraction), step.setpoint) == (True, None)
+    [error] = log.errors
+    assert 'not a volume ratio' in error

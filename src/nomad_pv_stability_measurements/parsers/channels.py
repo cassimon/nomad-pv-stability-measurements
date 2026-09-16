@@ -5,13 +5,15 @@ class, `hold` becomes its `setpoint`, and a named word becomes the value it stan
 """
 
 from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    BendRadiusStep,
+    BendRadius,
     Current,
     Irradiance,
+    OxygenFraction,
     Resistance,
-    StrainStep,
+    Strain,
     Temperature,
     Voltage,
+    WaterVaporFraction,
 )
 
 #: The step class each variable key names.
@@ -21,8 +23,10 @@ VARIABLE_STEPS = {
     'voltage': Voltage,
     'current': Current,
     'resistance': Resistance,
-    'bend_radius': BendRadiusStep,
-    'strain': StrainStep,
+    'bend_radius': BendRadius,
+    'strain': Strain,
+    'water_vapor': WaterVaporFraction,
+    'oxygen': OxygenFraction,
 }
 
 #: The variables an authored `channel:` groups, in the order an author reads them.
@@ -31,6 +35,7 @@ CHANNEL_VARIABLES = {
     'irradiation': ('irradiance',),
     'electrical_load': ('voltage', 'current', 'resistance'),
     'mechanical': ('bend_radius', 'strain'),
+    'atmosphere': ('water_vapor', 'oxygen'),
 }
 
 #: Words a setpoint reads as a value, per step class. Never global: `dark` is an
@@ -38,7 +43,13 @@ CHANNEL_VARIABLES = {
 NAMED_SETPOINTS = {Irradiance: {'dark': 0.0}}
 
 #: Words the schema has no place for any more (§15), and why.
-RETIRED_WORDS = {'open_circuit': 'the terminals left open have no setpoint to hold'}
+RETIRED_WORDS = {
+    'open_circuit': 'the terminals left open have no setpoint to hold',
+    'humidity': 'the schema records the water in the atmosphere absolutely, as a '
+    'volume ratio — write `water_vapor: 500 ppm` or `water_vapor: 2 %`. An authored '
+    '`%RH` is not translated, since it says nothing without the temperature it was '
+    'measured at',
+}
 
 _CHANNEL_COMMANDS = 'nomad_pv_stability_measurements.schema_packages.channel_commands'
 
