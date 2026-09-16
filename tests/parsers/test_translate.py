@@ -10,14 +10,14 @@ from nomad_pv_stability_measurements.parsers.translate import (
     translate,
     translate_section,
 )
-from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    BendRadius,
-    Current,
-    Irradiance,
-    Resistance,
-    Strain,
-    Temperature,
-    Voltage,
+from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    HoldBendRadius,
+    HoldCurrent,
+    HoldIrradiance,
+    HoldResistance,
+    HoldStrain,
+    HoldTemperature,
+    HoldVoltage,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 from nomad_pv_stability_measurements.schema_packages.routine import (
@@ -62,11 +62,11 @@ def test_a_channel_and_a_variable_name_the_step_class():
     assert translation.problems == []
     assert translation.archive == {
         'steps': [
-            entry(Voltage, control=True, setpoint=0.8),
+            entry(HoldVoltage, control=True, setpoint=0.8),
             entry(
                 BLOCK,
                 name='phase',
-                steps=[entry(BendRadius, control=True, setpoint=2.0)],
+                steps=[entry(HoldBendRadius, control=True, setpoint=2.0)],
             ),
         ]
     }
@@ -75,7 +75,7 @@ def test_a_channel_and_a_variable_name_the_step_class():
 def test_an_entry_that_carries_its_m_def_keeps_it():
     authored = {
         'steps': [
-            entry(Voltage, control=True, setpoint=0.8, monitor=True),
+            entry(HoldVoltage, control=True, setpoint=0.8, monitor=True),
             entry(BLOCK, name='phase'),
         ]
     }
@@ -93,10 +93,10 @@ def test_an_unknown_channel_is_a_problem_and_the_entry_is_left_out():
 
 
 def test_a_channel_word_must_agree_with_the_class():
-    translation = steps(entry(Temperature, channel='irradiation'))
+    translation = steps(entry(HoldTemperature, channel='irradiation'))
 
     assert translation.archive == {'steps': []}
-    assert 'does not match Temperature' in translation.problems[0].message
+    assert 'does not match HoldTemperature' in translation.problems[0].message
 
 
 def test_an_unresolvable_m_def_is_a_problem():
@@ -121,7 +121,7 @@ def test_an_old_channel_class_is_read_as_its_channel():
     assert translation.archive == {
         'steps': [
             entry(
-                Temperature,
+                HoldTemperature,
                 control=True,
                 setpoint=358.15,
                 estimated_duration=3600.0,
@@ -171,7 +171,7 @@ def test_a_value_is_read_into_the_declared_unit():
     assert translation.archive == {
         'steps': [
             entry(
-                Current,
+                HoldCurrent,
                 control=True,
                 setpoint=pytest.approx(0.005),
                 estimated_duration=172800.0,
@@ -225,7 +225,7 @@ def test_hold_on_a_single_variable_channel_sets_that_step():
 
     assert translation.problems == []
     assert translation.archive == {
-        'steps': [entry(Temperature, control=True, setpoint=pytest.approx(338.15))]
+        'steps': [entry(HoldTemperature, control=True, setpoint=pytest.approx(338.15))]
     }
 
 
@@ -236,7 +236,7 @@ def test_hold_beside_a_variable_sets_that_step():
 
     assert translation.problems == []
     assert translation.archive == {
-        'steps': [entry(Voltage, control=True, setpoint=0.8)]
+        'steps': [entry(HoldVoltage, control=True, setpoint=0.8)]
     }
 
 
@@ -245,7 +245,7 @@ def test_a_named_word_becomes_the_value_it_stands_for():
 
     assert translation.problems == []
     assert translation.archive == {
-        'steps': [entry(Irradiance, control=True, setpoint=0.0)]
+        'steps': [entry(HoldIrradiance, control=True, setpoint=0.0)]
     }
 
 
@@ -253,8 +253,8 @@ def test_a_named_word_is_read_nowhere_else():
     temperature = steps({'channel': 'temperature', 'hold': 'dark'})
     duration = steps({'channel': 'irradiation', 'duration': 'dark'})
 
-    assert temperature.archive == {'steps': [entry(Temperature)]}
-    assert duration.archive == {'steps': [entry(Irradiance)]}
+    assert temperature.archive == {'steps': [entry(HoldTemperature)]}
+    assert duration.archive == {'steps': [entry(HoldIrradiance)]}
     # The problem quotes the key the file wrote, not the field it was moved to.
     assert temperature.problems[0].path == 'steps[0].hold'
     assert 'could not read `hold`' in temperature.problems[0].message
@@ -274,7 +274,7 @@ def test_a_variable_the_channel_does_not_have_is_a_problem():
     )
 
     assert translation.archive == {
-        'steps': [entry(Strain, control=True, setpoint=pytest.approx(0.02))]
+        'steps': [entry(HoldStrain, control=True, setpoint=pytest.approx(0.02))]
     }
     [problem] = translation.problems
     assert 'bend_radius, strain' in problem.message
@@ -291,7 +291,7 @@ def test_one_variable_set_twice_is_a_problem():
     )
 
     assert translation.archive == {
-        'steps': [entry(Voltage, control=True, setpoint=pytest.approx(0.7))]
+        'steps': [entry(HoldVoltage, control=True, setpoint=pytest.approx(0.7))]
     }
     assert 'both set voltage' in translation.problems[0].message
 
@@ -314,7 +314,7 @@ def test_a_channel_logged_as_a_whole_becomes_one_step_per_variable():
     assert translation.archive == {
         'steps': [
             entry(cls, monitor=True, sampling_rate=1.0)
-            for cls in (Voltage, Current, Resistance)
+            for cls in (HoldVoltage, HoldCurrent, HoldResistance)
         ]
     }
 
@@ -344,7 +344,7 @@ def test_spectrum_is_a_plain_field_of_the_irradiance_step():
     assert translation.archive == {
         'steps': [
             entry(
-                Irradiance,
+                HoldIrradiance,
                 control=True,
                 setpoint=pytest.approx(1000),
                 spectrum='AM1.5G',
@@ -357,7 +357,7 @@ def test_spectrum_is_no_field_of_another_step():
     translation = steps({'channel': 'temperature', 'spectrum': 'AM1.5G'})
 
     assert translation.problems[0].path == 'steps[0].spectrum'
-    assert 'not a field of Temperature' in translation.problems[0].message
+    assert 'not a field of HoldTemperature' in translation.problems[0].message
 
 
 # Keys NOMAD would drop without a word (§9).
@@ -387,11 +387,11 @@ def test_channel_settings_become_the_first_steps_and_the_routine_follows():
     assert [step['m_def'] for step in settings] == [
         m_def(cls)
         for cls in (
-            Temperature,
-            Irradiance,
-            Voltage,
-            Current,
-            Resistance,
+            HoldTemperature,
+            HoldIrradiance,
+            HoldVoltage,
+            HoldCurrent,
+            HoldResistance,
         )
     ]
     # Settings are conditions: they hold for the whole protocol (D13).
@@ -414,8 +414,8 @@ def test_authored_steps_sit_between_the_settings_and_the_routine():
 
     assert translation.problems == []
     assert [step['m_def'] for step in translation.archive['data']['steps']] == [
-        m_def(Temperature),
-        m_def(Irradiance),
+        m_def(HoldTemperature),
+        m_def(HoldIrradiance),
         m_def(BLOCK),
     ]
 

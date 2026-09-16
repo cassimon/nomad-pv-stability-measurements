@@ -17,8 +17,9 @@ class PlannedMonitorControlStep(PlannedProcessStep):
     """
     One quantity, monitored, controlled, or both.
 
-    Never used on its own: the subclass in `activity_steps.py` is the quantity, and fixes the
-    unit of its `setpoint`. What a setpoint means physically is no part of the schema
+    Never used on its own, and neither is either kind below: a subclass in
+    `hold_steps.py` or `ramp_steps.py` is the quantity, and fixes the unit of what it
+    holds or moves. What a value means physically is no part of the schema
     (Design.md §15.1). Without an `estimated_duration` the step is a condition holding
     for its block's whole span; the first steps of a protocol set, this way, what holds
     for the whole run.
@@ -30,12 +31,7 @@ class PlannedMonitorControlStep(PlannedProcessStep):
     )
     control = Quantity(
         type=bool,
-        description='Regulate this quantity to `setpoint`.',
-    )
-    setpoint = Quantity(
-        type=np.float64,
-        description='The value to regulate to. Each step class declares it in its own '
-        'unit.',
+        description='Regulate this quantity.',
     )
     sample_every = Quantity(
         type=np.float64,
@@ -58,12 +54,83 @@ class PlannedMonitorControlStep(PlannedProcessStep):
             self.sampling_rate = 1 / self.sample_every
         if self.sample_every is None and self.sampling_rate is not None:
             self.sample_every = 1 / self.sampling_rate
-        if type(self) is PlannedMonitorControlStep:
+        if type(self) in ABSTRACT_STEPS:
             logger.error(
-                f'{self.name or "<unnamed>"} is a bare `PlannedMonitorControlStep`, '
-                f'which names no quantity: use one of the step classes in '
-                f'`activity_steps.py`.'
+                f'{self.name or "<unnamed>"} is a bare '
+                f'`{type(self).__name__}`, which names no quantity: use one of the '
+                f'step classes in `hold_steps.py` or `ramp_steps.py`.'
             )
+
+
+class HoldStep(PlannedMonitorControlStep):
+    """One value, held for as long as the step lasts (§15.11)."""
+
+    setpoint = Quantity(
+        type=np.float64,
+        description='The value to hold. Each step class declares it in its own unit.',
+    )
+
+
+class RampStep(PlannedMonitorControlStep):
+    """One value, moving from `start_point` to `end_point` over the step (§15.11).
+
+    Linearly: any other shape is a curve the schema would have to evaluate, which is
+    the physics §15.1 keeps out.
+    """
+
+    start_point = Quantity(
+        type=np.float64,
+        description='The value the step starts from. Each step class declares it in '
+        'its own unit.',
+    )
+    end_point = Quantity(
+        type=np.float64,
+        description='The value the step ends at, reached linearly from `start_point`.',
+    )
+    ramp_rate = Quantity(
+        type=np.float64,
+        description='How fast the value moves, as a positive magnitude — the direction '
+        'is `start_point` to `end_point`. Write this or `estimated_duration`; the '
+        'other is derived from it (D16).',
+    )
+
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        if type(self) in ABSTRACT_STEPS:
+            return  # already reported, and the base's own fields carry no unit
+        where = self.name or '<unnamed>'
+        if self.start_point is None or self.end_point is None:
+            logger.error(
+                f'{where} is a ramp missing an end: write both `start_point` and '
+                f'`end_point`.'
+            )
+            return
+        span = abs(self.end_point - self.start_point)
+        # The rate and the duration say one thing, so whichever was written, both are
+        # stored (D16, as the sampling pair is).
+        if self.ramp_rate is None and self.estimated_duration is not None:
+            self.ramp_rate = span / self.estimated_duration
+        elif self.ramp_rate is not None and self.estimated_duration is None:
+            self.estimated_duration = span / self.ramp_rate
+        elif self.ramp_rate is not None:
+            self.report_a_rate_that_contradicts_the_duration(span, where, logger)
+
+    def report_a_rate_that_contradicts_the_duration(self, span, where, logger):
+        """Reported, never repaired: both stand as authored (D13a)."""
+        derived = span / self.estimated_duration
+        written = self.ramp_rate.to(derived.units)
+        if isclose(written.magnitude, derived.magnitude, rel_tol=1e-9):
+            return
+        logger.error(
+            f'{where} writes a `ramp_rate` of {written.magnitude:g} {derived.units}, '
+            f'but its ends over an `estimated_duration` of '
+            f'{self.estimated_duration.to("s").magnitude:g} s make it '
+            f'{derived.magnitude:g}.'
+        )
+
+
+#: The bases that name no quantity: writing one directly is an authoring mistake.
+ABSTRACT_STEPS = (PlannedMonitorControlStep, HoldStep, RampStep)
 
 
 class PlannedSubroutineStep(PlannedProcessStep):

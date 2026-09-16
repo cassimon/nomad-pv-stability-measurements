@@ -7,17 +7,19 @@ import pytest
 from nomad.client import normalize_all, parse
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    Current,
-    Irradiance,
-    Resistance,
-    Temperature,
-    Voltage,
-)
 from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
+from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    HoldCurrent,
+    HoldIrradiance,
+    HoldResistance,
+    HoldTemperature,
+    HoldVoltage,
+)
+from nomad_pv_stability_measurements.schema_packages.ramp_steps import RampTemperature
 from nomad_pv_stability_measurements.schema_packages.routine import (
     PlannedMonitorControlStep,
     PlannedSubroutineStep,
+    RampStep,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
@@ -38,7 +40,7 @@ def entry(cls, **fields) -> dict:
 )
 def test_both_sampling_figures_are_stored(normalized, written, derived, expected):
     # Whichever the archive holds, the other is calculated from it (13.5 a).
-    step = normalized(Temperature.m_from_dict(written))
+    step = normalized(HoldTemperature.m_from_dict(written))
 
     assert getattr(step, derived).magnitude == pytest.approx(expected)
 
@@ -52,10 +54,14 @@ def test_both_kinds_of_step_share_one_base():
 
 
 def test_only_monitor_control_steps_carry_tags():
-    tags = {'monitor', 'control', 'setpoint', 'sample_every', 'sampling_rate'}
+    tags = {'monitor', 'control', 'sample_every', 'sampling_rate'}
 
     assert tags <= set(PlannedMonitorControlStep.m_def.all_quantities)
     assert tags.isdisjoint(BLOCK.m_def.all_quantities)
+    # What a step holds or moves sits on its kind, not on the base (§15.11).
+    assert {'setpoint', 'start_point'}.isdisjoint(
+        PlannedMonitorControlStep.m_def.all_quantities
+    )
 
 
 def test_a_step_built_as_the_base_names_no_quantity(normalized, log):
@@ -73,8 +79,8 @@ def test_two_steps_on_one_quantity_are_not_merged(normalized, log):
             {
                 'name': 'hot phase',
                 'steps': [
-                    entry(Temperature, control=True, setpoint=358.15),
-                    entry(Temperature, monitor=True),
+                    entry(HoldTemperature, control=True, setpoint=358.15),
+                    entry(HoldTemperature, monitor=True),
                 ],
             }
         )
@@ -92,8 +98,8 @@ def test_two_steps_on_one_quantity_may_be_truly_subsequent(normalized, log):
         BLOCK.m_from_dict(
             {
                 'steps': [
-                    entry(Temperature, estimated_duration=3600),
-                    entry(Temperature, estimated_duration=7200),
+                    entry(HoldTemperature, estimated_duration=3600),
+                    entry(HoldTemperature, estimated_duration=7200),
                 ]
             }
         )
@@ -103,11 +109,11 @@ def test_two_steps_on_one_quantity_may_be_truly_subsequent(normalized, log):
 
 
 def test_steps_on_different_quantities_do_not_overlap(normalized, log):
-    # Voltage and current are tied by the cell, but that is physics, and the schema
+    # HoldVoltage and current are tied by the cell, but that is physics, and the schema
     # holds none (§15.1).
     normalized(
         BLOCK.m_from_dict(
-            {'steps': [entry(Voltage), entry(Current), entry(Irradiance)]}
+            {'steps': [entry(HoldVoltage), entry(HoldCurrent), entry(HoldIrradiance)]}
         )
     )
 
@@ -120,8 +126,8 @@ def test_a_parallel_block_cannot_run_one_quantity_twice(normalized, log):
             {
                 'execution_mode': 'parallel',
                 'steps': [
-                    entry(Resistance, estimated_duration=3600),
-                    entry(Resistance, estimated_duration=3600),
+                    entry(HoldResistance, estimated_duration=3600),
+                    entry(HoldResistance, estimated_duration=3600),
                 ],
             }
         )
@@ -138,8 +144,8 @@ def test_a_step_the_block_leaves_no_time_for_is_flagged(normalized, log):
                 'name': 'phase',
                 'estimated_duration': 1800000,
                 'steps': [
-                    entry(Temperature, estimated_duration=1800000),
-                    entry(Temperature, name='cool down', estimated_duration=3600),
+                    entry(HoldTemperature, estimated_duration=1800000),
+                    entry(HoldTemperature, name='cool down', estimated_duration=3600),
                 ],
             }
         )
@@ -156,7 +162,7 @@ def test_a_step_without_an_estimated_duration_takes_no_turn(normalized, log):
             {
                 'estimated_duration': 1800000,
                 'steps': [
-                    entry(Temperature, name='warm', control=True, setpoint=358.15),
+                    entry(HoldTemperature, name='warm', control=True, setpoint=358.15),
                     entry(BLOCK, name='phase', estimated_duration=1800000),
                 ],
             }
@@ -176,8 +182,8 @@ def test_a_step_that_outlasts_a_sequential_block_is_shortened(normalized, log):
                 'name': 'phase',
                 'estimated_duration': 3600,
                 'steps': [
-                    entry(Temperature, name='warm', estimated_duration=1800),
-                    entry(Temperature, name='hot', estimated_duration=3600),
+                    entry(HoldTemperature, name='warm', estimated_duration=1800),
+                    entry(HoldTemperature, name='hot', estimated_duration=3600),
                 ],
             }
         )
@@ -199,8 +205,8 @@ def test_a_step_that_outlasts_a_parallel_block_is_shortened(normalized, log):
                 'execution_mode': 'parallel',
                 'estimated_duration': 3600,
                 'steps': [
-                    entry(Temperature, name='long', estimated_duration=7200),
-                    entry(Irradiance, name='short', estimated_duration=1800),
+                    entry(HoldTemperature, name='long', estimated_duration=7200),
+                    entry(HoldIrradiance, name='short', estimated_duration=1800),
                 ],
             }
         )
@@ -217,7 +223,7 @@ def test_a_condition_keeps_lasting_as_long_as_its_block(normalized, log):
         BLOCK.m_from_dict(
             {
                 'estimated_duration': 3600,
-                'steps': [entry(Temperature, monitor=True)],
+                'steps': [entry(HoldTemperature, monitor=True)],
             }
         )
     )
@@ -234,9 +240,9 @@ def test_a_sequential_block_lasts_as_long_as_its_steps_together(normalized, log)
         BLOCK.m_from_dict(
             {
                 'steps': [
-                    entry(Irradiance, monitor=True),
-                    entry(Temperature, estimated_duration=1800),
-                    entry(Voltage, estimated_duration=3600),
+                    entry(HoldIrradiance, monitor=True),
+                    entry(HoldTemperature, estimated_duration=1800),
+                    entry(HoldVoltage, estimated_duration=3600),
                 ]
             }
         )
@@ -253,8 +259,8 @@ def test_a_parallel_block_lasts_as_long_as_its_longest_step(normalized):
             {
                 'execution_mode': 'parallel',
                 'steps': [
-                    entry(Temperature, estimated_duration=7200),
-                    entry(Irradiance, estimated_duration=1800),
+                    entry(HoldTemperature, estimated_duration=7200),
+                    entry(HoldIrradiance, estimated_duration=1800),
                 ],
             }
         )
@@ -264,7 +270,9 @@ def test_a_parallel_block_lasts_as_long_as_its_longest_step(normalized):
 
 
 def test_a_block_whose_steps_have_no_duration_stays_without_one(normalized):
-    node = normalized(BLOCK.m_from_dict({'steps': [entry(Temperature, monitor=True)]}))
+    node = normalized(
+        BLOCK.m_from_dict({'steps': [entry(HoldTemperature, monitor=True)]})
+    )
 
     assert node.estimated_duration is None
 
@@ -280,11 +288,11 @@ def test_a_nested_block_is_measured_before_its_parent_adds_it_up(normalized):
                         BLOCK,
                         name='inner',
                         steps=[
-                            entry(Temperature, estimated_duration=1800),
-                            entry(Irradiance, estimated_duration=1800),
+                            entry(HoldTemperature, estimated_duration=1800),
+                            entry(HoldIrradiance, estimated_duration=1800),
                         ],
                     ),
-                    entry(Voltage, estimated_duration=600),
+                    entry(HoldVoltage, estimated_duration=600),
                 ]
             }
         )
@@ -301,11 +309,11 @@ def test_entry_loads_the_bare_archive_file():
 
     # What held for the whole run comes first, as conditions without a duration.
     assert [type(step) for step in settings] == [
-        Temperature,
-        Irradiance,
-        Voltage,
-        Current,
-        Resistance,
+        HoldTemperature,
+        HoldIrradiance,
+        HoldVoltage,
+        HoldCurrent,
+        HoldResistance,
     ]
     temperature, irradiance, voltage = settings[:3]
     assert temperature.estimated_duration is None
@@ -316,10 +324,10 @@ def test_entry_loads_the_bare_archive_file():
 
     assert isinstance(soak, BLOCK)
     assert [type(step) for step in soak.steps] == [
-        Temperature,
-        Temperature,
-        Irradiance,
-        Voltage,
+        HoldTemperature,
+        HoldTemperature,
+        HoldIrradiance,
+        HoldVoltage,
     ]
     hot = soak.steps[0]
     assert hot.estimated_duration.to(ureg.hour).magnitude == pytest.approx(500)
@@ -354,7 +362,7 @@ def test_n_iterations_last_as_long_as_all_of_them_together(normalized, log):
                 'repeat': 'n_times',
                 'repeat_n': 42,
                 'estimated_duration_one_iteration': 86400,
-                'steps': [entry(Temperature, estimated_duration=43200)],
+                'steps': [entry(HoldTemperature, estimated_duration=43200)],
             }
         )
     )
@@ -371,8 +379,8 @@ def test_an_iteration_lasts_as_long_as_its_steps_when_none_is_written(normalized
                 'repeat': 'n_times',
                 'repeat_n': 10,
                 'steps': [
-                    entry(Temperature, estimated_duration=3600),
-                    entry(Irradiance, estimated_duration=1800),
+                    entry(HoldTemperature, estimated_duration=3600),
+                    entry(HoldIrradiance, estimated_duration=1800),
                 ],
             }
         )
@@ -391,7 +399,7 @@ def test_the_steps_are_fitted_to_one_iteration_not_to_all_of_them(normalized, lo
                 'repeat': 'n_times',
                 'repeat_n': 10,
                 'estimated_duration_one_iteration': 3600,
-                'steps': [entry(Temperature, name='hot', estimated_duration=7200)],
+                'steps': [entry(HoldTemperature, name='hot', estimated_duration=7200)],
             }
         )
     )
@@ -411,7 +419,7 @@ def test_a_duration_that_contradicts_the_iterations_is_reported(normalized, log)
                 'repeat_n': 10,
                 'estimated_duration_one_iteration': 3600,
                 'estimated_duration': 7200,
-                'steps': [entry(Temperature, estimated_duration=3600)],
+                'steps': [entry(HoldTemperature, estimated_duration=3600)],
             }
         )
     )
@@ -428,7 +436,7 @@ def test_n_times_without_a_count_is_reported(normalized, log):
             {
                 'name': 'cycle',
                 'repeat': 'n_times',
-                'steps': [entry(Temperature, estimated_duration=3600)],
+                'steps': [entry(HoldTemperature, estimated_duration=3600)],
             }
         )
     )
@@ -445,7 +453,7 @@ def test_a_block_runs_at_least_once(normalized, log):
                 'name': 'cycle',
                 'repeat': 'n_times',
                 'repeat_n': 0,
-                'steps': [entry(Temperature, estimated_duration=3600)],
+                'steps': [entry(HoldTemperature, estimated_duration=3600)],
             }
         )
     )
@@ -455,13 +463,89 @@ def test_a_block_runs_at_least_once(normalized, log):
     assert 'at least once' in error
 
 
+# A ramp: both ends, and the rate the duration says (§15.11).
+
+
+def test_a_ramp_needs_both_its_ends(normalized, log):
+    normalized(RampTemperature(name='warm up', start_point=298.15 * ureg.kelvin))
+
+    [error] = log.errors
+    assert 'warm up is a ramp missing an end' in error
+
+
+def test_a_ramp_derives_its_rate_from_its_duration(normalized, log):
+    step = normalized(
+        RampTemperature(
+            start_point=298.15 * ureg.kelvin,
+            end_point=358.15 * ureg.kelvin,
+            estimated_duration=3600 * ureg.second,
+        )
+    )
+
+    # 60 K in an hour, whichever way round the ends were written.
+    assert step.ramp_rate.to(ureg.kelvin / ureg.hour).magnitude == pytest.approx(60)
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_a_ramp_derives_its_duration_from_its_rate(normalized, log):
+    step = normalized(
+        RampTemperature(
+            start_point=358.15 * ureg.kelvin,
+            end_point=298.15 * ureg.kelvin,
+            ramp_rate=60 * ureg.kelvin / ureg.hour,
+        )
+    )
+
+    # Cooling down: the rate is a magnitude, the direction is the ends (D16).
+    assert step.estimated_duration.to(ureg.hour).magnitude == pytest.approx(1)
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_a_rate_that_contradicts_the_duration_is_reported(normalized, log):
+    step = normalized(
+        RampTemperature(
+            name='warm up',
+            start_point=298.15 * ureg.kelvin,
+            end_point=358.15 * ureg.kelvin,
+            ramp_rate=60 * ureg.kelvin / ureg.hour,
+            estimated_duration=7200 * ureg.second,
+        )
+    )
+
+    # Reported, never repaired: both stand as authored (D13a).
+    assert step.estimated_duration.to(ureg.hour).magnitude == pytest.approx(2)
+    [error] = log.errors
+    assert 'warm up writes a `ramp_rate`' in error
+
+
+def test_a_ramp_with_neither_a_rate_nor_a_duration_lasts_as_its_block_does(
+    normalized, log
+):
+    step = normalized(
+        RampTemperature(
+            start_point=298.15 * ureg.kelvin, end_point=358.15 * ureg.kelvin
+        )
+    )
+
+    # A condition, like any other step without a duration (D13).
+    assert (step.estimated_duration, step.ramp_rate) == (None, None)
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_a_step_built_as_a_bare_kind_names_no_quantity(normalized, log):
+    normalized(RampStep(name='stray'))
+
+    [error] = log.errors
+    assert 'stray is a bare `RampStep`' in error
+
+
 def test_a_count_without_n_times_has_no_effect(normalized, log):
     node = normalized(
         BLOCK.m_from_dict(
             {
                 'name': 'phase',
                 'repeat_n': 42,
-                'steps': [entry(Temperature, estimated_duration=3600)],
+                'steps': [entry(HoldTemperature, estimated_duration=3600)],
             }
         )
     )

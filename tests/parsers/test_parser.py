@@ -9,10 +9,10 @@ from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.parsers.parser import StabilityYamlParser
-from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    Irradiance,
-    Temperature,
-    Voltage,
+from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    HoldIrradiance,
+    HoldTemperature,
+    HoldVoltage,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 
@@ -36,7 +36,7 @@ def test_the_parser_reads_an_authored_file_into_an_entry():
     assert 'open_circuit' in call.args[0]
     assert isinstance(archive.data, StabilityProtocol)
     held = archive.data.steps[ROUTINE].steps[3]
-    assert isinstance(held, Voltage)
+    assert isinstance(held, HoldVoltage)
     assert held.setpoint.to(ureg.volt).magnitude == pytest.approx(0.8)
 
 
@@ -54,7 +54,7 @@ def test_problems_are_logged_with_their_path(tmp_path):
     assert details == {'path': 'data.routine.commands[0].duraton'}
     assert 'Did you mean `duration`?' in message
     # The rest of the file still loads.
-    assert isinstance(archive.data.steps[0].steps[0], Temperature)
+    assert isinstance(archive.data.steps[0].steps[0], HoldTemperature)
 
 
 def test_nomad_matches_an_authored_file_to_this_parser():
@@ -63,5 +63,5 @@ def test_nomad_matches_an_authored_file_to_this_parser():
 
     assert isinstance(archive.data, StabilityProtocol)
     dark = archive.data.steps[ROUTINE].steps[2]
-    assert isinstance(dark, Irradiance)
+    assert isinstance(dark, HoldIrradiance)
     assert dark.setpoint.magnitude == pytest.approx(0)

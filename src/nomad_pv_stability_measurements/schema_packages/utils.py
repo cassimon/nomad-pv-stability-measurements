@@ -2,17 +2,25 @@ from nomad.units import ureg
 
 
 def _is_monitor_control(step) -> bool:
-    return 'setpoint' in step.m_def.all_quantities
+    # By `monitor`, not by `setpoint`: a ramp has none, and a block has neither (§15.11).
+    return 'monitor' in step.m_def.all_quantities
+
+
+def _axis_of(step) -> str:
+    """The quantity a step speaks to. `HoldTemperature` and `RampTemperature` are two
+    kinds of step on one axis, and contradict each other exactly as two holds do; this
+    module imports no schema class, so it reads the name (§15.11)."""
+    return type(step).__name__.removeprefix('Hold').removeprefix('Ramp')
 
 
 def report_overlapping_steps(steps, mode: str, where: str, logger) -> None:
 
-    by_class = {}
+    by_axis = {}
     for step in steps:
         if _is_monitor_control(step):
-            by_class.setdefault(type(step), []).append(step)
+            by_axis.setdefault(_axis_of(step), []).append(step)
 
-    for cls, overlapping in by_class.items():
+    for axis, overlapping in by_axis.items():
         if len(overlapping) <= 1:
             continue
         if mode == 'parallel':
@@ -24,7 +32,7 @@ def report_overlapping_steps(steps, mode: str, where: str, logger) -> None:
         else:
             continue  # each has its own turn — genuinely subsequent
         logger.error(
-            f'{len(overlapping)} {cls.__name__} steps overlap in {where}: {reason}. '
+            f'{len(overlapping)} {axis} steps overlap in {where}: {reason}. '
             f'Siblings are not merged into one step — write one step with all the '
             f'keys, or give each its own `estimated_duration` in a sequential block.'
         )

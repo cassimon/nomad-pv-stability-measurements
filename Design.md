@@ -1278,19 +1278,29 @@ src/nomad_pv_stability_measurements/
     general.py        PlannedProcess, PlannedProcessStep: extensions of NOMAD's own
                       Process / ProcessStep with the plan/record split (was_executed,
                       the estimated_* fields), specific to no PV concept (§15.5)
-    routine.py        PlannedMonitorControlStep (monitor, control, setpoint),
-                      PlannedSubroutineStep (execution_mode, steps, and repeat /
-                      repeat_n / estimated_duration_one_iteration, §15.8); the checks that
+    routine.py        PlannedMonitorControlStep (monitor, control, the sampling pair),
+                      its two kinds HoldStep (setpoint) and RampStep (start_point,
+                      end_point, ramp_rate) (§15.11), and PlannedSubroutineStep
+                      (execution_mode, steps, and repeat / repeat_n /
+                      estimated_duration_one_iteration, §15.8); the checks that
                       hold for any archive (R4, R5, the sampling pair) (§15.1)
-    activity_steps.py one PlannedMonitorControlStep per quantity, each fixing the unit
-                      of its setpoint (Temperature, Irradiance, ..., plus the atmosphere
-                      pair WaterVaporFraction / OxygenFraction, dimensionless volume
-                      ratios) (§15.1, §15.7)
+    hold_steps.py     one HoldStep per quantity, each fixing the unit of its setpoint
+                      (HoldTemperature, HoldIrradiance, ..., the atmosphere pair and
+                      HoldPressure), plus BalanceGas (a gas name), which holds no
+                      number at all (§15.1, §15.7, §15.10, §15.11)
+    ramp_steps.py     one RampStep per quantity, each fixing the unit of both ends and
+                      of the rate (RampTemperature, ...) (§15.11)
+    mpp_steps.py      the electrical load tracked rather than set: OperatingPoint (a
+                      point of the JV curve, mpp or voc), and the file a JV sweep and
+                      any tracker settings would go in (D17, §15.10)
     utils.py          the checks a block and the protocol share: R4, R5, and R6, which
                       fits steps to their block's duration (§15.4); check_steps runs the
                       three over one iteration of a repeating block (§15.8)
-    states.py         Ramp, Cycle, Tabulated, Sweep
-    protocol.py       StabilityProtocol (steps only), ProtocolSummary, normalize
+    states.py         Ramp, Cycle, Tabulated, Sweep — superseded: the ramp is a step's
+                      final_setpoint (§15.10) and the cycle a repeat block (§15.8)
+    protocol.py       StabilityProtocol (its steps, and what the run itself records:
+                      standard, environment, notes, and geo_location beside NOMAD's own
+                      location) and GeoLocation (§15.12); ProtocolSummary, normalize
                       pipeline, plot
     timeline.py       ProtocolTimeline
     results.py        StabilityMeasurement, StabilityResult, …                (iteration 2)
@@ -1750,10 +1760,14 @@ needed, or in the parser, not in the shape of the data model.
 
 - **`PlannedMonitorControlStep`** (`routine.py`) carries two tags, `monitor` and `control`, a
   `setpoint` with no unit on the base, and `sample_every` / `sampling_rate`.
-- **`activity_steps.py`** holds one subclass per quantity. Each only fixes the unit of its
-  `setpoint`: `Temperature` (K), `Irradiance` (W/m², plus `spectrum`), `Voltage` (V),
-  `Current` (A), `Resistance` (Ω), `BendRadius` (m), `Strain` (dimensionless), and the
-  atmosphere pair `WaterVaporFraction` / `OxygenFraction` (dimensionless, §15.7).
+- **`hold_steps.py` and `ramp_steps.py`** hold one subclass per quantity each, under the two
+  kinds `HoldStep` / `RampStep` (§15.11). A hold fixes the unit of its `setpoint`, a ramp of its
+  `start_point`, `end_point` and `ramp_rate`: `…Temperature` (K), `…Irradiance` (W/m², plus
+  `spectrum`), `…Voltage` (V), `…Current` (A), `…Resistance` (Ω), `…BendRadius` (m), `…Strain`
+  (dimensionless), the atmosphere pair `…WaterVaporFraction` / `…OxygenFraction`
+  (dimensionless, §15.7) and `…Pressure` (Pa). `BalanceGas` (a gas name) and `OperatingPoint`
+  (a point of the JV curve, in `mpp_steps.py`) hold something that is no number, so they take
+  neither (§15.10).
   **Verified** (scratch test): a subclass may redeclare `setpoint` with a unit, the base's stays
   unit-less, and the step round-trips.
 - **The class is the axis again.** R4 groups sibling steps by class; a bare
@@ -1916,3 +1930,177 @@ of ordinary steps run n times, and saying so needs one enum and two fields rathe
 with `waveform`, `period` and `duty_cycle` — a shape the schema would then have to evaluate,
 which is the physics §15.1 keeps out. What stays genuinely irreducible is the **ramp**, where the
 value varies *within* one step. That is still open.
+
+### 15.9 ISOS Table 1 coverage — what's still missing
+
+`tests/data/ISOS_protocols_table1.xlsx` (Khenkin et al., *Nat Energy* 2020) is the reference: one
+row per ISOS protocol, meant to become one example `.stability.yaml` each. Checked against §15 as
+it stands, most of the table is already expressible — fixed temperature/irradiance setpoints,
+`dark` for "Light source: None", a bare monitored condition for "Ambient", and the ISOS-LC-1
+dark/light duty cycle (a `repeat` block alternating two `Irradiance` steps, §15.8). Four gaps
+remained, in the order worth closing them — **T1, T2 and T3 are built (§15.10, §15.11); T4 is
+decided but not built**:
+
+| | Gap | Blocks | Why |
+|---|---|---|---|
+| T1 ✅ | **MPP tracking** — no schema representation | ISOS-L (all 3), ISOS-O (all 3), ISOS-LC (all 3), ISOS-LT (all 3), half of ISOS-V-1 | `Voltage` / `Current` / `Resistance` (`activity_steps.py`) only take a fixed `setpoint`. `track: mpp` existed pre-§15 (§4.1) but was dropped with everything else in that rewrite, and nothing in §15 replaces it. Roughly half the table's rows use MPP as the load condition. |
+| T2 ✅ | **Open circuit as an explicit, nameable step** | ISOS-D (all 3), ISOS-T (all 3), negative branch of ISOS-V-1 | `open_circuit` is a **retired word** (`RETIRED_WORDS`, `channels.py`): writing it is reported and the step is left out. A protocol that deliberately holds OC is indistinguishable, on disk, from one that never mentions electrical load at all — there is no way to say "OC, on purpose." |
+| T3 ✅ | **Ramping / continuously varying setpoints** | ISOS-T-1/2/3 ("RT to 65/85 °C"), ISOS-LT-1/2/3 ("linear ramping between X and 65 °C") | Already named above as the one thing §15.8's `repeat` cannot reach: a value that varies *within* one step, not across repeated iterations. |
+| T4 | **Relative humidity as an authored quantity** | ISOS-D-3, V-3, L-3, T-3, LC-3, LT-1/2/3 | Collides on purpose with §15.7: `%RH`/`RH` are in `_REJECTED_UNITS` and hard-refused. None of these rows' humidity figures (`85 %`, `~50 %`, `< 55 %`) can be transcribed as the table states them today. Needs a decision, not just code: keep absolute-ratio-only and expect the figure converted before authoring, or accept `%RH` as a spelling the parser converts using a sibling temperature step — the second reopens part of §15.7. *Settled in review: the second, but **only as a compound value carrying its own temperature** — `rh: {value: 85 %, at: 65 °C}` — converted to the absolute ratio in the parser, before the schema sees it. §15.7's schema decision is then untouched (`HoldWaterVaporFraction.setpoint` stays the plain fraction), and nothing reaches across sibling steps to resolve one value: the temperature stays explicit and local, which is exactly what §15.7 objected a bare `%RH` had not. It also matches the table, where every RH figure is already written beside its own temperature. Parser work (`units.py`, `channels.py`); not built.* |
+
+Smaller, and not worth a schema change on its own: ISOS-LT-2/3's "controlled at 50 % beyond
+40 °C" is a control law conditioned on another channel's value — even with T3 and T4 solved, that
+clause stays unreachable without conditional logic. Footnote it in the example rather than model
+it exactly, the same way the xlsx's setup and characterization-light-source columns are out of
+scope (tooling, not the protocol).
+
+### 15.10 The operating point, the ramp, and the ambient quantities
+
+Closes T1, T2 and T3 of §15.9. T4 (relative humidity) is settled in review but not built — its
+row in §15.9 carries the decision.
+
+**`OperatingPoint`** (`mpp_steps.py`, §15.11) is the electrical load's other axis: *where on the JV
+curve the load sits*, when the point is found by the instrument instead of written as a number.
+`point` is `MEnum('mpp', 'voc')` — maximum power point tracking, and the open-circuit condition.
+
+**One class with an enum, not `MaximumPowerPoint` + `OpenCircuit`.** A load sits at exactly one
+point at a time, so the two are values on one axis, and R4 then reports "MPP and Voc at once" as
+the contradiction it is — which two separate classes could never catch, since R4 groups siblings
+*by class* (§15.4). It is also the one step that names **no number**: `setpoint` and
+`final_setpoint` stay empty, because the volts and amps at the maximum power point are what the
+cell answers, not what the protocol instructs, and writing them would be authoring a measurement.
+
+**`voc` is what `open_circuit` was.** §15.2 retired the word for having no field to go to; it has
+one now, so T2's real complaint — that a protocol deliberately holding OC was indistinguishable
+from one that never mentioned the load — is answered. The translator still retires the word: it
+is a `RENAMED`-style mapping away (`open_circuit` → `OperatingPoint(point='voc')`), and belongs
+with the rest of the parser work, not here.
+
+**The ramp is `final_setpoint`.** *Superseded by §15.11: a ramp is its own kind of step —
+`RampStep`, with `start_point`, `end_point` and `ramp_rate` — and `setpoint` moves off the base
+onto `HoldStep`. What the rest of this section argues (linear only, the rate derived rather than
+a third authored field, declared per class in its own unit) stands, and is what §15.11 builds.*
+A step with one goes from `setpoint` to it, **linearly**, over
+its `estimated_duration` — or over its block's whole span, if it has none, since that is what a
+step without a duration already means (D13). The presence of the field *is* the shape, so there
+is no `shape` enum to keep in step with it, and no second way to say "hold".
+
+- **No `rate`.** D16 allowed a ramp a `rate` *or* a duration; every step already has
+  `estimated_duration`, so the rate is `(final_setpoint − setpoint) / estimated_duration` —
+  derivable by whatever needs it, and a third unit-ful quantity on every class if authored.
+- **No curve but the straight one.** Anything else is a shape the schema would have to evaluate,
+  which is the physics §15.1 keeps out. A staircase is not a curve at all: it is a `repeat` block
+  of ordinary holds (§15.8), which is how ISOS-T-1's "step ramping" is written.
+- **Declared per class, like `setpoint`.** Each numeric step redeclares `final_setpoint` in its
+  own unit. A ramp's end must carry the same dimension as its start, and a bare number beside a
+  kelvin one is exactly the trap O11 records. `OperatingPoint` and `BalanceGas` redeclare
+  neither: a tracked point does not ramp, and neither does a gas name.
+
+**Reported, never repaired** (D13a): a `final_setpoint` with no `setpoint` (a ramp needs the
+value it starts from — and unlike a missing end, it cannot be read as a hold), and an
+`OperatingPoint` naming no `point`, the same way a bare `PlannedMonitorControlStep` naming no
+quantity is reported.
+
+**The ambient quantities** are §15.7's "left out, for review" pair, added now: **`Pressure`**
+*(`HoldPressure` / `RampPressure` since §15.11)*
+(Pa — the atmosphere as a whole, so a glovebox overpressure, an altitude or a vacuum soak has
+somewhere to go) and **`BalanceGas`** (`gas`, free text like `Irradiance.spectrum`: `N2`, `air`,
+`Ar` — a name, not a number, so it declares no setpoint either). Note what did *not* need a
+class: "Ambient" as ISOS Table 1 writes it is a monitor-only step with no setpoint — a condition
+that lasts as long as its block (D13) — and that was already expressible on every axis.
+
+### 15.11 Holding and ramping are two kinds of step
+
+**Status: settled in review, built.** Supersedes §15.10's `final_setpoint`.
+
+`PlannedMonitorControlStep` keeps only what every monitor/control step has — `monitor`,
+`control` and the sampling pair. *What the step does with its quantity* is the kind below it,
+and the quantity itself is the class below that:
+
+| Kind (`routine.py`) | Declares | One class per quantity |
+|---|---|---|
+| `HoldStep` | `setpoint` | `hold_steps.py`: `HoldTemperature`, `HoldIrradiance`, … |
+| `RampStep` | `start_point`, `end_point`, `ramp_rate` | `ramp_steps.py`: `RampTemperature`, … |
+
+**Why two kinds rather than one class with both.** A step either holds or moves; it is never
+half of each. With `setpoint` and `final_setpoint` on one class, every hold carried a field it
+never filled, and *which kind a step is* was a question you answered by looking at which fields
+were empty — a shape the schema states nowhere and every reader has to infer. As two kinds the
+answer is the class, which is what the rest of the design already reads. It also pays twice
+over: `OperatingPoint` and `BalanceGas` hold something that is no number, and with `setpoint`
+moved down to `HoldStep` they subclass the plain step directly and inherit no numeric field at
+all — the wart §15.10 had to document is simply gone.
+
+**R4 groups by axis, not by class.** This is what the split costs, and it is worth naming:
+`HoldTemperature` and `RampTemperature` are two classes and *one quantity*, and two steps
+commanding the temperature at once contradict each other whichever kind they are. So
+`report_overlapping_steps` groups siblings by the **axis** — the class name without its `Hold` /
+`Ramp` prefix — where §15.1 could say "the class is the axis". `utils.py` deliberately imports
+no schema module (§15.4), so it cannot ask `isinstance`; it reads the name, as it already reads
+fields. That makes the naming convention load-bearing, which is the one thing to remember when
+adding a quantity: a class is `Hold<Quantity>` or `Ramp<Quantity>`, and the rest of the name is
+the axis. `_is_monitor_control` moves with it, from sniffing `setpoint` (which a ramp has not)
+to sniffing `monitor` (which both kinds have and no block does).
+
+**The rate and the duration are one fact** (D16): `ramp_rate` is a positive magnitude — the
+direction is `start_point` → `end_point` — and whichever of the two was written, both are
+stored, exactly as the sampling pair is (D9). A ramp with neither is a condition like any other
+step without a duration: it lasts as long as its block, and its rate is not known until that is
+(D13).
+
+**Reported, never repaired** (D13a): a ramp missing `start_point` or `end_point` — unlike a
+missing rate, there is nothing to derive it from; and a `ramp_rate` that contradicts the ends
+over the authored `estimated_duration`, where both stand and the disagreement is named with both
+figures. A bare `PlannedMonitorControlStep`, `HoldStep` or `RampStep` names no quantity and is
+reported as before, now saying which of the three it was.
+
+**Still authored nowhere.** The parser maps every variable key to its `Hold…` class; a ramp has
+no authoring spelling yet, and neither have `OperatingPoint` and `BalanceGas` (§15.10). That,
+and T4's `rh` with its own temperature, is what stands between this schema and the ISOS example
+files of §15.9.
+
+### 15.12 What the run itself records — `standard`, `environment`, `notes`, `location`
+
+Facts about the whole protocol rather than about any one quantity, so they sit on
+`StabilityProtocol` and not on a step.
+
+**`environment`** is `MEnum('indoor', 'outdoor', 'other')`, **defaulting to `indoor`** — unlike
+most defaults in this schema, a positive claim rather than a neutral element (D8). Deliberate:
+nearly every one of these tests is run in a laboratory, so the default is right far more often
+than it is wrong, and an outdoor test is exactly the one whose author is thinking about where it
+ran. *Spelled `MEnum`, like every other enum here* (`execution_mode`, `repeat`, `point`):
+`nomad.metainfo.metainfo.Enum` resolves, but one spelling per concept.
+
+**`notes`** is free text, and exists because `environment`'s own description already pointed at
+it. NOMAD's inherited text fields are `description`, `lab_id` and `name`, none of which means
+"anything else worth saying about this run".
+
+**The place's name is NOMAD's own `location`; only the coordinates are ours.** Every NOMAD
+activity already declares `location` — a string, *"the location associated with this activity"* —
+so `Denver, U.S.` goes there, where it searches beside every other activity in the Oasis, and
+this schema adds only what NOMAD has no field for. **Verified, the hard way:** declaring a
+`location` sub-section of our own instead raises `MetainfoError: Cannot inherit from different
+property types` — the collision saying out loud that the field already exists.
+
+- **`GeoLocation` (`geo_location`)** is `latitude` / `longitude` in degrees and `altitude` in
+  metres: what a search can compare, and what joins two uploads of one site where two spellings
+  of a name would not. Altitude is not decoration — it sets the air mass, and so the spectrum an
+  outdoor test actually sees. A plain number reads in the declared unit (D6), so `39.74 °` and
+  `5280 ft` both read; a bare `5280` on `altitude` reads as metres, which is O11's residual cost
+  turning up on the one field where feet are a common spelling, and is why the description says
+  so.
+- A section of its own rather than two flat fields, so the pair travels together — while either
+  half still stands alone: a named site nobody surveyed, or coordinates off an instrument log
+  that no one has a name for.
+- No `name` inside it. That would be a second place to write what `location` already holds,
+  which is the same "one fact, one place" that keeps `balance_gas` off the two fraction steps.
+
+**Reported, never repaired** (D13a): a latitude beyond ±90° or a longitude beyond ±180°, whose
+usual cause is the pair written the wrong way round — which a latitude of `-104.99` catches and
+nothing else would.
+
+**Left out:** any check tying `geo_location` to `environment`, since an indoor lab has a place on
+Earth too; and any bound on `altitude`. Latitude and longitude have hard mathematical ones, so
+breaking them is always a mistake and worth reporting; an altitude's plausible range is a
+judgement about where experiments happen rather than a fact about the number, and a rule
+guessing *"that looks like feet"* is exactly the physics §15.1 keeps out of the schema.

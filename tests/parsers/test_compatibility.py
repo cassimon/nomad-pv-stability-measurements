@@ -16,16 +16,16 @@ from nomad_pv_stability_measurements.parsers.translate import (
     translate,
     translate_section,
 )
-from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    BendRadius,
-    Current,
-    Irradiance,
-    OxygenFraction,
-    Resistance,
-    Strain,
-    Temperature,
-    Voltage,
-    WaterVaporFraction,
+from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    HoldBendRadius,
+    HoldCurrent,
+    HoldIrradiance,
+    HoldOxygenFraction,
+    HoldResistance,
+    HoldStrain,
+    HoldTemperature,
+    HoldVoltage,
+    HoldWaterVaporFraction,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 from nomad_pv_stability_measurements.schema_packages.routine import (
@@ -85,13 +85,13 @@ def test_the_channels_file(load_file, log):
     # logged as a whole, one step per variable.
     temperature, irradiance, *load = settings
     assert temperature.estimated_duration is None
-    assert isinstance(temperature, Temperature)
+    assert isinstance(temperature, HoldTemperature)
     assert (temperature.control, temperature.monitor) == (True, True)
     assert magnitude(temperature.setpoint, ureg.degC) == pytest.approx(65)
     assert magnitude(temperature.sample_every, ureg.s) == pytest.approx(60)
     assert magnitude(irradiance.setpoint, IRRADIANCE) == pytest.approx(1000)
     assert irradiance.spectrum == 'AM1.5G'
-    assert [type(step) for step in load] == [Voltage, Current, Resistance]
+    assert [type(step) for step in load] == [HoldVoltage, HoldCurrent, HoldResistance]
     for step in load:
         assert (step.monitor, step.control, step.setpoint) == (True, None, None)
         assert magnitude(step.sampling_rate, ureg.Hz) == pytest.approx(1)
@@ -103,10 +103,10 @@ def test_the_channels_file(load_file, log):
     # `500 h` is hours, not Planck's constant (§6 step 2).
     assert magnitude(hot.estimated_duration, ureg.hour) == pytest.approx(500)
     assert magnitude(hot.sampling_rate, ureg.Hz) == pytest.approx(10)
-    assert (type(drift), drift.control, drift.setpoint) == (Temperature, None, None)
+    assert (type(drift), drift.control, drift.setpoint) == (HoldTemperature, None, None)
     # Deliberately dark is a value, not a missing one (D8a).
     assert magnitude(dark.setpoint, IRRADIANCE) == pytest.approx(0)
-    assert isinstance(held, Voltage)
+    assert isinstance(held, HoldVoltage)
     assert magnitude(held.setpoint, ureg.V) == pytest.approx(0.8)
     # The routine wrote no duration of its own: it lasts as long as its episodes
     # together, 500 h + 100 h + 100 h + 24 h (§15.4).
@@ -130,9 +130,9 @@ def test_one_list_holds_both_kinds_of_step_without_m_def(load):
         {'name': 'phase', 'commands': [{'channel': 'irradiation'}]},
     )
 
-    assert isinstance(temperature, Temperature)
+    assert isinstance(temperature, HoldTemperature)
     assert isinstance(phase, BLOCK)
-    assert isinstance(phase.steps[0], Irradiance)
+    assert isinstance(phase.steps[0], HoldIrradiance)
 
 
 def test_an_explicit_m_def_and_plain_numbers_still_load(load, log):
@@ -149,7 +149,7 @@ def test_an_explicit_m_def_and_plain_numbers_still_load(load, log):
     )
 
     assert log.errors == []
-    assert isinstance(step, Temperature)
+    assert isinstance(step, HoldTemperature)
     assert magnitude(step.setpoint, ureg.degC) == pytest.approx(85)
     assert magnitude(step.estimated_duration, ureg.hour) == pytest.approx(1)
 
@@ -161,7 +161,7 @@ def test_a_setpoint_is_written_either_as_the_variable_or_as_hold(load, log):
     ]:
         [step] = load(authored)
 
-        assert isinstance(step, Strain)
+        assert isinstance(step, HoldStrain)
         assert step.setpoint.magnitude == pytest.approx(0.02)
     assert log.errors == []
 
@@ -169,7 +169,7 @@ def test_a_setpoint_is_written_either_as_the_variable_or_as_hold(load, log):
 def test_a_single_variable_needs_no_variable_named(load, log):
     [step] = load({'channel': 'mechanical', 'bend_radius': '5 mm'})
 
-    assert isinstance(step, BendRadius)
+    assert isinstance(step, HoldBendRadius)
     assert magnitude(step.setpoint, ureg.mm) == pytest.approx(5)
     assert log.errors == []
 
@@ -185,7 +185,7 @@ def test_the_isos_l_2_form(load, log):
     )
 
     assert log.errors == []
-    assert (type(step), step.control) == (Voltage, True)
+    assert (type(step), step.control) == (HoldVoltage, True)
     assert magnitude(step.setpoint, ureg.V) == pytest.approx(0.8)
     assert magnitude(step.sampling_rate, ureg.Hz) == pytest.approx(10)
     assert magnitude(step.sample_every, ureg.s) == pytest.approx(0.1)
@@ -200,7 +200,7 @@ def test_open_circuit_is_reported_and_its_step_left_out(load, log):
 def test_a_named_setpoint_becomes_the_value_it_stands_for(load):
     [step] = load({'channel': 'irradiation', 'hold': 'dark', 'spectrum': 'AM1.5G'})
 
-    assert isinstance(step, Irradiance)
+    assert isinstance(step, HoldIrradiance)
     assert magnitude(step.setpoint, IRRADIANCE) == pytest.approx(0)
     assert step.spectrum == 'AM1.5G'
 
@@ -210,7 +210,7 @@ def test_blank_text_asks_nothing(load, log):
         [step] = load({'channel': 'temperature', 'hold': blank})
 
         assert (type(step), step.control, step.setpoint) == (
-            Temperature,
+            HoldTemperature,
             None,
             None,
         )
@@ -292,7 +292,7 @@ def test_a_variable_the_channel_does_not_have_is_reported(load, log):
 def test_the_atmosphere_channel_logs_both_its_variables(load, log):
     water, oxygen = load({'channel': 'atmosphere', 'monitor': True})
 
-    assert (type(water), type(oxygen)) == (WaterVaporFraction, OxygenFraction)
+    assert (type(water), type(oxygen)) == (HoldWaterVaporFraction, HoldOxygenFraction)
     assert [step.monitor for step in (water, oxygen)] == [True, True]
     assert log.errors == []
 
@@ -301,7 +301,7 @@ def test_a_glovebox_figure_and_a_volume_percent_share_one_axis(load, log):
     [glovebox] = load({'channel': 'atmosphere', 'oxygen': '0.1 ppm'})
     [ambient] = load({'channel': 'atmosphere', 'oxygen': '21 vol%'})
 
-    assert (type(glovebox), glovebox.control) == (OxygenFraction, True)
+    assert (type(glovebox), glovebox.control) == (HoldOxygenFraction, True)
     assert glovebox.setpoint.magnitude == pytest.approx(1e-7)
     assert ambient.setpoint.magnitude == pytest.approx(0.21)
     assert log.errors == []
@@ -314,7 +314,7 @@ def test_water_vapour_is_written_either_as_the_variable_or_as_hold(load, log):
     ]:
         [step] = load(authored)
 
-        assert isinstance(step, WaterVaporFraction)
+        assert isinstance(step, HoldWaterVaporFraction)
         assert step.setpoint.magnitude == pytest.approx(5e-4)
     assert log.errors == []
 
@@ -334,6 +334,6 @@ def test_a_relative_humidity_value_on_the_water_axis_is_refused(load, log):
     [step] = load({'channel': 'atmosphere', 'water_vapor': '85 %RH'})
 
     # Reported, never repaired: the step stays, without a setpoint nobody can read.
-    assert (isinstance(step, WaterVaporFraction), step.setpoint) == (True, None)
+    assert (isinstance(step, HoldWaterVaporFraction), step.setpoint) == (True, None)
     [error] = log.errors
     assert 'not a volume ratio' in error

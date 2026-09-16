@@ -9,11 +9,12 @@ says so, `derive_duration` answers, and `normalize_steps` is the four of them in
 import pytest
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    Irradiance,
-    Temperature,
-    Voltage,
+from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    HoldIrradiance,
+    HoldTemperature,
+    HoldVoltage,
 )
+from nomad_pv_stability_measurements.schema_packages.ramp_steps import RampTemperature
 from nomad_pv_stability_measurements.schema_packages.routine import (
     PlannedSubroutineStep,
 )
@@ -50,7 +51,7 @@ def lengths(steps):
 
 
 def test_two_steps_on_one_quantity_overlap_in_a_parallel_block(log):
-    steps = [step(Temperature, seconds=3600), step(Temperature, seconds=7200)]
+    steps = [step(HoldTemperature, seconds=3600), step(HoldTemperature, seconds=7200)]
 
     report_overlapping_steps(steps, 'parallel', 'fork', log)
 
@@ -64,7 +65,7 @@ def test_two_steps_on_one_quantity_overlap_in_a_parallel_block(log):
 def test_a_condition_overlaps_whatever_else_speaks_to_its_quantity(log):
     # The condition has no duration, so it holds for the whole span, including the turn
     # the other step takes.
-    steps = [step(Temperature, seconds=3600), step(Temperature)]
+    steps = [step(HoldTemperature, seconds=3600), step(HoldTemperature)]
 
     report_overlapping_steps(steps, 'sequential', 'phase', log)
 
@@ -73,7 +74,7 @@ def test_a_condition_overlaps_whatever_else_speaks_to_its_quantity(log):
 
 
 def test_steps_with_a_turn_each_are_subsequent_not_overlapping(log):
-    steps = [step(Temperature, seconds=3600), step(Temperature, seconds=7200)]
+    steps = [step(HoldTemperature, seconds=3600), step(HoldTemperature, seconds=7200)]
 
     report_overlapping_steps(steps, 'sequential', 'phase', log)
 
@@ -81,16 +82,27 @@ def test_steps_with_a_turn_each_are_subsequent_not_overlapping(log):
 
 
 def test_different_quantities_never_overlap(log):
-    # Voltage and irradiance are tied by the cell, but that is physics (§15.1).
-    steps = [step(Voltage), step(Irradiance), step(Temperature)]
+    # HoldVoltage and irradiance are tied by the cell, but that is physics (§15.1).
+    steps = [step(HoldVoltage), step(HoldIrradiance), step(HoldTemperature)]
 
     report_overlapping_steps(steps, 'parallel', 'fork', log)
 
     assert log.errors == []
 
 
+def test_a_hold_and_a_ramp_on_one_quantity_overlap(log):
+    # Two classes, one axis: whichever kind they are, two steps cannot both command the
+    # temperature at once (§15.11).
+    steps = [step(HoldTemperature), step(RampTemperature)]
+
+    report_overlapping_steps(steps, 'parallel', 'fork', log)
+
+    [error] = log.errors
+    assert '2 Temperature steps overlap in fork' in error
+
+
 def test_blocks_are_not_a_quantity_and_never_overlap(log):
-    # A step is recognised as monitor/control by its `setpoint` field, which a block has
+    # A step is recognised as monitor/control by its `monitor` field, which a block has
     # not — two blocks at the same time are the point of `parallel`.
     steps = [step(BLOCK, seconds=3600), step(BLOCK, seconds=3600)]
 
@@ -100,7 +112,10 @@ def test_blocks_are_not_a_quantity_and_never_overlap(log):
 
 
 def test_each_crowded_quantity_is_reported_once_with_its_count(log):
-    steps = [step(Temperature) for _ in range(3)] + [step(Voltage), step(Voltage)]
+    steps = [step(HoldTemperature) for _ in range(3)] + [
+        step(HoldVoltage),
+        step(HoldVoltage),
+    ]
 
     report_overlapping_steps(steps, 'parallel', 'fork', log)
 
@@ -110,7 +125,7 @@ def test_each_crowded_quantity_is_reported_once_with_its_count(log):
 
 def test_an_overlap_says_what_to_write_instead(log):
     report_overlapping_steps(
-        [step(Temperature), step(Temperature)], 'parallel', 'fork', log
+        [step(HoldTemperature), step(HoldTemperature)], 'parallel', 'fork', log
     )
 
     [error] = log.errors
@@ -123,8 +138,8 @@ def test_an_overlap_says_what_to_write_instead(log):
 
 def test_a_step_after_the_time_is_spent_never_runs(log):
     steps = [
-        step(Temperature, name='warm', seconds=3600),
-        step(Voltage, name='late', seconds=600),
+        step(HoldTemperature, name='warm', seconds=3600),
+        step(HoldVoltage, name='late', seconds=600),
     ]
 
     report_steps_that_never_run(steps, 'sequential', 3600 * ureg.second, 'phase', log)
@@ -137,7 +152,10 @@ def test_a_step_after_the_time_is_spent_never_runs(log):
 
 def test_a_step_that_only_partly_fits_still_runs(log):
     # It starts, so it is not "never": R6 shortens it instead.
-    steps = [step(Temperature, seconds=1800), step(Voltage, name='long', seconds=7200)]
+    steps = [
+        step(HoldTemperature, seconds=1800),
+        step(HoldVoltage, name='long', seconds=7200),
+    ]
 
     report_steps_that_never_run(steps, 'sequential', 3600 * ureg.second, 'phase', log)
 
@@ -146,9 +164,9 @@ def test_a_step_that_only_partly_fits_still_runs(log):
 
 def test_every_step_past_the_end_is_named(log):
     steps = [
-        step(Temperature, name='warm', seconds=3600),
-        step(Voltage, name='second', seconds=600),
-        step(Irradiance, name='third', seconds=600),
+        step(HoldTemperature, name='warm', seconds=3600),
+        step(HoldVoltage, name='second', seconds=600),
+        step(HoldIrradiance, name='third', seconds=600),
     ]
 
     report_steps_that_never_run(steps, 'sequential', 3600 * ureg.second, 'phase', log)
@@ -157,7 +175,7 @@ def test_every_step_past_the_end_is_named(log):
 
 
 def test_a_condition_takes_no_turn_so_it_always_runs(log):
-    steps = [step(Temperature, seconds=3600), step(Voltage, name='logged')]
+    steps = [step(HoldTemperature, seconds=3600), step(HoldVoltage, name='logged')]
 
     report_steps_that_never_run(steps, 'sequential', 3600 * ureg.second, 'phase', log)
 
@@ -165,7 +183,10 @@ def test_a_condition_takes_no_turn_so_it_always_runs(log):
 
 
 def test_nothing_runs_out_of_time_in_a_parallel_block(log):
-    steps = [step(Temperature, seconds=7200), step(Voltage, name='late', seconds=7200)]
+    steps = [
+        step(HoldTemperature, seconds=7200),
+        step(HoldVoltage, name='late', seconds=7200),
+    ]
 
     report_steps_that_never_run(steps, 'parallel', 3600 * ureg.second, 'fork', log)
 
@@ -173,7 +194,10 @@ def test_nothing_runs_out_of_time_in_a_parallel_block(log):
 
 
 def test_a_block_without_a_duration_leaves_time_for_everything(log):
-    steps = [step(Temperature, seconds=7200), step(Voltage, name='late', seconds=600)]
+    steps = [
+        step(HoldTemperature, seconds=7200),
+        step(HoldVoltage, name='late', seconds=600),
+    ]
 
     report_steps_that_never_run(steps, 'sequential', None, 'phase', log)
 
@@ -181,7 +205,7 @@ def test_a_block_without_a_duration_leaves_time_for_everything(log):
 
 
 def test_an_unnamed_step_is_still_named_in_the_warning(log):
-    steps = [step(Temperature, seconds=3600), step(Voltage, seconds=600)]
+    steps = [step(HoldTemperature, seconds=3600), step(HoldVoltage, seconds=600)]
 
     report_steps_that_never_run(steps, 'sequential', 3600 * ureg.second, 'phase', log)
 
@@ -194,8 +218,8 @@ def test_an_unnamed_step_is_still_named_in_the_warning(log):
 
 def test_the_step_the_time_runs_out_during_is_shortened(log):
     steps = [
-        step(Temperature, name='warm', seconds=1800),
-        step(Voltage, name='hot', seconds=3600),
+        step(HoldTemperature, name='warm', seconds=1800),
+        step(HoldVoltage, name='hot', seconds=3600),
     ]
 
     fit_steps_to_duration(steps, 'sequential', 3600 * ureg.second, 'phase', log)
@@ -209,8 +233,8 @@ def test_the_step_the_time_runs_out_during_is_shortened(log):
 def test_a_step_with_no_time_left_is_left_alone(log):
     # R5 already says it never runs; shortening it to nothing would say it does.
     steps = [
-        step(Temperature, name='warm', seconds=3600),
-        step(Voltage, name='late', seconds=600),
+        step(HoldTemperature, name='warm', seconds=3600),
+        step(HoldVoltage, name='late', seconds=600),
     ]
 
     fit_steps_to_duration(steps, 'sequential', 3600 * ureg.second, 'phase', log)
@@ -220,7 +244,7 @@ def test_a_step_with_no_time_left_is_left_alone(log):
 
 
 def test_a_step_that_fits_exactly_is_not_shortened(log):
-    steps = [step(Temperature, name='whole', seconds=3600)]
+    steps = [step(HoldTemperature, name='whole', seconds=3600)]
 
     fit_steps_to_duration(steps, 'sequential', 3600 * ureg.second, 'phase', log)
 
@@ -230,9 +254,9 @@ def test_a_step_that_fits_exactly_is_not_shortened(log):
 
 def test_only_the_step_that_overruns_is_touched(log):
     steps = [
-        step(Temperature, name='warm', seconds=1800),
-        step(Voltage, name='hot', seconds=7200),
-        step(Irradiance, name='after', seconds=600),
+        step(HoldTemperature, name='warm', seconds=1800),
+        step(HoldVoltage, name='hot', seconds=7200),
+        step(HoldIrradiance, name='after', seconds=600),
     ]
 
     fit_steps_to_duration(steps, 'sequential', 3600 * ureg.second, 'phase', log)
@@ -244,9 +268,9 @@ def test_only_the_step_that_overruns_is_touched(log):
 
 def test_every_step_longer_than_a_parallel_block_is_shortened(log):
     steps = [
-        step(Temperature, name='long', seconds=7200),
-        step(Voltage, name='longer', seconds=10800),
-        step(Irradiance, name='short', seconds=1800),
+        step(HoldTemperature, name='long', seconds=7200),
+        step(HoldVoltage, name='longer', seconds=10800),
+        step(HoldIrradiance, name='short', seconds=1800),
     ]
 
     fit_steps_to_duration(steps, 'parallel', 3600 * ureg.second, 'fork', log)
@@ -259,7 +283,7 @@ def test_every_step_longer_than_a_parallel_block_is_shortened(log):
 def test_a_condition_is_never_given_a_duration(log):
     # It already lasts exactly as long as the block; a duration would make it an episode
     # that takes a turn (D13).
-    steps = [step(Temperature, name='logged')]
+    steps = [step(HoldTemperature, name='logged')]
 
     fit_steps_to_duration(steps, 'sequential', 3600 * ureg.second, 'phase', log)
 
@@ -268,7 +292,7 @@ def test_a_condition_is_never_given_a_duration(log):
 
 
 def test_a_block_without_a_duration_fits_nothing(log):
-    steps = [step(Temperature, name='long', seconds=7200)]
+    steps = [step(HoldTemperature, name='long', seconds=7200)]
 
     fit_steps_to_duration(steps, 'sequential', None, 'phase', log)
 
@@ -277,7 +301,7 @@ def test_a_block_without_a_duration_fits_nothing(log):
 
 
 def test_a_shortened_step_keeps_its_unit(log):
-    steps = [step(Temperature, name='hot', seconds=7200)]
+    steps = [step(HoldTemperature, name='hot', seconds=7200)]
 
     fit_steps_to_duration(steps, 'sequential', 1 * ureg.hour, 'phase', log)
 
@@ -288,24 +312,28 @@ def test_a_shortened_step_keeps_its_unit(log):
 
 
 def test_a_sequential_block_lasts_as_long_as_its_steps_together():
-    steps = [step(Temperature, seconds=1800), step(Voltage, seconds=3600)]
+    steps = [step(HoldTemperature, seconds=1800), step(HoldVoltage, seconds=3600)]
 
     assert derive_duration(steps, 'sequential').to('s').magnitude == pytest.approx(5400)
 
 
 def test_a_parallel_block_lasts_as_long_as_its_longest_step():
-    steps = [step(Temperature, seconds=1800), step(Voltage, seconds=3600)]
+    steps = [step(HoldTemperature, seconds=1800), step(HoldVoltage, seconds=3600)]
 
     assert derive_duration(steps, 'parallel').to('s').magnitude == pytest.approx(3600)
 
 
 def test_conditions_add_nothing_to_the_length():
-    steps = [step(Temperature), step(Voltage, seconds=3600), step(Irradiance)]
+    steps = [
+        step(HoldTemperature),
+        step(HoldVoltage, seconds=3600),
+        step(HoldIrradiance),
+    ]
 
     assert derive_duration(steps, 'sequential').to('s').magnitude == pytest.approx(3600)
 
 
-@pytest.mark.parametrize('steps', [[], [step(Temperature)]])
+@pytest.mark.parametrize('steps', [[], [step(HoldTemperature)]])
 def test_nothing_to_measure_leaves_the_length_open(steps):
     assert derive_duration(steps, 'sequential') is None
 
@@ -316,10 +344,10 @@ def test_nothing_to_measure_leaves_the_length_open(steps):
 def test_normalize_steps_reports_repairs_and_derives(log):
     block = BLOCK(name='phase', estimated_duration=3600 * ureg.second)
     block.steps = [
-        step(Temperature, name='logged'),
-        step(Temperature, name='warm', seconds=1800),
-        step(Voltage, name='hot', seconds=3600),
-        step(Irradiance, name='late', seconds=600),
+        step(HoldTemperature, name='logged'),
+        step(HoldTemperature, name='warm', seconds=1800),
+        step(HoldVoltage, name='hot', seconds=3600),
+        step(HoldIrradiance, name='late', seconds=600),
     ]
 
     normalize_steps(block, 'sequential', log)
@@ -335,7 +363,7 @@ def test_normalize_steps_reports_repairs_and_derives(log):
 
 def test_normalize_steps_measures_a_block_that_wrote_no_length(log):
     block = BLOCK(name='phase')
-    block.steps = [step(Temperature, seconds=1800), step(Voltage, seconds=3600)]
+    block.steps = [step(HoldTemperature, seconds=1800), step(HoldVoltage, seconds=3600)]
 
     normalize_steps(block, 'sequential', log)
 
@@ -345,7 +373,7 @@ def test_normalize_steps_measures_a_block_that_wrote_no_length(log):
 
 def test_normalize_steps_names_the_block_it_is_checking(log):
     block = BLOCK()
-    block.steps = [step(Temperature), step(Temperature)]
+    block.steps = [step(HoldTemperature), step(HoldTemperature)]
 
     normalize_steps(block, 'parallel', log)
 

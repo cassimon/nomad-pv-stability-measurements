@@ -4,29 +4,30 @@ None of them reaches the archive: a `channel:` and a variable's key choose the s
 class, `hold` becomes its `setpoint`, and a named word becomes the value it stands for.
 """
 
-from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    BendRadius,
-    Current,
-    Irradiance,
-    OxygenFraction,
-    Resistance,
-    Strain,
-    Temperature,
-    Voltage,
-    WaterVaporFraction,
+from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    HoldBendRadius,
+    HoldCurrent,
+    HoldIrradiance,
+    HoldOxygenFraction,
+    HoldResistance,
+    HoldStrain,
+    HoldTemperature,
+    HoldVoltage,
+    HoldWaterVaporFraction,
 )
 
-#: The step class each variable key names.
+#: The step class each variable key names. The held kind: a ramp has no authored
+#: spelling yet (§15.11).
 VARIABLE_STEPS = {
-    'temperature': Temperature,
-    'irradiance': Irradiance,
-    'voltage': Voltage,
-    'current': Current,
-    'resistance': Resistance,
-    'bend_radius': BendRadius,
-    'strain': Strain,
-    'water_vapor': WaterVaporFraction,
-    'oxygen': OxygenFraction,
+    'temperature': HoldTemperature,
+    'irradiance': HoldIrradiance,
+    'voltage': HoldVoltage,
+    'current': HoldCurrent,
+    'resistance': HoldResistance,
+    'bend_radius': HoldBendRadius,
+    'strain': HoldStrain,
+    'water_vapor': HoldWaterVaporFraction,
+    'oxygen': HoldOxygenFraction,
 }
 
 #: The variables an authored `channel:` groups, in the order an author reads them.
@@ -40,7 +41,7 @@ CHANNEL_VARIABLES = {
 
 #: Words a setpoint reads as a value, per step class. Never global: `dark` is an
 #: irradiance and means nothing on the temperature axis, or in a duration (D8a).
-NAMED_SETPOINTS = {Irradiance: {'dark': 0.0}}
+NAMED_SETPOINTS = {HoldIrradiance: {'dark': 0.0}}
 
 #: Words the schema has no place for any more (§15), and why.
 RETIRED_WORDS = {

@@ -3,14 +3,18 @@ import os
 import pytest
 from nomad.client import normalize_all, parse
 from nomad.datamodel import EntryArchive, EntryMetadata
+from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.activity_steps import (
-    Irradiance,
-    Temperature,
-    Voltage,
-)
 from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
-from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
+from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    HoldIrradiance,
+    HoldTemperature,
+    HoldVoltage,
+)
+from nomad_pv_stability_measurements.schema_packages.protocol import (
+    GeoLocation,
+    StabilityProtocol,
+)
 from nomad_pv_stability_measurements.schema_packages.routine import (
     PlannedMonitorControlStep,
     PlannedSubroutineStep,
@@ -95,7 +99,7 @@ def test_the_protocol_is_only_steps():
 
 def test_the_protocol_checks_its_steps_like_a_block(log):
     protocol = StabilityProtocol.m_from_dict(
-        {'name': 'soak', 'steps': [entry(Temperature), entry(Temperature)]}
+        {'name': 'soak', 'steps': [entry(HoldTemperature), entry(HoldTemperature)]}
     )
 
     normalize_protocol(protocol, log)
@@ -110,12 +114,12 @@ def test_a_block_overrides_a_condition_for_its_span(log):
     protocol = StabilityProtocol.m_from_dict(
         {
             'steps': [
-                entry(Temperature, control=True, setpoint=338.15),
+                entry(HoldTemperature, control=True, setpoint=338.15),
                 entry(
                     BLOCK,
                     steps=[
                         entry(
-                            Temperature,
+                            HoldTemperature,
                             control=True,
                             setpoint=358.15,
                             estimated_duration=3600,
@@ -152,9 +156,9 @@ def test_the_protocol_fits_its_steps_to_its_duration(log):
             'name': 'soak',
             'estimated_duration': 3600,
             'steps': [
-                entry(Temperature, name='warm', estimated_duration=1800),
-                entry(Irradiance, name='lit', estimated_duration=3600),
-                entry(Voltage, name='late', estimated_duration=600),
+                entry(HoldTemperature, name='warm', estimated_duration=1800),
+                entry(HoldIrradiance, name='lit', estimated_duration=3600),
+                entry(HoldVoltage, name='late', estimated_duration=600),
             ],
         }
     )
@@ -179,9 +183,9 @@ def test_the_protocol_derives_its_duration_from_its_steps(log):
     protocol = StabilityProtocol.m_from_dict(
         {
             'steps': [
-                entry(Irradiance, monitor=True),
-                entry(Temperature, estimated_duration=1800),
-                entry(Voltage, estimated_duration=3600),
+                entry(HoldIrradiance, monitor=True),
+                entry(HoldTemperature, estimated_duration=1800),
+                entry(HoldVoltage, estimated_duration=3600),
             ]
         }
     )
@@ -190,3 +194,82 @@ def test_the_protocol_derives_its_duration_from_its_steps(log):
 
     assert protocol.estimated_duration.magnitude == pytest.approx(5400)
     assert log.errors == []
+
+
+# What the run itself records (§15.12).
+
+
+def test_a_protocol_is_indoors_unless_it_says_otherwise():
+    # A positive claim rather than a neutral element, because nearly every one of these
+    # tests is run in a laboratory (§15.12).
+    assert StabilityProtocol().environment == 'indoor'
+    assert StabilityProtocol(environment='outdoor').environment == 'outdoor'
+
+
+def test_environment_rejects_unknown_values():
+    with pytest.raises(ValueError):
+        StabilityProtocol(environment='in orbit')
+
+
+def test_a_protocol_takes_free_text_notes():
+    assert StabilityProtocol(notes='ran over a weekend').notes == 'ran over a weekend'
+
+
+def test_a_place_is_nomads_own_location_plus_our_coordinates():
+    protocol = StabilityProtocol(
+        environment='outdoor',
+        location='Denver, U.S.',
+        geo_location=GeoLocation(
+            latitude=39.7392 * ureg.degree,
+            longitude=-104.9903 * ureg.degree,
+        ),
+    )
+
+    # The label is NOMAD's own field, so it searches beside every other activity.
+    assert protocol.location == 'Denver, U.S.'
+    assert protocol.geo_location.latitude.magnitude == pytest.approx(39.7392)
+    assert protocol.geo_location.longitude.magnitude == pytest.approx(-104.9903)
+
+
+def test_the_schema_adds_no_second_place_to_write_the_name():
+    # Declaring our own `location` sub-section collided with NOMAD's own quantity
+    # (`MetainfoError: Cannot inherit from different property types`) — verified.
+    assert 'name' not in GeoLocation.m_def.all_quantities
+    # `location` stays NOMAD's own quantity, and takes the name directly.
+    assert 'location' in StabilityProtocol.m_def.all_quantities
+    assert 'location' not in StabilityProtocol.m_def.all_sub_sections
+    assert StabilityProtocol(location='Denver, U.S.').location == 'Denver, U.S.'
+
+
+def test_coordinates_round_trip():
+    data = {'latitude': 39.7392, 'longitude': -104.9903, 'altitude': 1609.0}
+
+    assert GeoLocation.m_from_dict(data).m_to_dict() == data
+
+
+def test_a_place_records_how_high_it_is():
+    # Denver in the unit its own signs use, stored in metres either way.
+    denver = GeoLocation(altitude=5280 * ureg.foot)
+
+    assert denver.altitude.to(ureg.meter).magnitude == pytest.approx(1609, rel=1e-3)
+
+
+def test_below_sea_level_is_a_negative_altitude():
+    # No bound is checked: unlike a latitude, there is no number that is simply wrong.
+    dead_sea = GeoLocation(altitude=-430 * ureg.meter)
+
+    assert dead_sea.altitude.magnitude == pytest.approx(-430)
+
+
+def test_a_place_may_be_named_without_being_surveyed():
+    # The name stands on its own: it is a different field, not half of this section.
+    assert StabilityProtocol(location='Denver, U.S.').geo_location is None
+
+
+def test_coordinates_the_wrong_way_round_are_reported(normalized, log):
+    # A latitude past ±90° is what catches the classic swap.
+    normalized(GeoLocation(latitude=-104.9903 * ureg.degree))
+
+    [error] = log.errors
+    assert '`latitude` is -104.99' in error
+    assert 'wrong way round' in error
