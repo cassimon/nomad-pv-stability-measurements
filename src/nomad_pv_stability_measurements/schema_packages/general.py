@@ -1,4 +1,3 @@
-
 import numpy as np
 from nomad.common import now
 from nomad.datamodel.metainfo.basesections.v2 import Process, ProcessStep
@@ -70,17 +69,15 @@ class PlannedProcess(Process):
         'Use `datetime` / `end_time` once it actually has.',
     )
     estimated_end_time = Quantity(
-            type=np.float64,
-            unit='s',
-            description='How long this is planned to take, for a process not yet run. '
-            'Use `datetime` / `end_time` once it actually has.',
-        )
-    
+        type=Datetime,
+        description='When this is planned to end, for a process not yet run. Use '
+        '`end_time` once it actually has.',
+    )
     steps = SubSection(
         section_def=PlannedProcessStep,
         repeats=True,
         description='The steps of this process, in order: monitor/control steps, which '
-        'act on one quantity, and subroutine steps, which group further steps. L (Design.md §15.4)eave it '
+        'act on one quantity, and subroutine steps, which group further steps. Leave it '
         'empty for a plan that has no steps yet.',
     )
 

@@ -31,7 +31,7 @@ def report_overlapping_steps(steps, mode: str, where: str, logger) -> None:
 
 
 def report_steps_that_never_run(steps, mode: str, duration, where: str, logger) -> None:
-   
+
     if mode != 'sequential' or duration is None:
         return
     budget = duration.to('s').magnitude
@@ -48,7 +48,7 @@ def report_steps_that_never_run(steps, mode: str, duration, where: str, logger) 
 
 
 def fit_steps_to_duration(steps, mode: str, duration, where: str, logger) -> None:
-    
+
     if duration is None:
         return
     budget = duration.to('s').magnitude
@@ -68,7 +68,7 @@ def fit_steps_to_duration(steps, mode: str, duration, where: str, logger) -> Non
 
 
 def derive_duration(steps, mode: str):
-    
+
     lengths = [
         step.estimated_duration.to('s').magnitude
         for step in steps
@@ -79,13 +79,19 @@ def derive_duration(steps, mode: str):
     return (max(lengths) if mode == 'parallel' else sum(lengths)) * ureg.second
 
 
+def check_steps(steps, mode: str, duration, where: str, logger) -> None:
+    """R4, R5 and R6 over one run of `steps` against `duration`. A repeating block runs
+    them against one iteration, never against all of them together (§15.8)."""
+    report_overlapping_steps(steps, mode, where, logger)
+    report_steps_that_never_run(steps, mode, duration, where, logger)
+    fit_steps_to_duration(steps, mode, duration, where, logger)
+
+
 def normalize_steps(section, mode: str, logger) -> None:
-    
+
     where = section.name or '<unnamed>'
     duration = section.estimated_duration
-    report_overlapping_steps(section.steps, mode, where, logger)
-    report_steps_that_never_run(section.steps, mode, duration, where, logger)
-    fit_steps_to_duration(section.steps, mode, duration, where, logger)
+    check_steps(section.steps, mode, duration, where, logger)
     if duration is None:
         derived = derive_duration(section.steps, mode)
         if derived is not None:

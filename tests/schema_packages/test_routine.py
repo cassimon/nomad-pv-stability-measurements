@@ -81,7 +81,7 @@ def test_two_steps_on_one_quantity_are_not_merged(normalized, log):
     )
 
     [error] = log.errors
-    assert '2 TemperatureStep steps overlap in hot phase' in error
+    assert '2 Temperature steps overlap in hot phase' in error
     assert 'not merged' in error
     # Reported, never repaired: the steps stay as authored.
     assert [step.monitor for step in node.steps] == [None, True]
@@ -264,9 +264,7 @@ def test_a_parallel_block_lasts_as_long_as_its_longest_step(normalized):
 
 
 def test_a_block_whose_steps_have_no_duration_stays_without_one(normalized):
-    node = normalized(
-        BLOCK.m_from_dict({'steps': [entry(Temperature, monitor=True)]})
-    )
+    node = normalized(BLOCK.m_from_dict({'steps': [entry(Temperature, monitor=True)]}))
 
     assert node.estimated_duration is None
 
@@ -325,3 +323,151 @@ def test_entry_loads_the_bare_archive_file():
     ]
     hot = soak.steps[0]
     assert hot.estimated_duration.to(ureg.hour).magnitude == pytest.approx(500)
+
+
+# A block that repeats its steps (§15.8).
+
+
+def test_a_block_runs_until_its_duration_is_up_unless_told_otherwise():
+    assert BLOCK().repeat == 'until_end_of_duration'
+    assert BLOCK(repeat='n_times').repeat == 'n_times'
+
+
+def test_repeat_rejects_unknown_values():
+    with pytest.raises(ValueError):
+        BLOCK(repeat='forever')
+
+
+def test_only_a_block_repeats():
+    # An episode on one quantity is run again by the block around it, not by itself.
+    fields = {'repeat', 'repeat_n', 'estimated_duration_one_iteration'}
+
+    assert fields <= set(BLOCK.m_def.all_quantities)
+    assert fields.isdisjoint(PlannedMonitorControlStep.m_def.all_quantities)
+
+
+def test_n_iterations_last_as_long_as_all_of_them_together(normalized, log):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'name': 'daily cycle',
+                'repeat': 'n_times',
+                'repeat_n': 42,
+                'estimated_duration_one_iteration': 86400,
+                'steps': [entry(Temperature, estimated_duration=43200)],
+            }
+        )
+    )
+
+    assert node.estimated_duration.to(ureg.hour).magnitude == pytest.approx(42 * 24)
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_an_iteration_lasts_as_long_as_its_steps_when_none_is_written(normalized, log):
+    # A thermal cycle is then two steps and a count, and nothing else.
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'repeat': 'n_times',
+                'repeat_n': 10,
+                'steps': [
+                    entry(Temperature, estimated_duration=3600),
+                    entry(Irradiance, estimated_duration=1800),
+                ],
+            }
+        )
+    )
+
+    assert node.estimated_duration_one_iteration.magnitude == pytest.approx(5400)
+    assert node.estimated_duration.magnitude == pytest.approx(54000)
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_the_steps_are_fitted_to_one_iteration_not_to_all_of_them(normalized, log):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'name': 'cycle',
+                'repeat': 'n_times',
+                'repeat_n': 10,
+                'estimated_duration_one_iteration': 3600,
+                'steps': [entry(Temperature, name='hot', estimated_duration=7200)],
+            }
+        )
+    )
+
+    # Against all ten iterations together, 2 h would have looked as if it fitted.
+    assert node.steps[0].estimated_duration.magnitude == pytest.approx(3600)
+    [warning] = log.warnings
+    assert 'hot is shortened from 7200 s to 3600 s' in warning
+
+
+def test_a_duration_that_contradicts_the_iterations_is_reported(normalized, log):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'name': 'cycle',
+                'repeat': 'n_times',
+                'repeat_n': 10,
+                'estimated_duration_one_iteration': 3600,
+                'estimated_duration': 7200,
+                'steps': [entry(Temperature, estimated_duration=3600)],
+            }
+        )
+    )
+
+    # Reported, never repaired: the authored duration stands (D13a).
+    assert node.estimated_duration.magnitude == pytest.approx(7200)
+    [error] = log.errors
+    assert '10 iterations of 3600 s last 36000 s' in error
+
+
+def test_n_times_without_a_count_is_reported(normalized, log):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'name': 'cycle',
+                'repeat': 'n_times',
+                'steps': [entry(Temperature, estimated_duration=3600)],
+            }
+        )
+    )
+
+    assert node.estimated_duration is None
+    [error] = log.errors
+    assert 'no `repeat_n`' in error
+
+
+def test_a_block_runs_at_least_once(normalized, log):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'name': 'cycle',
+                'repeat': 'n_times',
+                'repeat_n': 0,
+                'steps': [entry(Temperature, estimated_duration=3600)],
+            }
+        )
+    )
+
+    assert node.estimated_duration is None
+    [error] = log.errors
+    assert 'at least once' in error
+
+
+def test_a_count_without_n_times_has_no_effect(normalized, log):
+    node = normalized(
+        BLOCK.m_from_dict(
+            {
+                'name': 'phase',
+                'repeat_n': 42,
+                'steps': [entry(Temperature, estimated_duration=3600)],
+            }
+        )
+    )
+
+    # The block lasts one pass, as it always did.
+    assert node.estimated_duration.magnitude == pytest.approx(3600)
+    [warning] = log.warnings
+    assert '`repeat_n`' in warning
+    assert 'no effect' in warning

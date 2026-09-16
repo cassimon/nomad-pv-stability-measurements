@@ -1279,14 +1279,16 @@ src/nomad_pv_stability_measurements/
                       Process / ProcessStep with the plan/record split (was_executed,
                       the estimated_* fields), specific to no PV concept (§15.5)
     routine.py        PlannedMonitorControlStep (monitor, control, setpoint),
-                      PlannedSubroutineStep (execution_mode, steps); the checks that
+                      PlannedSubroutineStep (execution_mode, steps, and repeat /
+                      repeat_n / estimated_duration_one_iteration, §15.8); the checks that
                       hold for any archive (R4, R5, the sampling pair) (§15.1)
     activity_steps.py one PlannedMonitorControlStep per quantity, each fixing the unit
                       of its setpoint (Temperature, Irradiance, ..., plus the atmosphere
                       pair WaterVaporFraction / OxygenFraction, dimensionless volume
                       ratios) (§15.1, §15.7)
     utils.py          the checks a block and the protocol share: R4, R5, and R6, which
-                      fits steps to their block's duration (§15.4)
+                      fits steps to their block's duration (§15.4); check_steps runs the
+                      three over one iteration of a repeating block (§15.8)
     states.py         Ramp, Cycle, Tabulated, Sweep
     protocol.py       StabilityProtocol (steps only), ProtocolSummary, normalize
                       pipeline, plot
@@ -1748,9 +1750,10 @@ needed, or in the parser, not in the shape of the data model.
 
 - **`PlannedMonitorControlStep`** (`routine.py`) carries two tags, `monitor` and `control`, a
   `setpoint` with no unit on the base, and `sample_every` / `sampling_rate`.
-- **`steps.py`** holds one subclass per quantity. Each only fixes the unit of its `setpoint`:
-  `TemperatureStep` (K), `IrradianceStep` (W/m², plus `spectrum`), `VoltageStep` (V),
-  `CurrentStep` (A), `ResistanceStep` (Ω), `BendRadiusStep` (m), `StrainStep` (dimensionless).
+- **`activity_steps.py`** holds one subclass per quantity. Each only fixes the unit of its
+  `setpoint`: `Temperature` (K), `Irradiance` (W/m², plus `spectrum`), `Voltage` (V),
+  `Current` (A), `Resistance` (Ω), `BendRadius` (m), `Strain` (dimensionless), and the
+  atmosphere pair `WaterVaporFraction` / `OxygenFraction` (dimensionless, §15.7).
   **Verified** (scratch test): a subclass may redeclare `setpoint` with a unit, the base's stays
   unit-less, and the step round-trips.
 - **The class is the axis again.** R4 groups sibling steps by class; a bare
@@ -1766,7 +1769,7 @@ needed, or in the parser, not in the shape of the data model.
 - `duration` → `estimated_duration` and `commands` → `steps`, on every step.
 - A channel with several variables and no setpoint (`electrical_load: {monitor: true}`) becomes
   one step per variable, each with the same tags.
-- `dark` stays an authoring word of the parser (`IrradianceStep`, setpoint 0).
+- `dark` stays an authoring word of the parser (`Irradiance`, setpoint 0).
 - `open_circuit` has no place in the schema: it is reported, and its step left out. The example
   file keeps it, so its translation carries exactly that one problem.
 
@@ -1775,7 +1778,7 @@ needed, or in the parser, not in the shape of the data model.
 | | Call | Why |
 |---|---|---|
 | a | The base stays in `routine.py`; the subclasses live in `steps.py`, which imports it | The block's checks need the base; the other direction would be an import cycle. |
-| b | Class names `TemperatureStep`, `IrradianceStep`, … | One class per quantity, named as the step it is. |
+| b | Class names `TemperatureStep`, `IrradianceStep`, … *Renamed since to the bare quantity — `Temperature`, `Irradiance`, … — and `steps.py` to `activity_steps.py`: the class is the quantity, and the suffix only repeated what the base class already says.* | One class per quantity, named as the step it is. |
 | c | The parser sets `control: true` with a setpoint; `normalize()` checks nothing about the tags | Logic is added later, when needed (15.1). |
 | d | A channel logged without a setpoint becomes one step per variable | The schema no longer knows which of a load's quantities are read back. |
 | e | `open_circuit` is reported and its step left out | It is a pre-defined setpoint with no field to go to. |
@@ -1879,3 +1882,37 @@ setpoint becomes one monitored step per variable, exactly as every other channel
 whole rather than either fraction and so belongs to neither step; and `total_pressure`, a third
 quantity of another dimension. Neither is needed to write a soak, and both are one class or one
 field away.
+
+### 15.8 A block that repeats
+
+**`repeat` on `PlannedSubroutineStep`** says how often the block runs its steps. Only a block
+carries it: a monitor/control step is one episode on one quantity, and running it again is the
+job of the block around it.
+
+| `repeat` | What it means |
+|---|---|
+| `until_end_of_duration` (default) | The steps run for as long as the block's `estimated_duration` lasts. Nothing repeats explicitly, so a block that says nothing is the block §15.4 already described. |
+| `n_times` | The steps are **one iteration**, run `repeat_n` times, each `estimated_duration_one_iteration` long. |
+
+**With `n_times` the block's own length is derived, not authored:** `estimated_duration` becomes
+`repeat_n` × `estimated_duration_one_iteration`. `estimated_duration_one_iteration` may itself be left empty, and is
+then derived from the steps exactly as a block's duration always was (§15.4) — so a thermal cycle
+is written as its steps and a count, and nothing else.
+
+**The steps are checked against one iteration.** R4, R5 and R6 run against
+`estimated_duration_one_iteration`, never against all the iterations together: a 2 h step inside a 1 h
+iteration is shortened, where measured against 10 × 1 h it would have looked as if it fitted.
+That is what `check_steps` in `utils.py` is — the three checks over one run of the steps —
+with `normalize_steps` left as what the protocol and a non-repeating block call.
+
+**Reported, never repaired** (D13a): `n_times` with no `repeat_n`; a `repeat_n` below 1; and an
+authored `estimated_duration` that contradicts `repeat_n` × `estimated_duration_one_iteration`, where the
+authored value stands and the disagreement is named with both figures. `repeat_n` or
+`estimated_duration_one_iteration` written *without* `n_times` is dead configuration rather than a
+contradiction, so it is a warning and the field is ignored.
+
+**Why this and not a `Cycle` state class** (§10's `states.py`, §4.1's `cycle`): a cycle is a block
+of ordinary steps run n times, and saying so needs one enum and two fields rather than a class
+with `waveform`, `period` and `duty_cycle` — a shape the schema would then have to evaluate,
+which is the physics §15.1 keeps out. What stays genuinely irreducible is the **ramp**, where the
+value varies *within* one step. That is still open.

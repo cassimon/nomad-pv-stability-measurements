@@ -96,7 +96,7 @@ def test_a_channel_word_must_agree_with_the_class():
     translation = steps(entry(Temperature, channel='irradiation'))
 
     assert translation.archive == {'steps': []}
-    assert 'does not match TemperatureStep' in translation.problems[0].message
+    assert 'does not match Temperature' in translation.problems[0].message
 
 
 def test_an_unresolvable_m_def_is_a_problem():
@@ -357,7 +357,7 @@ def test_spectrum_is_no_field_of_another_step():
     translation = steps({'channel': 'temperature', 'spectrum': 'AM1.5G'})
 
     assert translation.problems[0].path == 'steps[0].spectrum'
-    assert 'not a field of TemperatureStep' in translation.problems[0].message
+    assert 'not a field of Temperature' in translation.problems[0].message
 
 
 # Keys NOMAD would drop without a word (§9).

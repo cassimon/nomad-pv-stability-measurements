@@ -2,41 +2,41 @@ data:
   m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
   name: steady soak
   steps:
-  - m_def: nomad_pv_stability_measurements.schema_packages.steps.TemperatureStep
+  - m_def: nomad_pv_stability_measurements.schema_packages.activity_steps.Temperature
     monitor: true
     sample_every: 60.0
     setpoint: 338.15
     control: true
-  - m_def: nomad_pv_stability_measurements.schema_packages.steps.IrradianceStep
+  - m_def: nomad_pv_stability_measurements.schema_packages.activity_steps.Irradiance
     spectrum: AM1.5G
     monitor: true
     sample_every: 60.0
     setpoint: 1000.0
     control: true
-  - m_def: nomad_pv_stability_measurements.schema_packages.steps.VoltageStep
+  - m_def: nomad_pv_stability_measurements.schema_packages.activity_steps.Voltage
     monitor: true
     sampling_rate: 1.0
-  - m_def: nomad_pv_stability_measurements.schema_packages.steps.CurrentStep
+  - m_def: nomad_pv_stability_measurements.schema_packages.activity_steps.Current
     monitor: true
     sampling_rate: 1.0
-  - m_def: nomad_pv_stability_measurements.schema_packages.steps.ResistanceStep
+  - m_def: nomad_pv_stability_measurements.schema_packages.activity_steps.Resistance
     monitor: true
     sampling_rate: 1.0
   - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
     name: soak
     steps:
-    - m_def: nomad_pv_stability_measurements.schema_packages.steps.TemperatureStep
+    - m_def: nomad_pv_stability_measurements.schema_packages.activity_steps.Temperature
       estimated_duration: 1800000.0
       sampling_rate: 10.0
       setpoint: 358.15
       control: true
-    - m_def: nomad_pv_stability_measurements.schema_packages.steps.TemperatureStep
+    - m_def: nomad_pv_stability_measurements.schema_packages.activity_steps.Temperature
       estimated_duration: 360000.0
-    - m_def: nomad_pv_stability_measurements.schema_packages.steps.IrradianceStep
+    - m_def: nomad_pv_stability_measurements.schema_packages.activity_steps.Irradiance
       estimated_duration: 360000.0
       setpoint: 0.0
       control: true
-    - m_def: nomad_pv_stability_measurements.schema_packages.steps.VoltageStep
+    - m_def: nomad_pv_stability_measurements.schema_packages.activity_steps.Voltage
       estimated_duration: 86400.0
       setpoint: 0.8
       control: true

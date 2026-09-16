@@ -101,7 +101,7 @@ def test_the_protocol_checks_its_steps_like_a_block(log):
     normalize_protocol(protocol, log)
 
     [error] = log.errors
-    assert '2 TemperatureStep steps overlap in soak' in error
+    assert '2 Temperature steps overlap in soak' in error
 
 
 def test_a_block_overrides_a_condition_for_its_span(log):
