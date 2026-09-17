@@ -211,7 +211,11 @@ def protocol(standard, options, instructions, environment='indoor'):
         # The last digit of the designation, derived when the file writes none (§20.7).
         'standard_level': int(standard.rsplit('-', 1)[1].rstrip('I')),
         'environment': environment,
-        'instructions': instructions,
+        # A plain block: NOMAD writes no `m_def` for the declared type.
+        'instruction_block': {
+            'sub_instruction_execution_mode': 'parallel',
+            'sub_instructions': instructions,
+        },
     }
     if variant:
         archive['standard_variant'] = variant
@@ -361,8 +365,7 @@ def protocol_file(normalized, log):
         translation = translate(SHIPPED[key])
         assert [(p.path, p.message) for p in translation.problems] == []
         loaded = StabilityProtocol.m_from_dict(translation.archive['data'])
-        for each in loaded.instructions:
-            normalized(each)
+        normalized(loaded.instruction_block)
         metadata = EntryMetadata(entry_name=key)
         loaded.normalize(EntryArchive(metadata=metadata, data=loaded), log)
         assert (log.errors, log.warnings) == ([], [])

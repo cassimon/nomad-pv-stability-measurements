@@ -82,10 +82,10 @@ def test_a_timed_block_lasts_its_repeat_duration_whatever_it_contains(normalized
 def test_what_never_finishes_makes_everything_around_it_never_finish(normalized):
     inner = IndefiniteRepeatingBlock(sub_instructions=[single(60)])
     plan = normalized(
-        Plan(instructions=[InstructionBlock(sub_instructions=[inner, single(60)])])
+        Plan(instruction_block=InstructionBlock(sub_instructions=[inner, single(60)]))
     )
 
-    assert seconds(plan.instructions[0]) is None
+    assert seconds(plan.instruction_block) is None
     assert seconds(plan) is None
 
 
@@ -105,7 +105,9 @@ def test_a_blocks_written_duration_is_replaced_by_the_derived_one(normalized):
     ],
 )
 def test_a_plans_duration_is_written_or_derived(normalized, written, expected):
-    plan = Plan(instructions=[single(30), single(60)])
+    plan = Plan(
+        instruction_block=InstructionBlock(sub_instructions=[single(30), single(60)])
+    )
     if written is not None:
         plan.estimated_duration = written * ureg.second
 
@@ -124,7 +126,7 @@ def test_a_scheduled_plan_ends_its_duration_after_it_starts(
 ):
     plan = ScheduledPlan(
         scheduled_datetime=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        instructions=[instruction],
+        instruction_block=InstructionBlock(sub_instructions=[instruction]),
     )
 
     assert normalized(plan).scheduled_end_time == end

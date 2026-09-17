@@ -7,11 +7,8 @@ import pytest
 from nomad.client import normalize_all, parse
 from nomad.units import ureg
 
+from nomad_pv_stability_measurements.parsers.translate import translate
 from nomad_pv_stability_measurements.schema_packages.general import Plan
-from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
-    HoldIrradiance,
-    HoldTemperature,
-)
 from nomad_pv_stability_measurements.schema_packages.protocol import (
     GeoLocation,
     StabilityProtocol,
@@ -20,14 +17,21 @@ from nomad_pv_stability_measurements.schema_packages.protocol import (
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 
 
+def loaded(normalized, channel_settings: dict) -> StabilityProtocol:
+    """A protocol written as `channel_settings`, translated, loaded and normalized."""
+    archive = translate({'data': {'channel_settings': channel_settings}}).archive
+    protocol = StabilityProtocol.m_from_dict(archive['data'])
+    normalized(protocol.instruction_block)
+    return normalized(protocol)
+
+
 def test_a_protocol_is_a_plan_whose_instructions_all_start_together(normalized):
-    protocol = normalized(
-        StabilityProtocol(
-            instructions=[
-                HoldTemperature(estimated_duration=1800 * ureg.second),
-                HoldIrradiance(estimated_duration=3600 * ureg.second),
-            ]
-        )
+    protocol = loaded(
+        normalized,
+        {
+            'temperature': {'hold': '65 °C', 'duration': '30 min'},
+            'irradiation': {'hold': 'dark', 'duration': '1 h'},
+        },
     )
 
     assert isinstance(protocol, Plan)
@@ -35,13 +39,12 @@ def test_a_protocol_is_a_plan_whose_instructions_all_start_together(normalized):
 
 
 def test_settings_that_never_finish_give_the_protocol_no_end(normalized):
-    protocol = normalized(
-        StabilityProtocol(
-            instructions=[
-                HoldIrradiance(monitor=True),
-                HoldTemperature(estimated_duration=1800 * ureg.second),
-            ]
-        )
+    protocol = loaded(
+        normalized,
+        {
+            'irradiation': {'monitor': True},
+            'temperature': {'hold': '65 °C', 'duration': '30 min'},
+        },
     )
 
     assert protocol.estimated_duration is None
@@ -79,7 +82,7 @@ def test_coordinates_the_wrong_way_round_are_reported(normalized, log):
 def test_a_bare_archive_file_loads_through_nomad():
     archive = parse(os.path.join(DATA_DIR, 'tree.archive.yaml'))[0]
     normalize_all(archive)
-    [root] = archive.data.instructions
+    [root] = archive.data.instruction_block.sub_instructions
 
     assert isinstance(archive.data, StabilityProtocol)
     assert [block.name for block in root.sub_instructions] == ['A', 'fork', 'D']

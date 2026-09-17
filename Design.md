@@ -3395,3 +3395,20 @@ normalize gives the same label. The ISOS table ignores labels; `test_general` an
 `IndefiniteRepeatingBlock` is now an alias of `RepeatingBlock` (edited in `general.py`): the
 translator writes `m_def: …general.RepeatingBlock` for an indefinite block, compares the class
 exactly when a count is written, and `tests/data/tree.archive.yaml` follows.
+
+## 29. A plan holds one instruction block
+
+`Plan.instructions` (a repeating sub-section) became `Plan.instruction_block`, one
+`InstructionBlock` (edited in `general.py`). What follows from it:
+
+- `Plan.normalize` takes its `estimated_duration`, where none is written, from the block, which
+  NOMAD normalizes first. The fallback that built a block from `instructions` went with the field.
+- `instruction_execution_mode` is now a convention the translator applies: it writes the block
+  with `sub_instruction_execution_mode` from the plan's class (`parallel` for a
+  `StabilityProtocol`). A bare archive or an ELN can write a sequential block; nothing corrects it.
+- Authoring is unchanged: `channel_settings`, `instructions` and `routine` all go into the one
+  block, in that order. A file writing both those and an `instruction_block` is reported. A
+  non-repeating sub-section of instruction type is read like a list item, so its `m_def` may name
+  a kind.
+- Stored archives with `instructions` no longer load: uploads must be reprocessed.
+- The root block is listed as `Run once (4 instructions, in parallel)`.

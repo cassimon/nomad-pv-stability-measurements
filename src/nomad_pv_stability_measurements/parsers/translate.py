@@ -155,21 +155,35 @@ def _at(path: str, key: str) -> str:
 
 
 def _protocol(authored: dict, cls: type, path: str, problems: list) -> dict:
-    """The protocol's own fields. `channel_settings` becomes its first instructions and
-    `routine` its last, around any `instructions` written directly (§14.3). The protocol
-    starts all of them together (§23)."""
+    """The protocol's own fields, and its one `instruction_block`: `channel_settings`
+    first, then any `instructions` written directly, then `routine` (§14.3, §29). The
+    block runs them the way the plan's kind says — a protocol starts all of them together
+    (§23)."""
     authored = dict(authored)
     settings = authored.pop('channel_settings', None)
     routine = authored.pop('routine', None)
+    written = authored.pop('instructions', None)
     bare = _fields(authored, cls, path, problems)
-    instructions = [
-        *_settings_instructions(settings, _at(path, 'channel_settings'), problems),
-        *bare.pop('instructions', []),
-    ]
+    instructions = _settings_instructions(
+        settings, _at(path, 'channel_settings'), problems
+    )
+    if written is not None:
+        instructions += _instruction_list(written, _at(path, 'instructions'), problems)
     if routine is not None:
         instructions += _instruction(routine, _at(path, 'routine'), problems)
-    if instructions:
-        bare['instructions'] = instructions
+    if instructions and 'instruction_block' in bare:
+        problems.append(
+            Problem(
+                _at(path, 'instruction_block'),
+                'write the instructions or an `instruction_block`, not both.',
+            )
+        )
+    elif instructions:
+        bare['instruction_block'] = {
+            'm_def': m_def(InstructionBlock),
+            'sub_instruction_execution_mode': cls.instruction_execution_mode,
+            'sub_instructions': instructions,
+        }
     return bare
 
 
@@ -246,6 +260,11 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
                 bare[key] = read
         elif key in sub_sections and sub_sections[key].repeats:
             bare[key] = _instruction_list(value, where, problems)
+        elif key in sub_sections and issubclass(
+            sub_sections[key].sub_section.section_cls, Instruction
+        ):
+            # One instruction, read as a list's would be: its `m_def` may name a kind.
+            bare[key] = next(iter(_instruction(value, where, problems)), {})
         elif key in sub_sections:
             nested = sub_sections[key].sub_section.section_cls
             bare[key] = _section(value, nested, where, problems)

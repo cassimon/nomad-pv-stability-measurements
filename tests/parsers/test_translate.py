@@ -324,7 +324,13 @@ def test_settings_come_first_then_the_routine():
     assert translation.problems == []
     assert data['m_def'] == m_def(StabilityProtocol)
     assert data['estimated_duration'] == approx(3600000)
-    assert [each['m_def'] for each in data['instructions']] == [
+    block = data['instruction_block']
+    # One block, whose instructions a protocol starts together (§23, §29).
+    assert (block['m_def'], block['sub_instruction_execution_mode']) == (
+        m_def(InstructionBlock),
+        'parallel',
+    )
+    assert [each['m_def'] for each in block['sub_instructions']] == [
         m_def(HoldTemperature),
         m_def(IndefiniteRepeatingBlock),
     ]

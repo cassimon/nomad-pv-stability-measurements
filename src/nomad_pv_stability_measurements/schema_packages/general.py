@@ -266,7 +266,8 @@ class Plan(EntryData):
     is the one place instructions can be stopped before they finish.
     """
 
-    #: How a plan runs its `instructions`. A subclass sets its own convention.
+    #: How the `instruction_block` a translator writes for this kind of plan runs its
+    #: instructions. A subclass sets its own convention.
     instruction_execution_mode = 'sequential'
 
     name = Quantity(type=str, description='A short name for this plan.')
@@ -283,9 +284,8 @@ class Plan(EntryData):
         ').',
     )
 
-    instructions = SubSection(
-        section_def=Instruction,
-        repeats=True,
+    instruction_block = SubSection(
+        section_def=InstructionBlock,
         description='The instructions that make up this plan.',
     )
 
@@ -314,11 +314,9 @@ class Plan(EntryData):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        if self.estimated_duration is None:
-            self.estimated_duration = combined_duration(
-                [each.estimated_duration for each in self.instructions],
-                self.instruction_execution_mode,
-            )
+        # The block is normalized before the plan, so its duration is already derived.
+        if self.estimated_duration is None and self.instruction_block is not None:
+            self.estimated_duration = self.instruction_block.estimated_duration
 
 
 class ScheduledPlan(Plan):

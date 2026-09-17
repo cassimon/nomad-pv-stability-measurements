@@ -21,7 +21,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 def test_nomad_reads_an_authored_file_into_a_protocol_entry():
     archive = parse(os.path.join(DATA_DIR, 'channels.stability.yaml'))[0]
     normalize_all(archive)
-    *settings, soak = archive.data.instructions
+    *settings, soak = archive.data.instruction_block.sub_instructions
 
     assert isinstance(archive.data, StabilityProtocol)
     assert isinstance(soak.sub_instructions[3], HoldVoltage)
@@ -65,4 +65,7 @@ def test_problems_are_logged_with_their_path_and_the_rest_still_loads(tmp_path):
     [(message,), details] = logger.error.call_args
     assert details == {'path': 'data.routine.instructions[0].duraton'}
     assert 'Did you mean `duration`?' in message
-    assert isinstance(archive.data.instructions[0].sub_instructions[0], HoldTemperature)
+    assert isinstance(
+        archive.data.instruction_block.sub_instructions[0].sub_instructions[0],
+        HoldTemperature,
+    )
