@@ -101,49 +101,91 @@ class InstructionBlock(Instruction):
         return self.one_iteration()
 
 
-class CountingRepeatingBlock(InstructionBlock):
-    """Instructions repeated `repeat_n` times — indefinitely if it is empty.
+class RepeatingBlock(InstructionBlock):
+    """Instructions repeated — a block that may or may not finish.
 
-    Its `estimated_duration` is one iteration times `repeat_n`, and empty if it repeats
-    indefinitely or any sub-instruction never finishes.
+    Its kind says which: a timed block always finishes, an indefinite one never does, and
+    a counting one should. On its own it is not known to finish, so its
+    `estimated_duration` is empty.
     """
 
-    repeat_n = Quantity(
-        type=int,
-        description='How many times the sub-instructions are run. Must be positive. '
-        'Empty means they are repeated indefinitely.',
-    )
-
-    def normalize(self, archive, logger):
-        if self.repeat_n is not None and self.repeat_n < 1:
-            logger.error(
-                f'{self.name or "<unnamed>"} writes `repeat_n` {self.repeat_n}: a block '
-                f'runs at least once.'
-            )
-        super().normalize(archive, logger)
-
     def derive_duration(self):
-        one = self.one_iteration()
-        if one is None or self.repeat_n is None or self.repeat_n < 1:
-            return None
-        return self.repeat_n * one
+        return None
 
 
-class TimedRepeatingBlock(InstructionBlock):
+class TimedRepeatingBlock(RepeatingBlock):
     """Instructions repeated for `repeat_duration`, then stopped — wherever they are.
 
-    `repeat_duration` is what ends it, and so its `estimated_duration`.
+    It always finishes: `repeat_duration` is what ends it, and so its
+    `estimated_duration`, whether or not its sub-instructions ever finish.
     """
 
     repeat_duration = Quantity(
         type=np.float64,
         unit='s',
         description='How long the sub-instructions are repeated for, before they are '
-        'stopped. Must be positive. Empty means they are repeated indefinitely.',
+        'stopped. Must be positive.',
     )
+
+    def normalize(self, archive, logger):
+        if self.repeat_duration is None:
+            logger.error(
+                f'{self.name or "<unnamed>"} is a timed block, but has no '
+                f'`repeat_duration`.'
+            )
+        super().normalize(archive, logger)
 
     def derive_duration(self):
         return self.repeat_duration
+
+
+IndefiniteRepeatingBlock = RepeatingBlock
+"""Instructions repeated until something outside stops them — it never finishes.
+
+Its `estimated_duration` is always empty; only the plan it belongs to ends it.
+"""
+
+
+class CountingRepeatingBlock(RepeatingBlock):
+    """Instructions repeated `repeat_n` times — it should finish.
+
+    Its `estimated_duration` is one iteration times `repeat_n`. Without a count, or with a
+    sub-instruction that never finishes, it does not finish after all: that is warned
+    about, and its `estimated_duration` is empty.
+    """
+
+    repeat_n = Quantity(
+        type=int,
+        description='How many times the sub-instructions are run. Must be positive.',
+    )
+
+    def normalize(self, archive, logger):
+        name = self.name or '<unnamed>'
+        if self.repeat_n is None:
+            logger.warning(
+                f'{name} counts its repetitions, but has no `repeat_n`, so it never '
+                f'finishes. A block meant to never finish is an IndefiniteRepeatingBlock.'
+            )
+        elif self.repeat_n < 1:
+            logger.error(
+                f'{name} writes `repeat_n` {self.repeat_n}: a block runs at least once.'
+            )
+        super().normalize(archive, logger)
+        if (
+            self.repeat_n is not None
+            and self.sub_instructions
+            and (self.one_iteration() is None)
+        ):
+            logger.warning(
+                f'{name} counts its repetitions, but a sub-instruction never finishes, '
+                f'so it never finishes either.'
+            )
+
+    def derive_duration(self):
+        one = self.one_iteration()
+        if one is None or self.repeat_n is None or self.repeat_n < 1:
+            return None
+        return self.repeat_n * one
 
 
 class Plan(EntryData):

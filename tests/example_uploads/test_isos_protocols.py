@@ -22,7 +22,7 @@ from nomad_pv_stability_measurements.parsers.options import expand
 from nomad_pv_stability_measurements.parsers.parser import read, stem
 from nomad_pv_stability_measurements.parsers.translate import m_def, translate
 from nomad_pv_stability_measurements.schema_packages.general import (
-    CountingRepeatingBlock,
+    IndefiniteRepeatingBlock,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBetweenIrradiance,
@@ -167,7 +167,7 @@ def ramping(start, end) -> dict:
         end_point=end,
         end_of_ramp_behavior='triangle',
     )
-    return instruction(CountingRepeatingBlock, sub_instructions=[ramp])
+    return instruction(IndefiniteRepeatingBlock, sub_instructions=[ramp])
 
 
 def cycling(start, end) -> dict:
@@ -181,14 +181,14 @@ def cycling(start, end) -> dict:
         end_point=end,
         end_of_ramp_behavior='cycle',
     )
-    return instruction(CountingRepeatingBlock, sub_instructions=[cycle])
+    return instruction(IndefiniteRepeatingBlock, sub_instructions=[cycle])
 
 
 def light_dark(light: float, dark: float, lit: dict) -> dict:
     """A routine of light and dark, repeated indefinitely: until the protocol is stopped
     (§20.1, §23)."""
     return instruction(
-        CountingRepeatingBlock,
+        IndefiniteRepeatingBlock,
         sub_instructions=[
             {**lit, 'estimated_duration': pytest.approx(light)},
             {**DARK, 'estimated_duration': pytest.approx(dark)},

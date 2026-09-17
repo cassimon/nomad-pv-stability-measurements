@@ -36,9 +36,11 @@ from nomad_pv_stability_measurements.parsers.units import (
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
+    IndefiniteRepeatingBlock,
     Instruction,
     InstructionBlock,
     Plan,
+    RepeatingBlock,
     TimedRepeatingBlock,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
@@ -262,42 +264,39 @@ def _renamed(written: str, cls: type) -> str:
     return RENAMED.get(written, written)
 
 
+def _is_count(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _repeat(value, cls: type, where: str, problems: list, bare: dict) -> None:
-    """`repeat: 5` as `repeat_n`; `repeat: indefinitely`, like no `repeat` at all, as
-    none (§23)."""
+    """`repeat: 5` as a counting block's `repeat_n`; `repeat: indefinitely` is an
+    indefinite block, which writes nothing (§23, §27)."""
     if issubclass(cls, TimedRepeatingBlock):
-        problems.append(
-            Problem(
-                where,
-                'a timed block is stopped by its `repeat_for`; write no `repeat`.',
-            )
+        message = 'a timed block is stopped by its `repeat_for`; write no `repeat`.'
+    elif not issubclass(cls, RepeatingBlock):
+        message = f'{cls.__name__} runs its instructions once; write no `repeat`.'
+    elif value in RETIRED_REPEATS:
+        message = (
+            f'`repeat: {value}` is not written any more: write '
+            f'{RETIRED_REPEATS[value]}.'
         )
-    elif not issubclass(cls, CountingRepeatingBlock):
-        problems.append(
-            Problem(
-                where, f'{cls.__name__} runs its instructions once; write no `repeat`.'
-            )
+    elif value == REPEAT_INDEFINITELY and issubclass(cls, CountingRepeatingBlock):
+        message = 'a CountingRepeatingBlock counts: write a number of times.'
+    elif _is_count(value) and issubclass(cls, IndefiniteRepeatingBlock):
+        message = (
+            'an IndefiniteRepeatingBlock never finishes: write no number of times.'
         )
     elif value == REPEAT_INDEFINITELY:
         return
-    elif value in RETIRED_REPEATS:
-        problems.append(
-            Problem(
-                where,
-                f'`repeat: {value}` is not written any more: write '
-                f'{RETIRED_REPEATS[value]}.',
-            )
-        )
-    elif isinstance(value, int) and not isinstance(value, bool):
+    elif _is_count(value) and issubclass(cls, CountingRepeatingBlock):
         bare['repeat_n'] = value
+        return
     else:
-        problems.append(
-            Problem(
-                where,
-                f'could not read `repeat` {value!r}: write a number of times, or '
-                f'`{REPEAT_INDEFINITELY}`.',
-            )
+        message = (
+            f'could not read `repeat` {value!r}: write a number of times, or '
+            f'`{REPEAT_INDEFINITELY}`.'
         )
+    problems.append(Problem(where, message))
 
 
 def _instruction_list(entries, path: str, problems: list) -> list:
@@ -332,8 +331,10 @@ def _instruction(entry, path: str, problems: list) -> list[dict]:
         cls = None
     elif 'repeat_for' in rest:
         cls = TimedRepeatingBlock
-    else:
+    elif _is_count(rest.get('repeat')):
         cls = CountingRepeatingBlock
+    else:
+        cls = IndefiniteRepeatingBlock  # `repeat: indefinitely`, or no `repeat` at all
     if cls is None or issubclass(cls, MonitorControlInstruction):
         return _monitor_control(rest, cls, path, problems)
     return [{'m_def': m_def(cls), **_fields(rest, cls, path, problems)}]

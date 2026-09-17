@@ -13,6 +13,7 @@ from nomad_pv_stability_measurements.parsers.translate import (
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
+    IndefiniteRepeatingBlock,
     InstructionBlock,
     TimedRepeatingBlock,
 )
@@ -240,13 +241,13 @@ def test_humidity_is_relative_or_absolute(authored, expected):
 @pytest.mark.parametrize(
     ('authored', 'expected'),
     [
-        ({}, entry(CountingRepeatingBlock)),  # left out: indefinitely
-        ({'repeat': 'indefinitely'}, entry(CountingRepeatingBlock)),
+        ({}, entry(IndefiniteRepeatingBlock)),  # left out: indefinitely
+        ({'repeat': 'indefinitely'}, entry(IndefiniteRepeatingBlock)),
         ({'repeat': 5}, entry(CountingRepeatingBlock, repeat_n=5)),
         ({'repeat_for': '12 h'}, entry(TimedRepeatingBlock, repeat_duration=43200.0)),
         (
             {'mode': 'parallel'},
-            entry(CountingRepeatingBlock, sub_instruction_execution_mode='parallel'),
+            entry(IndefiniteRepeatingBlock, sub_instruction_execution_mode='parallel'),
         ),
     ],
 )
@@ -277,6 +278,11 @@ def test_how_a_block_repeats_and_runs(authored, expected):
             {'m_def': m_def(InstructionBlock), 'repeat': 3},
             'repeat',
             'runs its instructions once',
+        ),
+        (
+            {'m_def': m_def(CountingRepeatingBlock), 'repeat': 'indefinitely'},
+            'repeat',
+            'write a number of times',
         ),
     ],
 )
@@ -320,7 +326,7 @@ def test_settings_come_first_then_the_routine():
     assert data['estimated_duration'] == approx(3600000)
     assert [each['m_def'] for each in data['instructions']] == [
         m_def(HoldTemperature),
-        m_def(CountingRepeatingBlock),
+        m_def(IndefiniteRepeatingBlock),
     ]
 
 

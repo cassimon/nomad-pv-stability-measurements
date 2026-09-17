@@ -3353,3 +3353,25 @@ from the other. The ISOS files write `monitor: true` wherever the paper requires
 Not monitored: darkness, open circuit and fixed biases, which Table 3 lists only as conditions.
 ISOS-V's in situ dark current is "informative" (p.40), not required, and is not written. The ISOS
 table test expects each of these.
+
+## 27. Repeating blocks say whether they finish
+
+§23 made an empty `repeat_n` mean "indefinitely" on a `CountingRepeatingBlock` — a counting block
+that does not count. The kind now says it:
+
+```
+InstructionBlock                  runs once
+└── RepeatingBlock                may or may not finish; on its own, not known to (no duration)
+    ├── TimedRepeatingBlock       always finishes: after `repeat_duration` (missing: error)
+    ├── IndefiniteRepeatingBlock  never finishes: no duration, ever
+    └── CountingRepeatingBlock    should finish: `repeat_n` × one iteration
+```
+
+A counting block that does not finish after all — no `repeat_n`, or a sub-instruction that never
+finishes — is a **warning**, not an error, and its duration is empty. `repeat_n < 1` stays an
+error.
+
+Authoring: `repeat: 5` is a counting block, `repeat_for: 12 h` a timed one, and `repeat:
+indefinitely` — or no `repeat` at all — an indefinite one. With an `m_def`, a count on an
+indefinite block and `indefinitely` on a counting block are reported. The ISOS routines are
+`IndefiniteRepeatingBlock`s; `tests/data/tree.archive.yaml` follows.

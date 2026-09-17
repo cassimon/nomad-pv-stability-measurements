@@ -1,4 +1,3 @@
-
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage
 

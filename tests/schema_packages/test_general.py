@@ -1,8 +1,9 @@
-"""Instructions, blocks and plans (Design.md §23).
+"""Instructions, blocks and plans (Design.md §23, §27).
 
 An instruction is completed after its `estimated_duration`; empty means it never
-finishes. A block's duration is always derived from what it contains. Only a plan, or a
-timed block, stops instructions early.
+finishes. A block's duration is always derived from what it contains. A repeating block's
+kind says whether it finishes: a timed one always, an indefinite one never, a counting one
+should. Only a plan, or a timed block, stops instructions early.
 """
 
 from datetime import datetime, timezone
@@ -12,6 +13,7 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
+    IndefiniteRepeatingBlock,
     InstructionBlock,
     Plan,
     ScheduledPlan,
@@ -49,14 +51,24 @@ def test_a_counting_block_lasts_its_count_times_one_pass(normalized):
     assert seconds(normalized(block)) == pytest.approx(270)
 
 
-def test_a_counting_block_without_a_count_repeats_indefinitely_even_once_stored(
-    normalized,
-):
-    block = normalized(CountingRepeatingBlock(sub_instructions=[single(60)]))
-    stored = CountingRepeatingBlock.m_from_dict(block.m_to_dict())
+@pytest.mark.parametrize(
+    'block',
+    [
+        CountingRepeatingBlock(sub_instructions=[single(60)]),
+        CountingRepeatingBlock(repeat_n=3, sub_instructions=[single()]),
+    ],
+)
+def test_a_counting_block_that_does_not_finish_is_warned_about(normalized, log, block):
+    assert seconds(normalized(block)) is None
+    [warning] = log.warnings
+    assert 'never finishes' in warning
+
+
+def test_an_indefinite_block_never_finishes(normalized, log):
+    block = normalized(IndefiniteRepeatingBlock(sub_instructions=[single(60)]))
 
     assert seconds(block) is None
-    assert stored.repeat_n is None
+    assert (log.errors, log.warnings) == ([], [])
 
 
 def test_a_timed_block_lasts_its_repeat_duration_whatever_it_contains(normalized):
@@ -68,7 +80,7 @@ def test_a_timed_block_lasts_its_repeat_duration_whatever_it_contains(normalized
 
 
 def test_what_never_finishes_makes_everything_around_it_never_finish(normalized):
-    inner = CountingRepeatingBlock(repeat_n=2, sub_instructions=[single()])
+    inner = IndefiniteRepeatingBlock(sub_instructions=[single(60)])
     plan = normalized(
         Plan(instructions=[InstructionBlock(sub_instructions=[inner, single(60)])])
     )
@@ -148,6 +160,7 @@ def test_execute_builds_the_activity_from_its_arguments_not_from_the_plan():
             CountingRepeatingBlock(repeat_n=0, sub_instructions=[single(60)]),
             'at least once',
         ),
+        (TimedRepeatingBlock(sub_instructions=[single(60)]), 'no `repeat_duration`'),
     ],
 )
 def test_an_impossible_instruction_is_reported(normalized, log, section, reported):
