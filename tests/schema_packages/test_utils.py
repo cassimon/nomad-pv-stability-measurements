@@ -105,15 +105,16 @@ def test_a_hold_and_a_ramp_on_one_quantity_overlap(log):
     assert '2 Temperature steps overlap in fork' in error
 
 
-def test_mpp_and_open_circuit_cannot_both_be_asked_for(log):
-    # Two classes that declare one axis, so R4 sees the contradiction a `point` enum
-    # used to make visible (§15.13).
+def test_mpp_and_open_circuit_go_unreported(log):
+    # A known gap, not an intention: a load sits at one point at a time, so these two do
+    # contradict each other — but R4 groups by the class name alone, and the two names
+    # differ. The `axis` attribute that used to bridge them was removed in review for
+    # encoding physics in the schema (§15.13).
     steps = [step(MPPTracking), step(VOCTracking)]
 
     report_overlapping_steps(steps, 'parallel', 'fork', log)
 
-    [error] = log.errors
-    assert '2 OperatingPoint steps overlap in fork' in error
+    assert log.errors == []
 
 
 def test_blocks_are_not_a_quantity_and_never_overlap(log):

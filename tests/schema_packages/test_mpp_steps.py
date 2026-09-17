@@ -21,12 +21,6 @@ def test_the_two_ways_of_finding_a_point_are_two_classes():
     assert [cls.__name__ for cls in TRACKED] == ['MPPTracking', 'VOCTracking']
 
 
-def test_both_name_one_axis():
-    # A load sits at one point at a time, so two of these contradict each other and R4
-    # has to see them as one quantity even though they are two classes (§15.13).
-    assert {cls.axis for cls in TRACKED} == {'OperatingPoint'}
-
-
 def test_a_found_point_is_neither_held_nor_ramped():
     # The volts and amps at the point are the cell's answer, so there is no number for
     # the protocol to write, and nothing to move between.

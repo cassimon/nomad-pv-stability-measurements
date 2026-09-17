@@ -6,27 +6,26 @@ def _is_monitor_control(step) -> bool:
     return 'monitor' in step.m_def.all_quantities
 
 
-def _axis_of(step) -> str:
-    """The quantity a step speaks to. `HoldTemperature` and `RampTemperature` are two
-    kinds of step on one axis, and contradict each other exactly as two holds do.
+def _quantity_of(step) -> str:
+    """The quantity a step speaks to: its class name without its kind prefix, so
+    `HoldTemperature` and `RampTemperature` are two kinds of step on one quantity and
+    contradict each other exactly as two holds do (§15.11).
 
-    A class may name its axis outright — `axis = 'OperatingPoint'`, which is how
-    `MPPTracking` and `VOCTracking` say they are one thing (§15.13). Otherwise it is the
-    class name without its kind prefix. This module imports no schema class, so it reads
-    the class itself, never a type it would have to import (§15.11).
+    The name is the whole rule. This module imports no schema class, so it reads the
+    class itself, never a type it would have to import (§15.4).
     """
     cls = type(step)
-    return getattr(cls, 'axis', cls.__name__.removeprefix('Hold').removeprefix('Ramp'))
+    return cls.__name__.removeprefix('Hold').removeprefix('Ramp')
 
 
 def report_overlapping_steps(steps, mode: str, where: str, logger) -> None:
 
-    by_axis = {}
+    by_quantity = {}
     for step in steps:
         if _is_monitor_control(step):
-            by_axis.setdefault(_axis_of(step), []).append(step)
+            by_quantity.setdefault(_quantity_of(step), []).append(step)
 
-    for axis, overlapping in by_axis.items():
+    for quantity, overlapping in by_quantity.items():
         if len(overlapping) <= 1:
             continue
         if mode == 'parallel':
@@ -38,7 +37,7 @@ def report_overlapping_steps(steps, mode: str, where: str, logger) -> None:
         else:
             continue  # each has its own turn — genuinely subsequent
         logger.error(
-            f'{len(overlapping)} {axis} steps overlap in {where}: {reason}. '
+            f'{len(overlapping)} {quantity} steps overlap in {where}: {reason}. '
             f'Siblings are not merged into one step — write one step with all the '
             f'keys, or give each its own `estimated_duration` in a sequential block.'
         )

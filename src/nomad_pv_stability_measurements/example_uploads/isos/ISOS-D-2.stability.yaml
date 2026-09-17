@@ -1,0 +1,21 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-D-2
+  standard: ISOS-D-2
+  environment: indoor
+  notes: >-
+    ISOS Table 1, row ISOS-D-2 — dark storage in an oven in ambient air. The table gives
+    two temperature levels, 65 degC and 85 degC; this file writes the lower one, and the
+    other is one line away. Relative humidity is ambient, i.e. not controlled. Load at
+    open circuit. Every condition is constant, so this protocol has no routine. The
+    standard fixes no test duration and no sampling interval, so none are written here.
+  channel_settings:
+    irradiation:
+      hold: dark
+    temperature:
+      hold: 65 °C
+    atmosphere:
+      variable: water_vapor
+      control: false
+    electrical_load:
+      hold: open_circuit

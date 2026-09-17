@@ -1292,8 +1292,8 @@ src/nomad_pv_stability_measurements/
                       of the rate (RampTemperature, ...) (§15.11)
     mpp_steps.py      the electrical load driven to a point it finds rather than to a
                       number: MPPTracking (with the perturbation settings an operator
-                      sets) and VOCTracking, both declaring axis = 'OperatingPoint';
-                      the file a JV sweep would go in (D17, §15.10, §15.13)
+                      sets) and VOCTracking; the file a JV sweep would go in
+                      (D17, §15.10, §15.13)
     utils.py          the checks a block and the protocol share: R4, R5, and R6, which
                       fits steps to their block's duration (§15.4); check_steps runs the
                       three over one iteration of a repeating block (§15.8)
@@ -1965,9 +1965,9 @@ curve the load sits*, when the point is found by the instrument instead of writt
 `point` is `MEnum('mpp', 'voc')` — maximum power point tracking, and the open-circuit condition.
 
 **One class with an enum, not `MaximumPowerPoint` + `OpenCircuit`.** *Superseded by §15.13:
-`MPPTracking` and `VOCTracking` are two classes, named for what they do. The argument below was
-right about the contradiction but wrong about what forces one class — an axis can be **declared**
-instead of derived from the class name, so two classes still overlap as one.* A load sits at
+`MPPTracking` and `VOCTracking` are two classes, named for what they do. The argument below is
+right that R4 then stops seeing the contradiction — the declared axis that was to have bridged
+them was removed in review, so the report is a known gap (§15.13).* A load sits at
 exactly one
 point at a time, so the two are values on one axis, and R4 then reports "MPP and Voc at once" as
 the contradiction it is — which two separate classes could never catch, since R4 groups siblings
@@ -2110,30 +2110,42 @@ breaking them is always a mistake and worth reporting; an altitude's plausible r
 judgement about where experiments happen rather than a fact about the number, and a rule
 guessing *"that looks like feet"* is exactly the physics §15.1 keeps out of the schema.
 
-### 15.13 The load's found points, as two classes — and a declared axis
+### 15.13 The load's found points, as two classes
 
 **Status: settled in review, built.** Supersedes §15.10's single `OperatingPoint` with a `point`
 enum.
+
+*Amended in review: the declared `axis` attribute described below was **removed** — it encoded
+physics in the schema, which is the one thing §15.1 exists to keep out. What survives is the two
+classes and their names; what is lost is R4's report of "MPP and Voc at once". See "The axis was
+declared — and then removed" below.*
 
 **`MPPTracking` and `VOCTracking`** (`mpp_steps.py`), named for what they do. `OperatingPoint`
 asked a reader to know an enum before the class said anything at all: the class named a
 *category*, and the fact lived in a value. Two classes put the fact in the name, which is what
 every other step here does — `HoldTemperature` does not carry a `quantity: temperature`.
 
-**The axis is declared, not derived.** §15.10 argued that one class was *forced*, because R4
-groups by axis and the axis was the class name minus its kind prefix — so two classes would be
-two axes and "MPP and Voc at once" would go unreported. That was right about the contradiction
-and wrong about the remedy: a class can simply **say** what axis it is on.
+**The axis was declared — and then removed.** §15.10 argued that one class was *forced*, because
+R4 groups by axis and the axis was the class name minus its kind prefix — so two classes would be
+two axes and "MPP and Voc at once" would go unreported. The remedy tried was a class attribute
+naming the axis outright, `axis = 'OperatingPoint'`, which `_axis_of` read ahead of the derived
+name. It worked (a plain class attribute survives NOMAD's metaclass and is *not* registered as a
+metainfo property), and it was **rejected in review as too physics-encoded**: "these two classes
+are one physical degree of freedom" is a fact about solar cells, and §15.1's whole line is that
+such facts live in the parser or in a `normalize()`, never as schema furniture. One tag for one
+pair is also a general mechanism with a single user — the argument O12 lost on.
 
-```python
-class MPPTracking(PlannedMonitorControlStep):
-    axis = 'OperatingPoint'
-```
+So `_quantity_of` (renamed from `_axis_of`, since "axis" was the physics word) is now just the
+class name minus its `Hold`/`Ramp` prefix, and that name is the whole rule.
 
-`_axis_of` now reads `getattr(cls, 'axis', <class name minus Hold/Ramp>)`. **Verified:** a plain
-class attribute survives NOMAD's metaclass, is *not* registered as a metainfo property, and is
-readable off the class — so `utils.py` still imports no schema module (§15.4), and the derived
-name stays the default for every step that needs no exception.
+**The gap this leaves, stated plainly:** `MPPTracking` and `VOCTracking` group under their own
+names, so a block asking for both is **not** reported. A load does sit at one point at a time, so
+this is a real contradiction going unseen — recorded here, and asserted as current behaviour in
+`test_mpp_and_open_circuit_go_unreported`, so that it is a known gap rather than a silent
+regression. It is the same limit R4 already has between voltage, current and resistance
+(see the paragraph below): the cell ties them, and the schema does not know the cell. If it ever
+needs closing, the honest route is a check that knows about the load — in the parser, where the
+channel vocabulary already lives — not a tag on the class.
 
 **A constant external bias is `HoldVoltage`** — settled in review, and no class of its own here.
 Reverse bias included: `-1.2 V` is a number the protocol names, which is precisely what
@@ -2273,3 +2285,300 @@ figure cannot be translated at all. `%RH` as a *unit* stays refused by `_REJECTE
 message names the compound form — because `85 %RH` in a bare setpoint is still a number without
 its temperature. The compound is the one place the schema will read a relative humidity, which
 is what keeps "absolute on purpose" true of everything stored.
+
+---
+
+## 16. ISOS Table 1 as example uploads
+
+**Status: in progress.** §15.9 asked for one `.stability.yaml` per row of ISOS Table 1, and
+§15.10–§15.16 closed the four gaps that blocked it. This section is how those files are written,
+and what authoring the real protocols exposed that §15.9 did not predict.
+
+### 16.1 Where they live, and why not in `tests/data/`
+
+```
+src/nomad_pv_stability_measurements/example_uploads/isos/
+  README.md                what the set is, and how to read one file
+  ISOS-D-1.stability.yaml  … one per row, twenty-one in all
+```
+
+They ship **with the plugin**, through the `example_upload_entry_point` the package already
+declares, because an example upload is what a new Oasis user opens first — these files are the
+user-facing documentation §10 step 7 asks for, written in the format they will write themselves.
+The tests read them from that path rather than keeping a second copy in `tests/data/`: two copies
+of twenty-one files is twenty-one chances for the shipped one to rot while the tested one passes.
+`tests/data/` keeps what exists only to exercise the parser (`channels`, `tree`).
+
+The cookiecutter's placeholder `example_uploads/getting_started/` (one file, reading
+`EXAMPLE DATA`) is replaced rather than kept beside them.
+
+### 16.2 Two rules that govern every file
+
+**Settled in review, and the correction that produced them.** The first draft of the ISOS-D files
+broke both: it invented a test duration, a sampling interval, and a routine block with a name, to
+hold a protocol that has no moving parts at all.
+
+**Rule 1 — write only what the standard fixes, with certainty.** An example upload is read as a
+*template*. Anything written in one is taken by the next author as something the protocol
+requires, so a plausible-looking figure the standard never states is worse than an empty field:
+it manufactures a requirement. ISOS Table 1 fixes conditions — light, temperature, humidity,
+load. It fixes **no test duration, no sampling interval, no measurement schedule, and no cycle
+count** (with one exception, ISOS-LC-1's "cycle period 2, 8 or 24 h; duty cycle 1:1 or 1:2",
+which the table does state). None of those appear in a file. Where the table offers levels
+("65, 85 °C"), the file takes one and names the other in `notes`; that is a choice among stated
+values, not an invention.
+
+The same rule retires `monitor: true` from most files. The table writes "Monitored" in exactly
+one place — ISOS-LT's humidity — so that is the only place a file asserts logging. Elsewhere
+"Ambient" means **not controlled**, and the file says exactly that and nothing more:
+
+```yaml
+temperature: {control: false}      # ambient: not regulated. Not "logged every 600 s".
+```
+
+**Rule 2 — `channel_settings` is everything constant; `routine` is only what cannot be a
+constant.** The two parts of a file are a statement about the protocol, not a house style: a
+setting has no duration and therefore holds for the whole run (D13), which is precisely what a
+constant condition is. If a protocol holds one temperature, one irradiance and one load from
+beginning to end, **it has no routine**, and writing an empty block around it to look complete is
+a lie about the protocol's shape.
+
+This splits ISOS Table 1 cleanly in two:
+
+| Families | Shape |
+|---|---|
+| **ISOS-D, -V, -L, -O** | every condition constant → `channel_settings` only, no `routine` |
+| **ISOS-T, -LC, -LT** | something varies within the run — a thermal cycle, a light/dark duty cycle, a ramping temperature → the varying part, and only that, goes in `routine` |
+
+**No invented names.** A block or protocol is named only where the standard names it. The
+protocol's own `name` is the designation from the table (`ISOS-D-1`) and nothing more;
+descriptive titles like "dark storage, ambient" are the author's prose, and a block that the
+standard does not name is left unnamed.
+
+**The rest of the transcription**, unchanged from the first draft:
+
+| The table says | The file writes | Why |
+|---|---|---|
+| "None" (light source) | `hold: dark` | Deliberately dark, and counted (D8a) — not the absence of an irradiance step. |
+| "OC" | `hold: open_circuit` | §15.13; ISOS's own word reaches `VOCTracking`. |
+| "MPP or OC" | `hold: mpp` | The table's "or" is a choice the operator makes. MPP is written because it is the case the tracker settings exist for; `notes` records that OC is equally within the protocol. |
+| "Linear ramping between X and 65 °C" (ISOS-LT) | one `ramp:` step with `end_of_ramp_behavior: triangle` | §15.14. A triangle *is* the solar-thermal cycle: up at the rate, down at the rate, repeat. Two ramp steps in a repeat block would say the same thing at twice the length. |
+| "Outdoor" (ISOS-O) | `environment: outdoor` + `geo_location` | §15.12. The site is part of an outdoor result. |
+
+A consequence of Rule 1 worth seeing coming: a ramp whose rate the table does not state is
+written with `from` and `to` and **no** `rate` and no `duration`. §15.11's `normalize()` derives
+one from the other when either is present and reports nothing when neither is — so an
+under-specified ramp is a legal, honest archive rather than an error.
+
+### 16.3 What twenty-one real protocols exposed
+
+Three things, none of them predicted by §15.9's four-row table:
+
+1. **ISOS-V's load column is device-derived, and the schema cannot say so.** The row reads
+   "Positive: V_MPP; V_oc; E_g/q; J_SC — Negative: −V_oc, J_MPP": every one of them is a number
+   *taken from a JV curve measured on a fresh device*, not a number an author knows when writing
+   the protocol. `HoldVoltage` takes a number, so the files write a representative one and say in
+   `notes` what it must be set from. **The gap is real and is not a parser gap:** the schema has
+   no way to express "this setpoint is derived from a measurement of this sample". It would be a
+   quantity whose value is a reference plus a rule, which is a bigger idea than a step — closest
+   to §4.5's `results.py`, where the measured JV curve will actually exist. Recorded, not built.
+2. **ISOS-O-1 and ISOS-O-2 become the same file.** They differ in the table *only* by the
+   characterization light source (solar simulator vs sunlight), which §15.9 put out of scope. The
+   two files are therefore identical but for `standard` and `notes`. That is the honest outcome
+   of the scope decision rather than a fault — and it is the clearest argument yet that
+   characterization belongs in the measurement layer, where it will distinguish them.
+3. **"Monitored, uncontrolled" is one word away from "monitored, controlled".** ISOS-LT-1's
+   humidity is monitored and not controlled; LT-2/3's is controlled at 50 %. In the file that is
+   the presence or absence of a setpoint beside the same `monitor: true` — which reads well, and
+   is worth noting as a case where the schema's central distinction lines up exactly with the
+   standard's own prose.
+
+ISOS-LT-2/3's "controlled at 50 % beyond 40 °C" stays footnoted in `notes`, as §15.9 settled: a
+control law conditioned on another quantity's value is not reachable without conditional logic,
+and one clause in two rows does not buy it.
+
+### 16.4 The tests
+
+`tests/example_uploads/test_isos_protocols.py`, one test per protocol, each asserting **every
+field of every step** — not a smoke test that the file parses. Each one:
+
+1. translates the shipped file with **zero problems** (a typo in an example upload is a bug in
+   the documentation, so the bar is zero, not "no exception");
+2. loads the bare archive into `StabilityProtocol` and normalizes it, with **no errors logged** —
+   which is what runs R4/R5/R6 over the real protocol and catches an overlap a hand-written
+   example would otherwise ship with;
+3. asserts each step's class, its setpoint or ramp ends in their own units, its duration, its
+   sampling, and the protocol's own `standard` / `environment` / `notes` / `geo_location`;
+4. round-trips: translating the bare archive again returns it unchanged (§13.1a).
+
+A shared parametrized test covers 1, 2 and 4 for all twenty-one; the per-protocol tests carry 3,
+which is the part that has to be written out by hand for each row.
+
+---
+
+## 17. Standard values, tolerances, and bounds
+
+**Status: proposed, not built.** Asked for in review, to close two gaps §16.3 recorded: "RT to
+65 °C" gives no number for room temperature, and "< 55 %" is a bound the schema can only store as
+an equality. A third thing falls out for free — `23 ± 4 °C` currently loses its `± 4`.
+
+### 17.1 The three pieces
+
+| Piece | Where | What it is |
+|---|---|---|
+| `StandardValue`, `RoomTemperature` | `schema_packages/standard_values.py` | A named value with a tolerance, published as a section so the number has one home and a description |
+| `set_point`, `set_point_tolerance` | `routine.py`, `hold_steps.py` | `HoldStep.setpoint` renamed and given its tolerance; authored `hold:` / `hold_tolerance:` |
+| `HoldBelowStep` + `HoldBelow…` | `schema_packages/hold_below_steps.py` | "Keep this under X", authored `hold_below:` |
+
+### 17.2 `standard_values.py`
+
+```python
+class StandardValue(ArchiveSection):
+    """A value a standard names rather than each protocol restating it."""
+    name      = Quantity(type=str)                 # 'room temperature'
+    value     = Quantity(type=np.float64)          # no unit on the base
+    tolerance = Quantity(type=np.float64)          # symmetric: value ± tolerance
+
+class RoomTemperature(StandardValue):
+    name      = Quantity(type=str, default='room temperature')
+    value     = Quantity(type=np.float64, unit='K', default=296.15)   # 23 °C
+    tolerance = Quantity(type=np.float64, unit='K', default=4.0)      # ± 4 K
+```
+
+The base names no unit and each subclass declares one, exactly as `HoldStep.set_point` and its
+ten subclasses do (§15.11) — so the pattern is the one already in the file, not a new one.
+
+**The figures are ISOS Table 1's own.** The table writes "Ambient (23 ± 4 °C)" in the rows that
+state a number, and "RT" in the rows that do not; taking the first as the definition of the
+second is a cross-reference *within one table*, which is the only reading that does not invent a
+figure (§16.2, Rule 1). The `description` says so, and `name` is what carries it into the ELN.
+
+**Verify before building** (the `location` collision in §15.12 was found this way): that
+`ArchiveSection` declares no `name` of its own, and that a `default` on a unit-ful `Quantity`
+reads back in the declared unit.
+
+**Why a section at all, when the parser inlines the numbers (§17.3)?** Because the alternative is
+a dict literal in `channels.py`, and this way the definition is *published*: it appears in the
+metainfo and the schema browser, carries a description and a citation, and is one `EntryData`
+away from being a referenceable entry in an Oasis if these ever need to be curated centrally.
+
+### 17.3 How `RT` reaches a step — resolved by the parser, numbers in the archive
+
+`temperature: RT` and `hold: RT` both fill `set_point` **and** `set_point_tolerance` from
+`RoomTemperature`, in the translator, before the schema sees anything. The archive holds
+`set_point: 296.15, set_point_tolerance: 4.0` and no trace of the word.
+
+This is D8a's rule and §13's whole architecture: authoring words never reach the archive, so no
+consumer has to resolve one. It also means a file that pins its own figure and a file that writes
+`RT` are the same archive, and compare without a lookup.
+
+`NAMED_SETPOINTS` (`channels.py`) therefore stops mapping a word to a bare float and maps it to a
+`StandardValue` subclass:
+
+```python
+NAMED_VALUES = {
+    HoldTemperature: {'RT': RoomTemperature},
+    HoldIrradiance:  {'dark': Dark},          # value 0 W/m², no tolerance
+}
+```
+
+**`dark` moves over too.** It is the same idea — a word standing for a value — and it is
+currently a magic `0.0` in a parser dict. As a `StandardValue` it gains a description and a unit
+and stops being a special case, and the translator keeps **one** path instead of a float branch
+beside a section branch. Separable from the rest of this section if it is not wanted.
+
+**A named word must resolve in a ramp, which today it does not.** `_value` gates the table on
+`key == 'setpoint'`, so `ramp: {from: dark, to: 1 sun}` — written out in D8a as a thing that
+works — silently does not resolve. The gate becomes `key in ('set_point', 'start_point',
+'end_point')`. This is not polish: `ramp: {from: RT, to: 65 °C}` **is** ISOS-T-1 and ISOS-LT-1,
+so `RT` is needed at a ramp endpoint on day one. A tolerance has nowhere to go on a ramp
+endpoint, and is dropped there with a reported problem rather than silently.
+
+### 17.4 `set_point` and `set_point_tolerance`
+
+`HoldStep.setpoint` → **`set_point`**, and a new `set_point_tolerance` beside it. The rename is
+worth its churn for one reason: `RampStep` already spells its fields `start_point` and
+`end_point`, so `setpoint` was the odd one out.
+
+```yaml
+temperature: {hold: 65 °C, hold_tolerance: 2 K}
+temperature: {hold: RT}                 # both fields, from the standard value
+```
+
+- **The tolerance is symmetric** — `value ± tolerance`, one field, because that is how every
+  standard states it. An asymmetric window is `HoldBelow` plus `HoldAbove` (§17.5).
+- **An explicit `hold_tolerance` overrides the one a named value brought.** Not a contradiction
+  to report: a lab whose oven holds tighter than the standard demands is stating a fact about its
+  own run.
+- **A tolerance is a *difference*, so its unit is a difference unit.** `hold_tolerance: 4 °C`
+  reads as 277.15 K through `parse()` — the O11 trap, and silent. The plan is to **refuse an
+  offset unit on a tolerance** with a message naming `4 K`, which is a small, targeted check of
+  exactly the kind §6 exists for.
+
+**Compatibility is the risk in this section, not the rename itself.** §13.1a promises that no
+file which loaded before stops loading, and `setpoint` appears in every bare archive ever written
+by this plugin, including `tests/data/channels.archive.yaml`. So the translator gains a bare-field
+rename (`setpoint` → `set_point`) for monitor/control steps, tested with a golden archive in the
+old spelling. `VALUE_FIELDS`, `_value_field` and `_setpoint` all follow the rename.
+
+### 17.5 `HoldBelow`
+
+```yaml
+atmosphere: {variable: water_vapor, hold_below: 55 %}
+```
+
+```python
+class HoldBelowStep(PlannedMonitorControlStep):
+    upper_bound = Quantity(type=np.float64)   # unit declared per subclass
+```
+
+A sibling kind of `HoldStep`, not a subclass of it: "keep under 55 %" is not "hold at 55 %", and
+reusing `set_point` for both would be one field with two meanings. `upper_bound` rather than
+`maximum` leaves `lower_bound` free for the symmetric `HoldAbove`, which is three lines whenever
+a standard states one — not built now, because none of these do.
+
+**Only the quantities that need one.** ISOS states a bound for water vapour alone (`< 55 %` in
+T-3, `< 50 %` in LC-3), so `HoldBelowWaterVaporFraction` is the whole family at first. The
+translator already reports against a partial table — `balance_gas` "does not ramp" (§15.15) —
+and the same guard gives "`voltage` has no below-bound form" for free. Adding one later is one
+class and one table line, which is cheaper than ten classes nobody writes.
+
+**R4 has to keep grouping by quantity.** `_quantity_of` strips `Hold` then `Ramp`, so
+`HoldBelowWaterVaporFraction` would become `BelowWaterVaporFraction` and stop colliding with the
+plain hold — two steps commanding one quantity, unreported. The prefixes become data, longest
+first:
+
+```python
+for prefix in ('HoldBelow', 'HoldAbove', 'Hold', 'Ramp'):
+```
+
+Asking for a bound **sets `control`**, as a setpoint and a ramp do (§15.13, §15.14).
+
+### 17.6 Order of work, each step reviewable on its own
+
+1. **`standard_values.py` + tests.** Section only, no parser, no rename — verifies the two
+   NOMAD assumptions in §17.2 before anything depends on them.
+2. **`set_point` rename + `set_point_tolerance`**, with the bare-field compatibility rename and a
+   golden archive in the old spelling. The biggest diff and the one with a migration, so it
+   travels alone.
+3. **`hold_tolerance`, and named values resolving at ramp endpoints.** Includes the offset-unit
+   refusal, and fixes `dark` in a ramp along the way.
+4. **`RT` end to end** — `NAMED_VALUES`, `RoomTemperature`, and `{channel: temperature, hold: RT}`
+   and `ramp: {from: RT}` both landing the value and the tolerance.
+5. **`HoldBelowStep` + `HoldBelowWaterVaporFraction` + `hold_below:`**, with the `_quantity_of`
+   prefix fix and an R4 test that a hold and a below-bound on one quantity still collide.
+6. **The ISOS files that were waiting on this** — T-1/-2 and LT-1 (`RT`), T-3 and LC-3
+   (`hold_below`), and `± 4 K` wherever the table states a tolerance.
+
+### 17.7 Decisions for review
+
+- **`StandardValue`, not `standardValue`** — every section in this package is PascalCase, and so
+  is every section in NOMAD.
+- **Scope of the standard values.** `RoomTemperature` is asked for. `Dark` is proposed (§17.3) to
+  remove the float special case. Nothing else: `1 sun` is already a *unit* alias (§6), not a
+  named value, and should stay one.
+- **What a tolerance means is not checked.** The schema stores `± 4 K`; nothing verifies a run
+  stayed inside it, because that is measured data (§4.5). It is a statement of the plan.
+- **Still unreachable, and not addressed here:** ISOS-LT-2/3's "controlled at 50 % beyond 40 °C"
+  is a bound *conditioned on another quantity* — `HoldBelow` is unconditional. Footnoted in
+  `notes`, as §15.9 and §16.2 settled.

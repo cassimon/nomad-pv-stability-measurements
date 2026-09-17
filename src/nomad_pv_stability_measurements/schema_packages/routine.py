@@ -96,7 +96,7 @@ class RampStep(PlannedMonitorControlStep):
     end_of_ramp_behavior = Quantity(
         type=MEnum('hold', 'sawtooth', 'triangle'),
         default='hold',
-        description='Whether the ramp runs once and then holds end_point until the end of the step duration, ' \
+        description='Whether the ramp runs once and then holds end_point until the end of the step duration, '
         'repeats with an abrupt jump back to `start_point`, '
         'or repeats with a downward ramp at the same rate back to `start_point`.',
     )

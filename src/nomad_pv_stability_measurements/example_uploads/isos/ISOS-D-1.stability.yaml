@@ -1,0 +1,23 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-D-1
+  standard: ISOS-D-1
+  environment: indoor
+  notes: >-
+    ISOS Table 1, row ISOS-D-1 — shelf life. Light source none, temperature ambient
+    (the table gives 23 +- 4 degC), relative humidity ambient, load at open circuit.
+    "Ambient" means not controlled, which is what `control: false` says; the figure in
+    brackets describes a laboratory rather than a setpoint anyone dials in. Every
+    condition is constant, so this protocol has no routine. The standard fixes no test
+    duration, no sampling interval and no measurement schedule, so none are written
+    here — add your own when you run it.
+  channel_settings:
+    irradiation:
+      hold: dark
+    temperature:
+      control: false
+    atmosphere:
+      variable: water_vapor
+      control: false
+    electrical_load:
+      hold: open_circuit

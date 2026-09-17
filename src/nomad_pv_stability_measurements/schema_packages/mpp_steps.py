@@ -15,7 +15,6 @@ class MPPTracking(PlannedMonitorControlStep):
     perturbs, how often, and how long it waits before reading back.
     """
 
-
     perturbation_voltage = Quantity(
         type=np.float64,
         unit='V',
