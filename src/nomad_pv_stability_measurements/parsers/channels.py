@@ -1,16 +1,16 @@
-"""The words an authored file uses for steps (Design.md §15.2).
+"""The words an authored file uses for instructions (Design.md §15.2).
 
-None of them reaches the archive: a `channel:` and a variable's key choose the step's
+None of them reaches the archive: a `channel:` and a variable's key choose the instruction's
 class, `hold` becomes its `set_point`, and a named word becomes the value it stands for.
 """
 
-from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
+from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBelowAbsoluteHumidity,
     HoldBelowOxygenFraction,
     HoldBelowRelativeHumidity,
     HoldBetweenIrradiance,
 )
-from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     BalanceGas,
     HoldAbsoluteHumidity,
     HoldBendRadius,
@@ -24,11 +24,11 @@ from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     HoldTemperature,
     HoldVoltage,
 )
-from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     MPPTracking,
     VOCTracking,
 )
-from nomad_pv_stability_measurements.schema_packages.ramp_steps import (
+from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
     RampAbsoluteHumidity,
     RampBendRadius,
     RampCurrent,
@@ -46,8 +46,8 @@ from nomad_pv_stability_measurements.schema_packages.standard_values import (
     RoomTemperature,
 )
 
-#: The step class each variable key names when the step holds one value (§15.11).
-VARIABLE_STEPS = {
+#: The instruction class each variable key names when the instruction holds one value (§15.11).
+VARIABLE_INSTRUCTIONS = {
     'temperature': HoldTemperature,
     'irradiance': HoldIrradiance,
     'voltage': HoldVoltage,
@@ -66,9 +66,9 @@ VARIABLE_STEPS = {
 #: balance is a gas's name, not a number, so it has a field of its own (§15.15).
 VALUE_FIELDS = {BalanceGas: 'gas'}
 
-#: The same variables when the step ramps instead, chosen by an authored `ramp:`
+#: The same variables when the instruction ramps instead, chosen by an authored `ramp:`
 #: (§15.14). One key, two kinds — which is what R4 reads as one axis (§15.11).
-RAMP_STEPS = {
+RAMP_INSTRUCTIONS = {
     'temperature': RampTemperature,
     'irradiance': RampIrradiance,
     'voltage': RampVoltage,
@@ -82,18 +82,18 @@ RAMP_STEPS = {
     'pressure': RampPressure,
 }
 
-#: The same variables when the step keeps under a bound instead, chosen by an authored
+#: The same variables when the instruction keeps under a bound instead, chosen by an authored
 #: `hold_below:` (§17.5). Only what a standard bounds — the relative humidity, and the
 #: water and oxygen of an inert atmosphere (§20.5); the rest are reported.
-HOLD_BELOW_STEPS = {
+HOLD_BELOW_INSTRUCTIONS = {
     'absolute_humidity': HoldBelowAbsoluteHumidity,
     'relative_humidity': HoldBelowRelativeHumidity,
     'oxygen': HoldBelowOxygenFraction,
 }
 
-#: The same variables when the step keeps between two bounds, chosen by an authored
+#: The same variables when the instruction keeps between two bounds, chosen by an authored
 #: `hold_between:` (§22). Only what a standard gives a range for: the irradiance.
-HOLD_BETWEEN_STEPS = {
+HOLD_BETWEEN_INSTRUCTIONS = {
     'irradiance': HoldBetweenIrradiance,
 }
 
@@ -115,16 +115,16 @@ CHANNEL_VARIABLES = {
     ),
 }
 
-#: Words a set point reads as a value, per step class. Never global: `dark` is an
+#: Words a set point reads as a value, per instruction class. Never global: `dark` is an
 #: irradiance and means nothing on the temperature axis, or in a duration (D8a).
 NAMED_VALUES = {
     'irradiance': {'dark': Dark},
     'temperature': {'RT': RoomTemperature},
 }
 
-#: Words that name a step outright, with no value to hold: the load is driven to a point
+#: Words that name an instruction outright, with no value to hold: the load is driven to a point
 #: the cell decides, not to a number the protocol writes (§15.13). `open_circuit` is what
-#: ISOS Table 1 writes for `voc`, and is read as the same step.
+#: ISOS Table 1 writes for `voc`, and is read as the same instruction.
 TRACKED_POINTS = {
     'mpp': MPPTracking,
     'voc': VOCTracking,

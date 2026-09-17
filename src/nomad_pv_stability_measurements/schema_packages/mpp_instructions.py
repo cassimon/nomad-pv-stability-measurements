@@ -2,13 +2,13 @@ import numpy as np
 from nomad.metainfo import Quantity, SchemaPackage
 
 from nomad_pv_stability_measurements.schema_packages.routine import (
-    PlannedMonitorControlStep,
+    MonitorControlInstruction,
 )
 
 m_package = SchemaPackage()
 
 
-class MPPTracking(PlannedMonitorControlStep):
+class MPPTracking(MonitorControlInstruction):
     """The load held at the cell's maximum power point, which the tracker finds.
 
     The parameters are what an operator sets before the run: how far the tracker
@@ -45,7 +45,7 @@ class MPPTracking(PlannedMonitorControlStep):
     )
 
 
-class VOCTracking(PlannedMonitorControlStep):
+class VOCTracking(MonitorControlInstruction):
     """The load at open circuit, where the voltage settles with no current drawn.
 
     No parameters and no set_point: open circuit is a state of the terminals, and the

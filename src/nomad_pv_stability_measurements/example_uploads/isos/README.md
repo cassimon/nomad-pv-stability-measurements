@@ -46,7 +46,7 @@ channel_settings:          # conditions that hold for the whole test
   atmosphere: {variable: relative_humidity, control: false, monitor: true}   # ambient
   electrical_load: {hold: mpp}
 routine:                   # only what changes during the test
-  repeat: until_end_of_protocol
+  repeat: indefinitely
   commands:
     - {channel: irradiation, control: true, duration: 8 h}
     - {channel: irradiation, hold: dark, duration: 16 h}

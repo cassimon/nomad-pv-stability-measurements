@@ -1,4 +1,4 @@
-"""The steps that hold one value, one class per quantity (Design.md §15.1, §15.11).
+"""The instructions that hold one value, one class per quantity (Design.md §15.1, §15.11).
 
 Each only fixes the unit of its `set_point`. What a set point means physically, which
 quantities are tied, and words that stand for values are no part of the schema: such
@@ -16,22 +16,22 @@ the relative humidity a standard states, which needs no temperature beside it to
 written down (§20.6).
 
 `BalanceGas` holds something that is not a number — a gas — so it takes no `set_point`
-and subclasses the plain monitor/control step instead of `HoldStep` (§15.11). The load's
-tracked point is the same shape, and lives in `mpp_steps.py` (§15.10).
+and subclasses the plain monitor/control instruction instead of `HoldInstruction` (§15.11). The load's
+tracked point is the same shape, and lives in `mpp_instructions.py` (§15.10).
 """
 
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage
 
 from nomad_pv_stability_measurements.schema_packages.routine import (
-    HoldStep,
-    PlannedMonitorControlStep,
+    HoldInstruction,
+    MonitorControlInstruction,
 )
 
 m_package = SchemaPackage()
 
 
-class HoldTemperature(HoldStep):
+class HoldTemperature(HoldInstruction):
     """The sample's temperature."""
 
     set_point = Quantity(type=np.float64, unit='K', description='Temperature to hold.')
@@ -42,7 +42,7 @@ class HoldTemperature(HoldStep):
     )
 
 
-class HoldIrradiance(HoldStep):
+class HoldIrradiance(HoldInstruction):
     """The light on the sample."""
 
     set_point = Quantity(
@@ -59,7 +59,7 @@ class HoldIrradiance(HoldStep):
     )
 
 
-class HoldVoltage(HoldStep):
+class HoldVoltage(HoldInstruction):
     """The voltage at the cell's terminals."""
 
     set_point = Quantity(type=np.float64, unit='V', description='Voltage to hold.')
@@ -76,7 +76,7 @@ class HoldVoltage(HoldStep):
     )
 
 
-class HoldCurrent(HoldStep):
+class HoldCurrent(HoldInstruction):
     """The current through the cell."""
 
     set_point = Quantity(type=np.float64, unit='A', description='Current to hold.')
@@ -93,7 +93,7 @@ class HoldCurrent(HoldStep):
     )
 
 
-class HoldResistance(HoldStep):
+class HoldResistance(HoldInstruction):
     """The load across the cell's terminals."""
 
     set_point = Quantity(
@@ -106,7 +106,7 @@ class HoldResistance(HoldStep):
     )
 
 
-class HoldBendRadius(HoldStep):
+class HoldBendRadius(HoldInstruction):
     """How far the device is bent."""
 
     set_point = Quantity(
@@ -119,7 +119,7 @@ class HoldBendRadius(HoldStep):
     )
 
 
-class HoldStrain(HoldStep):
+class HoldStrain(HoldInstruction):
     """How far the device is stretched."""
 
     set_point = Quantity(
@@ -134,7 +134,7 @@ class HoldStrain(HoldStep):
     )
 
 
-class HoldAbsoluteHumidity(HoldStep):
+class HoldAbsoluteHumidity(HoldInstruction):
     """The water in the atmosphere around the sample, as a volume ratio (§20.6)."""
 
     set_point = Quantity(
@@ -151,14 +151,14 @@ class HoldAbsoluteHumidity(HoldStep):
     )
 
 
-class HoldRelativeHumidity(HoldStep):
+class HoldRelativeHumidity(HoldInstruction):
     """The relative humidity around the sample, as the fraction itself (§20.6)."""
 
     set_point = Quantity(
         type=np.float64,
         unit='dimensionless',
         description='Relative humidity to hold, as a fraction: `85 %` is 0.85. At '
-        'whatever temperature the sample is at — the step states no temperature of its '
+        'whatever temperature the sample is at — the instruction states no temperature of its '
         'own, and is not converted into a volume ratio.',
     )
     set_point_tolerance = Quantity(
@@ -168,7 +168,7 @@ class HoldRelativeHumidity(HoldStep):
     )
 
 
-class HoldOxygenFraction(HoldStep):
+class HoldOxygenFraction(HoldInstruction):
     """The oxygen in the atmosphere around the sample, as a volume ratio."""
 
     set_point = Quantity(
@@ -184,14 +184,14 @@ class HoldOxygenFraction(HoldStep):
     )
 
 
-class HoldPressure(HoldStep):
+class HoldPressure(HoldInstruction):
     """The total pressure of the atmosphere around the sample."""
 
     set_point = Quantity(
         type=np.float64,
         unit='Pa',
         description='Pressure to hold: the atmosphere as a whole, beside the fractions '
-        'the other steps record (§15.10).',
+        'the other instructions record (§15.10).',
     )
     set_point_tolerance = Quantity(
         type=np.float64,
@@ -200,8 +200,8 @@ class HoldPressure(HoldStep):
     )
 
 
-class BalanceGas(PlannedMonitorControlStep):
-    """What the rest of the atmosphere is, beside the fractions the other steps record.
+class BalanceGas(MonitorControlInstruction):
+    """What the rest of the atmosphere is, beside the fractions the other instructions record.
 
     A name, not a number, so it declares no `set_point` either (§15.10, §15.11).
     """

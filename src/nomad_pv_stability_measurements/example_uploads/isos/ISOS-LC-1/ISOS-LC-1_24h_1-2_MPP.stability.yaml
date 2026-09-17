@@ -17,7 +17,7 @@ data:
     electrical_load:
       hold: mpp
   routine:
-    repeat: until_end_of_protocol
+    repeat: indefinitely
     commands:
       - channel: irradiation
         control: true

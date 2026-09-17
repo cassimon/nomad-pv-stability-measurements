@@ -3179,3 +3179,94 @@ as `HoldBetweenIrradiance` with `lower_bound` 800 and `upper_bound` 1000. Names,
 counts (192 files) are unchanged.
 
 **Status: built.** 192 files, 812 tests, ruff clean.
+
+## 23. Plans and instructions — the protocol is no activity
+
+Replaces §15.4's fitting, §15.5, §15.6 and §15.8. A protocol is a **plan**: it says what is to be
+done, and never claims that anything ran. `Plan.execute()` is where a plan becomes a NOMAD
+`Activity`; this plugin never calls it, as it has no concrete measurements yet. "Step" is kept
+for what an activity records (`ActivityStep`) and nowhere else: everything a plan holds is an
+**instruction**.
+
+### 23.1 `general.py` — no PV concept
+
+```
+Instruction                     name, description, estimated_duration, sub_instructions
+├── SingleInstruction           no sub-instructions
+│   └── MonitorControlInstruction (routine.py) → Hold…, HoldBelow…, HoldBetween…, Ramp…, MPP/VOC
+└── InstructionBlock            sub_instruction_execution_mode — runs once
+    ├── CountingRepeatingBlock  repeat_n
+    └── TimedRepeatingBlock     repeat_duration
+Plan (EntryData)                name, description, estimated_duration, instructions, execute()
+└── ScheduledPlan               scheduled_datetime, scheduled_end_time
+    StabilityProtocol (protocol.py) is a Plan
+```
+
+- **An instruction is completed after its `estimated_duration`. Empty means it never finishes.**
+  There is no "condition lasting as long as its block" any more: a setting without a duration
+  simply never ends.
+- **Instructions are consistent on their own.** A block's `estimated_duration` is always derived,
+  never authored. `InstructionBlock`, the parent of both repeating blocks, runs its
+  sub-instructions once (`sequential` sum, `parallel` maximum); a `CountingRepeatingBlock` lasts
+  that times `repeat_n`. Empty if it repeats indefinitely or anything inside never finishes —
+  which passes up to every parent and to the plan.
+- **`repeat_n` has no default; empty means indefinitely.** A default would come back on every
+  read, since NOMAD stores no empty value (verified), and an indefinite block would load as one
+  pass.
+- **`TimedRepeatingBlock`** repeats its sub-instructions until `repeat_duration`, then stops
+  them wherever they are; that is its `estimated_duration`. Each repeating block has only its own
+  way of ending: no `repeat_n` on the timed one, no `repeat_duration` on the counting one.
+- **Only a plan stops instructions early.** A written `Plan.estimated_duration` is where every
+  instruction still running is stopped; left empty it is derived, and empty if one never ends.
+  `ScheduledPlan.scheduled_end_time` is empty then too.
+- **`execute()` takes everything the activity is as keyword arguments** — never the plan's own
+  `name` or `description` — and a subclass overrides it to turn instructions into steps.
+
+### 23.2 The protocol runs all its instructions in parallel
+
+`StabilityProtocol.instruction_execution_mode = 'parallel'`: the settings, which never finish,
+and the routine start together, so the routine is not left waiting behind them. With settings in
+every file, a protocol claims no length unless it writes `duration`.
+
+The PV checks stay out of `general.py`: `StabilityProtocol.normalize` runs them over its own
+instructions and every block inside it (`utils.check_instructions`):
+
+- **R4** — two instructions on one quantity in a `parallel` run overlap (error). One after
+  another they never do.
+- **R5** — in a `sequential` run, an instruction after one that never finishes, or after a timed
+  block's `repeat_duration` is used up, never runs (warning).
+- **R6 is gone.** Nothing is shortened to fit a block: a block's length follows from its
+  instructions, and stopping is the plan's or a timed block's job.
+
+### 23.3 Authoring
+
+```yaml
+duration: 1000 h            # on the protocol only: where everything stops
+routine:
+  repeat: indefinitely      # a CountingRepeatingBlock; or `repeat: 5`; left out, indefinitely too
+  mode: parallel            # optional, `sequential` otherwise
+  commands: [...]
+routine:
+  repeat_for: 12 h          # a TimedRepeatingBlock
+  commands: [...]
+```
+
+`commands` becomes `instructions` on a protocol and `sub_instructions` on a block; `mode` becomes
+`sub_instruction_execution_mode`, `repeat_for` becomes `repeat_duration`. The former words are
+reported with what to write instead: `until_end_of_protocol` (`repeat: indefinitely`),
+`until_end_of_duration` (`repeat_for`), `n_times` (the number). `duration` on a block is
+reported: its length follows from its commands. A block without `m_def` is a
+`CountingRepeatingBlock`, or a `TimedRepeatingBlock` with `repeat_for`; a plain `InstructionBlock`
+is only reached by naming it, and takes no `repeat`.
+
+### 23.4 Renamed, and not kept readable
+
+`PlannedProcess` → `Plan`; `PlannedProcessStep` → `Instruction`; `PlannedSubroutineStep` deleted
+for `InstructionBlock` and its two repeating children; `PlannedMonitorControlStep`, `HoldStep`, `HoldBelowStep`,
+`HoldBetweenStep`, `RampStep` → `…Instruction`; `hold_steps.py`, `hold_below_steps.py`,
+`ramp_steps.py`, `mpp_steps.py` → `…_instructions.py`; `steps` → `instructions` /
+`sub_instructions`. `was_executed` and the `estimated_*` plan/record fields are gone with
+`PlannedProcess`; `location` is the protocol's own quantity now. No alias maps the old class
+paths — nothing was published in them. The 109 ISOS files write `repeat: indefinitely`.
+
+**Status: built.** 192 files, 814 tests, ruff clean.

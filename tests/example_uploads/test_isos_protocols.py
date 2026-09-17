@@ -19,24 +19,26 @@ from nomad.datamodel import EntryArchive, EntryMetadata
 
 from nomad_pv_stability_measurements import example_uploads
 from nomad_pv_stability_measurements.parsers.translate import m_def, translate
-from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
+from nomad_pv_stability_measurements.schema_packages.general import (
+    CountingRepeatingBlock,
+)
+from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBetweenIrradiance,
 )
-from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldCurrent,
     HoldIrradiance,
     HoldRelativeHumidity,
     HoldTemperature,
     HoldVoltage,
 )
-from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     MPPTracking,
     VOCTracking,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
-from nomad_pv_stability_measurements.schema_packages.ramp_steps import RampTemperature
-from nomad_pv_stability_measurements.schema_packages.routine import (
-    PlannedSubroutineStep,
+from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
+    RampTemperature,
 )
 
 EXAMPLES = Path(example_uploads.__file__).parent / 'isos'
@@ -52,7 +54,7 @@ HOUR = 3600
 MINUTE = 60
 
 
-def step(cls, **fields) -> dict:
+def instruction(cls, **fields) -> dict:
     return {'m_def': m_def(cls), **fields}
 
 
@@ -60,16 +62,16 @@ def kelvin(celsius: float):
     return pytest.approx(celsius + ZERO_CELSIUS)
 
 
-# The table's cells, as the steps they are — read with the paper's text (§18.7, §20).
+# The table's cells, as the instructions they are — read with the paper's text (§18.7, §20).
 
-DARK = step(HoldIrradiance, control=True, set_point=0.0)
-SOLAR_SIMULATOR = step(HoldIrradiance, control=True)
+DARK = instruction(HoldIrradiance, control=True, set_point=0.0)
+SOLAR_SIMULATOR = instruction(HoldIrradiance, control=True)
 #: "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied"
 #: (p.43). A recommendation is a variant of its own (§21.1): every solar simulator comes
 #: without it and with it, the latter's option last. A range, never a target (§22).
 LIGHTS = {
     None: SOLAR_SIMULATOR,
-    ('800-1000Wm2', 'recommended 800–1000 W/m²'): step(
+    ('800-1000Wm2', 'recommended 800–1000 W/m²'): instruction(
         HoldBetweenIrradiance,
         control=True,
         lower_bound=pytest.approx(800),
@@ -77,10 +79,10 @@ LIGHTS = {
     ),
 }
 #: Table 3 has an outdoor test report the sunlight irradiance, so it is monitored.
-SUNLIGHT = step(HoldIrradiance, control=False, monitor=True)
+SUNLIGHT = instruction(HoldIrradiance, control=False, monitor=True)
 #: "Ambient (23 ± 4 °C)": "monitored but not explicitly controlled (room temperature in
 #: the laboratory is assumed to be 23±4 °C)" (p.36) — the figure, not regulated.
-ROOM_TEMPERATURE = step(
+ROOM_TEMPERATURE = instruction(
     HoldTemperature,
     control=False,
     monitor=True,
@@ -89,12 +91,12 @@ ROOM_TEMPERATURE = step(
 )
 #: Bare "Ambient": "even if a parameter is not controlled … it is still important to
 #: monitor and report" it (p.43). Humidity is stated as RH throughout (§20.6).
-AMBIENT_TEMPERATURE = step(HoldTemperature, control=False, monitor=True)
-AMBIENT_HUMIDITY = step(HoldRelativeHumidity, control=False, monitor=True)
+AMBIENT_TEMPERATURE = instruction(HoldTemperature, control=False, monitor=True)
+AMBIENT_HUMIDITY = instruction(HoldRelativeHumidity, control=False, monitor=True)
 #: Monitored, and controlled only above 40 °C: the condition stays in `notes` (§20.8).
-HUMIDITY_MONITORED = step(HoldRelativeHumidity, monitor=True)
-OPEN_CIRCUIT = step(VOCTracking, control=True)
-MPP = ('MPP', step(MPPTracking, control=True))
+HUMIDITY_MONITORED = instruction(HoldRelativeHumidity, monitor=True)
+OPEN_CIRCUIT = instruction(VOCTracking, control=True)
+MPP = ('MPP', instruction(MPPTracking, control=True))
 #: Levels 1 and 2 under light: "options of exposure under open-circuit condition or using a
 #: fixed voltage bias near the MPP (instead of active MPP tracking)" (p.37).
 LOWER_LEVEL_LOADS = {
@@ -102,7 +104,7 @@ LOWER_LEVEL_LOADS = {
     'OC': ('OC', OPEN_CIRCUIT),
     'Vfixed': (
         'fixed voltage near MPP',
-        step(HoldVoltage, control=True, reference_point='near V_MPP'),
+        instruction(HoldVoltage, control=True, reference_point='near V_MPP'),
     ),
 }
 TEMPERATURES = {'65degC': ('65 °C', 65), '85degC': ('85 °C', 85)}
@@ -128,52 +130,51 @@ LIGHT_CYCLES = {
 
 
 def held(celsius: float) -> dict:
-    return step(HoldTemperature, control=True, set_point=kelvin(celsius))
+    return instruction(HoldTemperature, control=True, set_point=kelvin(celsius))
 
 
 def humidity(percent: float) -> dict:
     """A relative humidity, stored as the fraction itself — no temperature (§20.6)."""
-    return step(
+    return instruction(
         HoldRelativeHumidity, control=True, set_point=pytest.approx(percent / 100)
     )
 
 
 def bias(cls, point: str) -> dict:
-    return step(cls, control=True, reference_point=point)
+    return instruction(cls, control=True, reference_point=point)
 
 
 def ramping(start, end) -> dict:
     """A routine of linear ramps between two temperatures, up and down (§15.14)."""
-    ramp = step(
+    ramp = instruction(
         RampTemperature,
         control=True,
         start_point=start,
         end_point=end,
         end_of_ramp_behavior='triangle',
     )
-    return step(PlannedSubroutineStep, steps=[ramp])
+    return instruction(CountingRepeatingBlock, sub_instructions=[ramp])
 
 
 def cycling(start, end) -> dict:
     """A routine cycling between two temperatures by a path not stated: a ramp that
     cycles (§21.2)."""
-    cycle = step(
+    cycle = instruction(
         RampTemperature,
         control=True,
         start_point=start,
         end_point=end,
         end_of_ramp_behavior='cycle',
     )
-    return step(PlannedSubroutineStep, steps=[cycle])
+    return instruction(CountingRepeatingBlock, sub_instructions=[cycle])
 
 
 def light_dark(light: float, dark: float, lit: dict) -> dict:
-    """A routine of light and dark, repeated for as long as the protocol runs (§20.1)."""
-    return step(
-        PlannedSubroutineStep,
-        repeat='until_end_of_protocol',
-        estimated_duration_one_iteration=pytest.approx(light + dark),
-        steps=[
+    """A routine of light and dark, repeated indefinitely: until the protocol is stopped
+    (§20.1, §23)."""
+    return instruction(
+        CountingRepeatingBlock,
+        sub_instructions=[
             {**lit, 'estimated_duration': pytest.approx(light)},
             {**DARK, 'estimated_duration': pytest.approx(dark)},
         ],
@@ -183,7 +184,7 @@ def light_dark(light: float, dark: float, lit: dict) -> dict:
 EXPECTED = {}
 
 
-def protocol(standard, options, steps, environment='indoor'):
+def protocol(standard, options, instructions, environment='indoor'):
     """The archive one file must load to. `options` are (file-name token, label), or
     `None` for an option a variant does not take."""
     options = [option for option in options if option]
@@ -196,7 +197,7 @@ def protocol(standard, options, steps, environment='indoor'):
         # The last digit of the designation, derived when the file writes none (§20.7).
         'standard_level': int(standard.rsplit('-', 1)[1].rstrip('I')),
         'environment': environment,
-        'steps': steps,
+        'instructions': instructions,
     }
     if variant:
         archive['standard_variant'] = variant
@@ -337,7 +338,7 @@ def protocol_file(normalized, log):
         translation = translate(read(name))
         assert [(p.path, p.message) for p in translation.problems] == []
         loaded = StabilityProtocol.m_from_dict(translation.archive['data'])
-        for each in loaded.steps:
+        for each in loaded.instructions:
             normalized(each)
         metadata = EntryMetadata(entry_name=name)
         loaded.normalize(EntryArchive(metadata=metadata, data=loaded), log)
@@ -379,6 +380,9 @@ def test_no_light_cycling_protocol_claims_a_length(path, protocol_file):
     # The standard fixes the cycle, never how many: a file that derived a length from one
     # cycle would claim a test hours long (§20.1).
     loaded = protocol_file(path)
+    routine = loaded.instructions[-1]
 
     assert loaded.estimated_duration is None
-    assert loaded.steps[-1].estimated_duration_one_iteration is not None
+    assert (routine.repeat_n, routine.estimated_duration) == (None, None)
+    # The cycle itself is stated, and has its length.
+    assert routine.one_iteration() is not None

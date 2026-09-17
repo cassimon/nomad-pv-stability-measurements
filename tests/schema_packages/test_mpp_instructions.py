@@ -3,14 +3,16 @@
 import pytest
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.hold_steps import HoldVoltage
-from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
+    HoldVoltage,
+)
+from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     MPPTracking,
     VOCTracking,
 )
 from nomad_pv_stability_measurements.schema_packages.routine import (
-    HoldStep,
-    RampStep,
+    HoldInstruction,
+    RampInstruction,
 )
 
 TRACKED = (MPPTracking, VOCTracking)
@@ -25,7 +27,7 @@ def test_a_found_point_is_neither_held_nor_ramped():
     # The volts and amps at the point are the cell's answer, so there is no number for
     # the protocol to write, and nothing to move between.
     for cls in TRACKED:
-        assert not issubclass(cls, HoldStep | RampStep)
+        assert not issubclass(cls, HoldInstruction | RampInstruction)
         quantities = set(cls.m_def.all_quantities)
         assert {'set_point', 'start_point', 'end_point'}.isdisjoint(quantities)
         assert {'monitor', 'control'} <= quantities
@@ -60,7 +62,7 @@ def test_what_the_run_reports_back_is_no_part_of_the_plan():
     quantities = set(MPPTracking.m_def.all_quantities)
 
     assert {'last_pce', 'last_vmpp', 'status', 'power_density'}.isdisjoint(quantities)
-    # And the two the step already has from every other step are not repeated.
+    # And the two the instruction already has from every other instruction are not repeated.
     assert {'sampling', 'time'}.isdisjoint(quantities)
     assert {'sample_every', 'sampling_rate', 'estimated_duration'} <= quantities
 

@@ -1,11 +1,11 @@
 """Values a standard names, rather than each protocol restating them (Design.md §17.2).
 
 An authored word such as `RT` stands for one of these. The parser resolves it into the
-step's own fields, so an archive holds the numbers and never the word (D8a, §17.3). The
+instruction's own fields, so an archive holds the numbers and never the word (D8a, §17.3). The
 sections exist so that each value has one home, a unit and a description, published in
 the metainfo instead of living as a number in a parser table.
 
-Each base field names no unit, and each subclass declares its own, as `HoldStep` and its
+Each base field names no unit, and each subclass declares its own, as `HoldInstruction` and its
 subclasses do (§15.11).
 """
 

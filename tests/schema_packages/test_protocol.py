@@ -5,16 +5,21 @@ from nomad.client import normalize_all, parse
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
-from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
+from nomad_pv_stability_measurements.schema_packages.general import (
+    Instruction,
+    InstructionBlock,
+    Plan,
+    TimedRepeatingBlock,
+)
+from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBetweenIrradiance,
 )
-from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldIrradiance,
     HoldTemperature,
     HoldVoltage,
 )
-from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     MPPTracking,
     VOCTracking,
 )
@@ -22,13 +27,9 @@ from nomad_pv_stability_measurements.schema_packages.protocol import (
     GeoLocation,
     StabilityProtocol,
 )
-from nomad_pv_stability_measurements.schema_packages.routine import (
-    PlannedMonitorControlStep,
-    PlannedSubroutineStep,
-)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
-BLOCK = PlannedSubroutineStep
+BLOCK = InstructionBlock
 
 
 def entry(cls, **fields) -> dict:
@@ -39,13 +40,13 @@ def entry(cls, **fields) -> dict:
 # writes it: every entry names its class.
 TREE = {
     'name': 'example',
-    'steps': [
+    'sub_instructions': [
         entry(BLOCK, name='A'),
         entry(
             BLOCK,
             name='fork',
-            execution_mode='parallel',
-            steps=[entry(BLOCK, name='B'), entry(BLOCK, name='C')],
+            sub_instruction_execution_mode='parallel',
+            sub_instructions=[entry(BLOCK, name='B'), entry(BLOCK, name='C')],
         ),
         entry(BLOCK, name='D'),
     ],
@@ -53,42 +54,33 @@ TREE = {
 
 
 def normalize_protocol(protocol, log):
-    # A protocol's own normalize reads the archive's metadata, and names a nameless
-    # protocol after the entry, as a real upload always has one (§14.2, verified).
+    # Every nested instruction first, as NOMAD does; then the protocol, whose own
+    # normalize reads the archive's metadata.
+    for nested in protocol.m_all_contents(depth_first=True):
+        nested.normalize(EntryArchive(), log)
     metadata = EntryMetadata(entry_name='protocol.stability.yaml')
     protocol.normalize(EntryArchive(metadata=metadata, data=protocol), log)
 
 
-def test_blocks_nest_through_steps():
+def test_blocks_nest_through_sub_instructions():
     root = BLOCK.m_from_dict(TREE)
-    fork = root.steps[1]
+    fork = root.sub_instructions[1]
 
-    assert [block.name for block in root.steps] == ['A', 'fork', 'D']
-    assert [block.name for block in fork.steps] == ['B', 'C']
-    assert all(isinstance(block, BLOCK) for block in [*root.steps, *fork.steps])
-
-
-def test_both_kinds_of_step_have_a_single_base():
-    # One chain each: ProcessStep -> PlannedProcessStep -> the two kinds.
-    assert BLOCK.__bases__ == (PlannedProcessStep,)
-    assert PlannedMonitorControlStep.__bases__ == (PlannedProcessStep,)
+    assert [block.name for block in root.sub_instructions] == ['A', 'fork', 'D']
+    assert [block.name for block in fork.sub_instructions] == ['B', 'C']
+    assert all(
+        isinstance(block, BLOCK)
+        for block in [*root.sub_instructions, *fork.sub_instructions]
+    )
 
 
-def test_steps_is_the_only_list_on_a_block():
-    sections = BLOCK.m_def.all_sub_sections
-
-    assert tuple(sections) == ('steps',)
-    assert sections['steps'].sub_section.section_cls is PlannedProcessStep
+def test_the_execution_mode_defaults_to_sequential():
+    assert BLOCK().sub_instruction_execution_mode == 'sequential'
 
 
-def test_execution_mode_defaults_to_sequential():
-    assert BLOCK().execution_mode == 'sequential'
-    assert BLOCK(execution_mode='parallel').execution_mode == 'parallel'
-
-
-def test_execution_mode_rejects_unknown_values():
+def test_the_execution_mode_rejects_unknown_values():
     with pytest.raises(ValueError):
-        BLOCK(execution_mode='interleaved')
+        BLOCK(sub_instruction_execution_mode='interleaved')
 
 
 def test_tree_round_trips_exactly():
@@ -96,35 +88,84 @@ def test_tree_round_trips_exactly():
     assert BLOCK.m_from_dict(TREE).m_to_dict() == TREE
 
 
-def test_the_protocol_is_only_steps():
+def test_the_protocol_is_a_plan_of_instructions_only():
     sections = StabilityProtocol.m_def.all_sub_sections
 
-    assert sections['steps'].sub_section.section_cls is PlannedProcessStep
+    assert issubclass(StabilityProtocol, Plan)
+    assert sections['instructions'].sub_section.section_cls is Instruction
     # `channel_settings` and `routine` are words of the authored file only (§14.3).
     assert {'channel_settings', 'routine'}.isdisjoint(sections)
 
 
-def test_the_protocol_checks_its_steps_like_a_block(log):
+def test_the_protocol_runs_all_its_instructions_in_parallel(log):
     protocol = StabilityProtocol.m_from_dict(
-        {'name': 'soak', 'steps': [entry(HoldTemperature), entry(HoldTemperature)]}
+        {
+            'instructions': [
+                entry(HoldTemperature, estimated_duration=1800),
+                entry(HoldVoltage, estimated_duration=3600),
+            ]
+        }
+    )
+
+    normalize_protocol(protocol, log)
+
+    assert protocol.estimated_duration.magnitude == pytest.approx(3600)
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_settings_that_never_finish_leave_the_protocol_without_an_end(log):
+    protocol = StabilityProtocol.m_from_dict(
+        {
+            'instructions': [
+                entry(HoldIrradiance, monitor=True),
+                entry(HoldTemperature, estimated_duration=1800),
+            ]
+        }
+    )
+
+    normalize_protocol(protocol, log)
+
+    assert protocol.estimated_duration is None
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_a_written_duration_is_where_the_protocol_stops(log):
+    protocol = StabilityProtocol.m_from_dict(
+        {
+            'estimated_duration': 3600000,
+            'instructions': [entry(HoldIrradiance, monitor=True)],
+        }
+    )
+
+    normalize_protocol(protocol, log)
+
+    assert protocol.estimated_duration.to('hour').magnitude == pytest.approx(1000)
+
+
+def test_the_protocol_checks_its_own_instructions(log):
+    protocol = StabilityProtocol.m_from_dict(
+        {
+            'name': 'soak',
+            'instructions': [entry(HoldTemperature), entry(HoldTemperature)],
+        }
     )
 
     normalize_protocol(protocol, log)
 
     [error] = log.errors
-    assert '2 Temperature steps overlap in soak' in error
+    assert '2 Temperature instructions overlap in soak' in error
 
 
-def test_a_block_overrides_a_condition_for_its_span(log):
-    # The settings of an authored file become leading conditions, and the routine a
-    # block after them: one level deeper, so not a sibling, so no overlap (§14.3).
+def test_a_block_overrides_a_setting_while_it_runs(log):
+    # The settings of an authored file become instructions that never finish, and the
+    # routine a block beside them: one level deeper, so not a sibling, so no overlap.
     protocol = StabilityProtocol.m_from_dict(
         {
-            'steps': [
+            'instructions': [
                 entry(HoldTemperature, control=True, set_point=338.15),
                 entry(
                     BLOCK,
-                    steps=[
+                    sub_instructions=[
                         entry(
                             HoldTemperature,
                             control=True,
@@ -142,65 +183,70 @@ def test_a_block_overrides_a_condition_for_its_span(log):
     assert log.errors == []
 
 
-def test_entry_loads_from_the_bare_archive_file():
-    archive = parse(os.path.join(DATA_DIR, 'tree.archive.yaml'))[0]
-    normalize_all(archive)
-    [root] = archive.data.steps
-
-    assert isinstance(archive.data, StabilityProtocol)
-    assert archive.data.name == 'my protocol'
-    assert root.name == 'example'
-    assert [block.name for block in root.steps] == ['A', 'fork', 'D']
-    assert root.steps[1].execution_mode == 'parallel'
-
-
-# The protocol's own duration, checked and set like a block's (§15.4).
-
-
-def test_the_protocol_fits_its_steps_to_its_duration(log):
+def test_the_protocol_checks_every_block_inside_it(log):
     protocol = StabilityProtocol.m_from_dict(
         {
-            'name': 'soak',
-            'estimated_duration': 3600,
-            'steps': [
-                entry(HoldTemperature, name='warm', estimated_duration=1800),
-                entry(HoldIrradiance, name='lit', estimated_duration=3600),
-                entry(HoldVoltage, name='late', estimated_duration=600),
-            ],
-        }
-    )
-
-    normalize_protocol(protocol, log)
-
-    # `lit` is cut to the time left; `late` has none left, so it is only reported.
-    assert [step.estimated_duration.magnitude for step in protocol.steps] == [
-        1800,
-        1800,
-        600,
-    ]
-    assert any('late never runs' in warning for warning in log.warnings)
-    assert any(
-        'lit is shortened from 3600 s to 1800 s' in warning and 'soak' in warning
-        for warning in log.warnings
-    )
-    assert log.errors == []
-
-
-def test_the_protocol_derives_its_duration_from_its_steps(log):
-    protocol = StabilityProtocol.m_from_dict(
-        {
-            'steps': [
-                entry(HoldIrradiance, monitor=True),
-                entry(HoldTemperature, estimated_duration=1800),
-                entry(HoldVoltage, estimated_duration=3600),
+            'instructions': [
+                entry(
+                    BLOCK,
+                    name='fork',
+                    sub_instruction_execution_mode='parallel',
+                    sub_instructions=[entry(HoldTemperature), entry(HoldTemperature)],
+                ),
+                entry(
+                    BLOCK,
+                    name='phase',
+                    sub_instructions=[
+                        entry(HoldVoltage, name='forever'),
+                        entry(HoldIrradiance, name='late', estimated_duration=60),
+                    ],
+                ),
             ]
         }
     )
 
     normalize_protocol(protocol, log)
 
-    assert protocol.estimated_duration.magnitude == pytest.approx(5400)
-    assert log.errors == []
+    [error] = log.errors
+    assert '2 Temperature instructions overlap in fork' in error
+    [warning] = log.warnings
+    assert 'late never runs' in warning
+
+
+def test_a_timed_block_stops_what_comes_after_its_time(log):
+    protocol = StabilityProtocol.m_from_dict(
+        {
+            'instructions': [
+                entry(
+                    TimedRepeatingBlock,
+                    name='soak',
+                    repeat_duration=3600,
+                    sub_instructions=[
+                        entry(HoldTemperature, estimated_duration=3600),
+                        entry(HoldVoltage, name='late', estimated_duration=60),
+                    ],
+                )
+            ]
+        }
+    )
+
+    normalize_protocol(protocol, log)
+
+    assert protocol.estimated_duration.magnitude == pytest.approx(3600)
+    [warning] = log.warnings
+    assert 'late never runs' in warning
+
+
+def test_entry_loads_from_the_bare_archive_file():
+    archive = parse(os.path.join(DATA_DIR, 'tree.archive.yaml'))[0]
+    normalize_all(archive)
+    [root] = archive.data.instructions
+
+    assert isinstance(archive.data, StabilityProtocol)
+    assert archive.data.name == 'my protocol'
+    assert root.name == 'example'
+    assert [block.name for block in root.sub_instructions] == ['A', 'fork', 'D']
+    assert root.sub_instructions[1].sub_instruction_execution_mode == 'parallel'
 
 
 # What the run itself records (§15.12).
@@ -222,7 +268,7 @@ def test_a_protocol_takes_free_text_notes():
     assert StabilityProtocol(notes='ran over a weekend').notes == 'ran over a weekend'
 
 
-def test_a_place_is_nomads_own_location_plus_our_coordinates():
+def test_a_place_is_a_location_plus_coordinates():
     protocol = StabilityProtocol(
         environment='outdoor',
         location='Denver, U.S.',
@@ -232,17 +278,15 @@ def test_a_place_is_nomads_own_location_plus_our_coordinates():
         ),
     )
 
-    # The label is NOMAD's own field, so it searches beside every other activity.
+    # The label is plain text, searchable as any other.
     assert protocol.location == 'Denver, U.S.'
     assert protocol.geo_location.latitude.magnitude == pytest.approx(39.7392)
     assert protocol.geo_location.longitude.magnitude == pytest.approx(-104.9903)
 
 
 def test_the_schema_adds_no_second_place_to_write_the_name():
-    # Declaring our own `location` sub-section collided with NOMAD's own quantity
-    # (`MetainfoError: Cannot inherit from different property types`) — verified.
     assert 'name' not in GeoLocation.m_def.all_quantities
-    # `location` stays NOMAD's own quantity, and takes the name directly.
+    # `location` is a quantity, and takes the name directly.
     assert 'location' in StabilityProtocol.m_def.all_quantities
     assert 'location' not in StabilityProtocol.m_def.all_sub_sections
     assert StabilityProtocol(location='Denver, U.S.').location == 'Denver, U.S.'
@@ -296,11 +340,10 @@ def test_an_option_of_a_standard_is_a_protocol_of_its_own():
 # The level-3 rule (§20.7).
 
 
-def checked(standard, *steps, log, **fields) -> StabilityProtocol:
+def checked(standard, *instructions, log, **fields) -> StabilityProtocol:
     protocol = StabilityProtocol(standard=standard, **fields)
-    protocol.steps = list(steps)
-    metadata = EntryMetadata(entry_name='protocol')
-    protocol.normalize(EntryArchive(metadata=metadata, data=protocol), log)
+    protocol.instructions = list(instructions)
+    normalize_protocol(protocol, log)
     return protocol
 
 

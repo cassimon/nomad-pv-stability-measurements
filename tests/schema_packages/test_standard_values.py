@@ -36,7 +36,7 @@ def test_dark_is_exact():
     assert dark.tolerance is None
 
 
-def test_a_standard_value_is_no_step():
+def test_a_standard_value_is_no_instruction():
     # It is resolved into a step's fields by the parser, never stored as one (§17.3).
     assert {'monitor', 'control', 'estimated_duration'}.isdisjoint(
         RoomTemperature.m_def.all_quantities

@@ -1,31 +1,35 @@
 import re
 
 import numpy as np
-from nomad.datamodel.data import ArchiveSection, EntryData
+from nomad.datamodel.data import ArchiveSection
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
 
-# The protocol's steps name these classes; importing them registers them with NOMAD.
-from nomad_pv_stability_measurements.schema_packages.general import PlannedProcess
-from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
+# The protocol's instructions name these classes; importing them registers them with NOMAD.
+from nomad_pv_stability_measurements.schema_packages.general import (
+    InstructionBlock,
+    Plan,
+    TimedRepeatingBlock,
+)
+from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBetweenIrradiance,
 )
-from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldCurrent,
     HoldIrradiance,
     HoldResistance,
     HoldVoltage,
 )
-from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     MPPTracking,
     VOCTracking,
 )
-from nomad_pv_stability_measurements.schema_packages.ramp_steps import (
+from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
     RampCurrent,
     RampIrradiance,
     RampResistance,
     RampVoltage,
 )
-from nomad_pv_stability_measurements.schema_packages.utils import normalize_steps
+from nomad_pv_stability_measurements.schema_packages.utils import check_instructions
 
 m_package = SchemaPackage()
 
@@ -33,8 +37,8 @@ m_package = SchemaPackage()
 _ISOS_DESIGNATION = re.compile(r'^ISOS-[A-Z]+-(?P<level>[1-3])I?$')
 #: ISOS makes MPP tracking mandatory at this level, under light (p.37).
 _MPP_MANDATORY_LEVEL = 3
-#: The steps that set the electrical load, whichever way.
-_LOAD_STEPS = (
+#: The instructions that set the electrical load, whichever way.
+_LOAD_INSTRUCTIONS = (
     MPPTracking,
     VOCTracking,
     HoldVoltage,
@@ -49,9 +53,8 @@ _LOAD_STEPS = (
 class GeoLocation(ArchiveSection):
     """Where on Earth a test ran, as coordinates.
 
-    The place's *name* is deliberately not here: every NOMAD activity already declares
-    `location`, "the location associated with this activity", so `Denver, U.S.` goes
-    there and stays searchable beside every other activity in the Oasis. A section of
+    The place's *name* is deliberately not here: it goes in the protocol's own
+    `location`, as `Denver, U.S.`, and stays searchable as text. A section of
     its own rather than two flat fields, so the pair travels together (Design.md §15.12).
     """
 
@@ -86,15 +89,20 @@ class GeoLocation(ArchiveSection):
                 )
 
 
-class StabilityProtocol(PlannedProcess, EntryData):
-    """A PV stability test protocol: the steps that run, in order.
+class StabilityProtocol(Plan):
+    """A PV stability test protocol: the instructions a test runs.
 
-    The first steps usually set what holds for the whole run: monitor/control steps
-    without an `estimated_duration`. For increased reability,
-    `.stability.yaml` distinguishes `channel_settings` and `routine`. However, in the schema,
-    they are all just different steps, and the protocol's own steps run in sequence as assumed by the
-    parent classes.
+    All of the protocol's own instructions run in parallel. The first usually set what
+    holds for the whole run: monitor/control instructions without an
+    `estimated_duration`, which never finish. For readability, `.stability.yaml`
+    distinguishes `channel_settings` and `routine`; in the schema they are all just
+    instructions, started together. The protocol's `estimated_duration`, if written, is
+    where all of them are stopped.
+
+    A plan only: this plugin never calls `execute()`.
     """
+
+    instruction_execution_mode = 'parallel'
 
     standard = Quantity(
         type=str,
@@ -126,22 +134,51 @@ class StabilityProtocol(PlannedProcess, EntryData):
         description='Anything else worth recording about this protocol, in free text.',
     )
 
+    location = Quantity(
+        type=str,
+        description='Where the test runs, by name, e.g. `Denver, U.S.`.',
+    )
+
     geo_location = SubSection(
         section_def=GeoLocation,
         description="Where the test ran, as coordinates; the place's name goes in "
-        "NOMAD's own `location`. Chiefly for an `outdoor` test, where the site is part "
+        '`location`. Chiefly for an `outdoor` test, where the site is part '
         'of the result — though a laboratory has a place on Earth too.',
     )
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        # The protocol's own steps run in sequence, like a sequential block's (§15.4).
-        normalize_steps(self, 'sequential', logger)
+        self.check_instructions(logger)
         designation = _ISOS_DESIGNATION.match(self.standard or '')
         if designation is not None:
             if self.standard_level is None:
                 self.standard_level = int(designation.group('level'))
             self.report_a_level_3_load_without_mpp_tracking(logger)
+
+    def check_instructions(self, logger):
+        """R4 and R5 over the protocol's own instructions and over every block's."""
+        check_instructions(
+            self.instructions,
+            self.instruction_execution_mode,
+            self.estimated_duration,
+            self.name or '<unnamed>',
+            logger,
+        )
+        for block in self.m_all_contents():
+            if not isinstance(block, InstructionBlock):
+                continue
+            stop = (
+                block.repeat_duration
+                if isinstance(block, TimedRepeatingBlock)
+                else None
+            )
+            check_instructions(
+                block.sub_instructions,
+                block.sub_instruction_execution_mode,
+                stop,
+                block.name or '<unnamed>',
+                logger,
+            )
 
     def report_a_level_3_load_without_mpp_tracking(self, logger):
         """ "we indicate MPP tracking as mandatory only at the third, most advanced level
@@ -149,23 +186,23 @@ class StabilityProtocol(PlannedProcess, EntryData):
         no maximum power point to track. Reported, never repaired (D13a, §20.7)."""
         if self.standard_level != _MPP_MANDATORY_LEVEL:
             return
-        steps = list(self.m_all_contents(depth_first=True))
+        instructions = list(self.m_all_contents(depth_first=True))
         lit = any(
-            isinstance(step, RampIrradiance)
+            isinstance(each, RampIrradiance)
             or (
-                isinstance(step, HoldIrradiance)
-                and (step.set_point is None or step.set_point.magnitude != 0)
+                isinstance(each, HoldIrradiance)
+                and (each.set_point is None or each.set_point.magnitude != 0)
             )
             or (
-                isinstance(step, HoldBetweenIrradiance)
-                and (step.upper_bound is None or step.upper_bound.magnitude != 0)
+                isinstance(each, HoldBetweenIrradiance)
+                and (each.upper_bound is None or each.upper_bound.magnitude != 0)
             )
-            for step in steps
+            for each in instructions
         )
         if not lit:
             return
-        loads = [step for step in steps if isinstance(step, _LOAD_STEPS)]
-        others = sorted({type(step).__name__ for step in loads} - {'MPPTracking'})
+        loads = [each for each in instructions if isinstance(each, _LOAD_INSTRUCTIONS)]
+        others = sorted({type(each).__name__ for each in loads} - {'MPPTracking'})
         if others or not loads:
             found = ', '.join(others) if others else 'no electrical load at all'
             logger.error(

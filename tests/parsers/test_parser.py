@@ -9,7 +9,7 @@ from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.parsers.parser import StabilityYamlParser
-from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldIrradiance,
     HoldTemperature,
     HoldVoltage,
@@ -17,7 +17,7 @@ from nomad_pv_stability_measurements.schema_packages.hold_steps import (
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
-#: The routine's block comes after the five settings steps (§15.2).
+#: The routine's block comes after the five settings instructions (§15.2).
 ROUTINE = 5
 
 
@@ -34,7 +34,7 @@ def test_the_parser_reads_an_authored_file_into_an_entry():
     # goes through without a complaint (§15.13).
     assert logger.error.call_args_list == []
     assert isinstance(archive.data, StabilityProtocol)
-    held = archive.data.steps[ROUTINE].steps[3]
+    held = archive.data.instructions[ROUTINE].sub_instructions[3]
     assert isinstance(held, HoldVoltage)
     assert held.set_point.to(ureg.volt).magnitude == pytest.approx(0.8)
 
@@ -53,7 +53,7 @@ def test_problems_are_logged_with_their_path(tmp_path):
     assert details == {'path': 'data.routine.commands[0].duraton'}
     assert 'Did you mean `duration`?' in message
     # The rest of the file still loads.
-    assert isinstance(archive.data.steps[0].steps[0], HoldTemperature)
+    assert isinstance(archive.data.instructions[0].sub_instructions[0], HoldTemperature)
 
 
 def test_nomad_matches_an_authored_file_to_this_parser():
@@ -61,6 +61,6 @@ def test_nomad_matches_an_authored_file_to_this_parser():
     archive = parse(os.path.join(DATA_DIR, 'channels.stability.yaml'))[0]
 
     assert isinstance(archive.data, StabilityProtocol)
-    dark = archive.data.steps[ROUTINE].steps[2]
+    dark = archive.data.instructions[ROUTINE].sub_instructions[2]
     assert isinstance(dark, HoldIrradiance)
     assert dark.set_point.magnitude == pytest.approx(0)

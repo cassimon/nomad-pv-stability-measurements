@@ -17,7 +17,7 @@ data:
       control: true
       reference_point: near V_MPP
   routine:
-    repeat: until_end_of_protocol
+    repeat: indefinitely
     commands:
       - channel: irradiation
         hold_between:

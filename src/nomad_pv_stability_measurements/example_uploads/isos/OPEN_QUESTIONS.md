@@ -12,7 +12,7 @@ and "Fig. 3" are the paper's. Settling a question may add, change or remove file
 - Text, p.39: "At the ISOS-LC-3 level, RH is held at 50% and high temperatures."
 - Fig. 3 files LC-3 in the row "Controlled RH = 85 or 50%".
 
-The two readings are different steps — a bound or a held value — so no file is written.
+The two readings are different instructions — a bound or a held value — so no file is written.
 **Blocks 12 files** (6 light–dark cycles × 65 / 85 °C, MPP).
 
 ### 2. ISOS-I: what makes an atmosphere inert?

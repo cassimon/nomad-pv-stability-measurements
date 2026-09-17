@@ -1,6 +1,7 @@
 """Fixtures shared by the schema tests."""
 
 import pytest
+from nomad.datamodel import EntryArchive
 
 
 class RecordingLogger:
@@ -40,8 +41,9 @@ def normalized(log):
     """
 
     def run(section):
+        archive = EntryArchive()
         for nested in section.m_all_contents(depth_first=True, include_self=True):
-            nested.normalize(None, log)
+            nested.normalize(archive, log)
         return section
 
     return run

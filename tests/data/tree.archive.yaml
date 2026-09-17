@@ -1,19 +1,19 @@
 data:
   m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
   name: my protocol
-  steps:
-  - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+  instructions:
+  - m_def: nomad_pv_stability_measurements.schema_packages.general.CountingRepeatingBlock
     name: example
-    steps:
-    - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+    sub_instructions:
+    - m_def: nomad_pv_stability_measurements.schema_packages.general.CountingRepeatingBlock
       name: A
-    - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+    - m_def: nomad_pv_stability_measurements.schema_packages.general.CountingRepeatingBlock
       name: fork
-      execution_mode: parallel
-      steps:
-      - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+      sub_instruction_execution_mode: parallel
+      sub_instructions:
+      - m_def: nomad_pv_stability_measurements.schema_packages.general.CountingRepeatingBlock
         name: B
-      - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+      - m_def: nomad_pv_stability_measurements.schema_packages.general.CountingRepeatingBlock
         name: C
-    - m_def: nomad_pv_stability_measurements.schema_packages.routine.PlannedSubroutineStep
+    - m_def: nomad_pv_stability_measurements.schema_packages.general.CountingRepeatingBlock
       name: D

@@ -1,8 +1,8 @@
-"""The steps whose value moves, one class per quantity (Design.md §15.11).
+"""The instructions whose value moves, one class per quantity (Design.md §15.11).
 
 Each fixes the unit of `start_point`, `end_point` and `ramp_rate` — the rate in that
 unit per second, since a rate is the quantity over a time. One class per quantity, as
-`hold_steps.py` has: `RampTemperature` and `HoldTemperature` are two kinds of step on
+`hold_instructions.py` has: `RampTemperature` and `HoldTemperature` are two kinds of instruction on
 one axis, and R4 reads them as one (`utils.py`).
 
 The move is linear. Any other shape is a curve the schema would have to evaluate, which
@@ -14,12 +14,12 @@ the path, the ramp's `end_of_ramp_behavior` is `cycle` (§21.2).
 import numpy as np
 from nomad.metainfo import Quantity, SchemaPackage
 
-from nomad_pv_stability_measurements.schema_packages.routine import RampStep
+from nomad_pv_stability_measurements.schema_packages.routine import RampInstruction
 
 m_package = SchemaPackage()
 
 
-class RampTemperature(RampStep):
+class RampTemperature(RampInstruction):
     """The sample's temperature, moving."""
 
     start_point = Quantity(
@@ -31,7 +31,7 @@ class RampTemperature(RampStep):
     )
 
 
-class RampIrradiance(RampStep):
+class RampIrradiance(RampInstruction):
     """The light on the sample, moving."""
 
     start_point = Quantity(
@@ -49,7 +49,7 @@ class RampIrradiance(RampStep):
     )
 
 
-class RampVoltage(RampStep):
+class RampVoltage(RampInstruction):
     """The voltage at the cell's terminals, moving."""
 
     start_point = Quantity(
@@ -61,7 +61,7 @@ class RampVoltage(RampStep):
     )
 
 
-class RampCurrent(RampStep):
+class RampCurrent(RampInstruction):
     """The current through the cell, moving."""
 
     start_point = Quantity(
@@ -73,7 +73,7 @@ class RampCurrent(RampStep):
     )
 
 
-class RampResistance(RampStep):
+class RampResistance(RampInstruction):
     """The load across the cell's terminals, moving."""
 
     start_point = Quantity(
@@ -87,7 +87,7 @@ class RampResistance(RampStep):
     )
 
 
-class RampBendRadius(RampStep):
+class RampBendRadius(RampInstruction):
     """How far the device is bent, moving."""
 
     start_point = Quantity(
@@ -99,7 +99,7 @@ class RampBendRadius(RampStep):
     )
 
 
-class RampStrain(RampStep):
+class RampStrain(RampInstruction):
     """How far the device is stretched, moving."""
 
     start_point = Quantity(
@@ -117,7 +117,7 @@ class RampStrain(RampStep):
     )
 
 
-class RampAbsoluteHumidity(RampStep):
+class RampAbsoluteHumidity(RampInstruction):
     """The water in the atmosphere around the sample, moving."""
 
     start_point = Quantity(
@@ -135,7 +135,7 @@ class RampAbsoluteHumidity(RampStep):
     )
 
 
-class RampRelativeHumidity(RampStep):
+class RampRelativeHumidity(RampInstruction):
     """The relative humidity around the sample, moving (§20.6)."""
 
     start_point = Quantity(
@@ -153,7 +153,7 @@ class RampRelativeHumidity(RampStep):
     )
 
 
-class RampOxygenFraction(RampStep):
+class RampOxygenFraction(RampInstruction):
     """The oxygen in the atmosphere around the sample, moving."""
 
     start_point = Quantity(
@@ -171,7 +171,7 @@ class RampOxygenFraction(RampStep):
     )
 
 
-class RampPressure(RampStep):
+class RampPressure(RampInstruction):
     """The total pressure of the atmosphere around the sample, moving."""
 
     start_point = Quantity(

@@ -15,7 +15,7 @@ data:
     electrical_load:
       hold: open_circuit
   routine:
-    repeat: until_end_of_protocol
+    repeat: indefinitely
     commands:
       - channel: irradiation
         control: true

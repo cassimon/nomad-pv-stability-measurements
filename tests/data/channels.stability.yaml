@@ -16,6 +16,7 @@ data:
       sampling_rate: 1 Hz
   routine:
     name: soak
+    repeat: 1
     commands:
       - channel: temperature        # an episode: 500 h at 85 °C, logged fast
         hold: 85 °C

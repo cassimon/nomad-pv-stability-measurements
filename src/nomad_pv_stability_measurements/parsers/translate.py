@@ -16,33 +16,38 @@ import pint
 
 from nomad_pv_stability_measurements.parsers.channels import (
     CHANNEL_VARIABLES,
-    HOLD_BELOW_STEPS,
-    HOLD_BETWEEN_STEPS,
+    HOLD_BELOW_INSTRUCTIONS,
+    HOLD_BETWEEN_INSTRUCTIONS,
     NAMED_VALUES,
     OLD_CHANNEL_CLASSES,
     OLD_CLASSES,
-    RAMP_STEPS,
+    RAMP_INSTRUCTIONS,
     RETIRED_WORDS,
     TRACKED_POINT_CHANNEL,
     TRACKED_POINTS,
     VALUE_FIELDS,
     VARIABLE_ALIASES,
-    VARIABLE_STEPS,
+    VARIABLE_INSTRUCTIONS,
 )
 from nomad_pv_stability_measurements.parsers.units import (
     parse,
     parse_difference,
     volume_ratio_of_relative_humidity,
 )
-from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
+from nomad_pv_stability_measurements.schema_packages.general import (
+    CountingRepeatingBlock,
+    Instruction,
+    InstructionBlock,
+    Plan,
+    TimedRepeatingBlock,
+)
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 from nomad_pv_stability_measurements.schema_packages.routine import (
-    PlannedMonitorControlStep,
-    PlannedSubroutineStep,
+    MonitorControlInstruction,
 )
 
-#: Keys a step may be written with that are no field of the schema. They are read
-#: here and never reach the archive.
+#: Keys an instruction may be written with that are no field of the schema. They are
+#: read here and never reach the archive.
 AUTHORING_WORDS = (
     'channel',
     'variable',
@@ -54,26 +59,37 @@ AUTHORING_WORDS = (
     'duration',
     'commands',
     'mode',
+    'repeat',
+    'repeat_for',
 )
-#: Keys a protocol may be written with that become its steps (§14.3).
-PROTOCOL_WORDS = ('channel_settings', 'routine')
-#: Keys a step may be written with for a field of another name (§15.1, §15.6).
+#: Keys a protocol may be written with that become its instructions (§14.3).
+PROTOCOL_WORDS = ('channel_settings', 'routine', 'duration')
+#: Keys an instruction or a plan may be written with for a field of another name
+#: (§15.1, §15.6).
 RENAMED = {
     'duration': 'estimated_duration',
-    'commands': 'steps',
-    'mode': 'execution_mode',
+    'mode': 'sub_instruction_execution_mode',
+    'repeat_for': 'repeat_duration',
     # A field renamed in the schema itself: every bare archive written before §17.4 still
     # spells it `setpoint`, and still loads (§13.1a).
     'setpoint': 'set_point',
 }
+#: What `repeat:` says when it is no number of times (§23).
+REPEAT_INDEFINITELY = 'indefinitely'
+#: `repeat:` words of the former notation, and what to write instead (§23).
+RETIRED_REPEATS = {
+    'until_end_of_protocol': f'`repeat: {REPEAT_INDEFINITELY}`, or leave `repeat` out',
+    'until_end_of_duration': 'a timed block, `repeat_for: 12 h`',
+    'n_times': 'the number itself, `repeat: 5`',
+}
 
 #: Both kinds back to their variable. A bare archive names either in its `m_def`, so a
 #: stored ramp has to read back as a ramp and not as a hold (§15.14).
-RAMP_KEYS = {cls: key for key, cls in RAMP_STEPS.items()}
-HOLD_BELOW_KEYS = {cls: key for key, cls in HOLD_BELOW_STEPS.items()}
-HOLD_BETWEEN_KEYS = {cls: key for key, cls in HOLD_BETWEEN_STEPS.items()}
+RAMP_KEYS = {cls: key for key, cls in RAMP_INSTRUCTIONS.items()}
+HOLD_BELOW_KEYS = {cls: key for key, cls in HOLD_BELOW_INSTRUCTIONS.items()}
+HOLD_BETWEEN_KEYS = {cls: key for key, cls in HOLD_BETWEEN_INSTRUCTIONS.items()}
 VARIABLE_KEYS = (
-    {cls: key for key, cls in VARIABLE_STEPS.items()}
+    {cls: key for key, cls in VARIABLE_INSTRUCTIONS.items()}
     | RAMP_KEYS
     | HOLD_BELOW_KEYS
     | HOLD_BETWEEN_KEYS
@@ -125,7 +141,7 @@ def translate(document) -> Translation:
 
 
 def translate_section(authored: dict, cls: type) -> Translation:
-    """One authored section read as `cls`, e.g. a block and its steps."""
+    """One authored section read as `cls`, e.g. a block and its instructions."""
     problems = []
     return Translation(_section(authored, cls, '', problems), problems)
 
@@ -135,33 +151,34 @@ def _at(path: str, key: str) -> str:
 
 
 def _protocol(authored: dict, cls: type, path: str, problems: list) -> dict:
-    """The protocol's own fields. `channel_settings` becomes its first steps and
-    `routine` its last, around any `steps` written directly (§14.3)."""
+    """The protocol's own fields. `channel_settings` becomes its first instructions and
+    `routine` its last, around any `instructions` written directly (§14.3). The protocol
+    starts all of them together (§23)."""
     authored = dict(authored)
     settings = authored.pop('channel_settings', None)
     routine = authored.pop('routine', None)
     bare = _fields(authored, cls, path, problems)
-    steps = [
-        *_settings_steps(settings, _at(path, 'channel_settings'), problems),
-        *bare.pop('steps', []),
+    instructions = [
+        *_settings_instructions(settings, _at(path, 'channel_settings'), problems),
+        *bare.pop('instructions', []),
     ]
     if routine is not None:
-        steps += _step(routine, _at(path, 'routine'), problems)
-    if steps:
-        bare['steps'] = steps
+        instructions += _instruction(routine, _at(path, 'routine'), problems)
+    if instructions:
+        bare['instructions'] = instructions
     return bare
 
 
-def _settings_steps(settings, path: str, problems: list) -> list:
-    """The steps of `channel_settings`, without a duration: conditions that hold for
-    the whole protocol (D13). The routine, one block deeper, overrides them for its
-    span."""
+def _settings_instructions(settings, path: str, problems: list) -> list:
+    """The instructions of `channel_settings`, without a duration: they never finish, and
+    so hold for the whole protocol (D13). The routine, one block deeper, overrides them
+    while it runs."""
     if settings is None:
         return []
     if not isinstance(settings, dict):
         problems.append(Problem(path, f'expected a section, got {settings!r}.'))
         return []
-    steps = []
+    instructions = []
     for channel, block in settings.items():
         where = _at(path, channel)
         if not isinstance(block, dict):
@@ -175,17 +192,17 @@ def _settings_steps(settings, path: str, problems: list) -> list:
                     f'`channel: {written}` does not match the slot `{channel}`.',
                 )
             )
-        steps += _step({**block, 'channel': channel}, where, problems)
-    return steps
+        instructions += _instruction({**block, 'channel': channel}, where, problems)
+    return instructions
 
 
 def _section(authored, cls: type, path: str, problems: list) -> dict:
     if not isinstance(authored, dict):
         problems.append(Problem(path, f'expected a section, got {authored!r}.'))
         return {}
-    if issubclass(cls, PlannedMonitorControlStep):
-        steps = _monitor_control(authored, cls, path, problems)
-        return {k: v for k, v in steps[0].items() if k != 'm_def'} if steps else {}
+    if issubclass(cls, MonitorControlInstruction):
+        read = _monitor_control(authored, cls, path, problems)
+        return {k: v for k, v in read[0].items() if k != 'm_def'} if read else {}
     return _fields(authored, cls, path, problems)
 
 
@@ -195,12 +212,21 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
     bare = {}
     for written, value in authored.items():
         where = _at(path, written)
-        key = RENAMED.get(written, written)
-        if not issubclass(cls, PlannedProcessStep):
-            key = written
+        key = _renamed(written, cls)
         if key != written and key in authored:
             problems.append(
                 Problem(where, f'`{written}` and `{key}` are one field; write one.')
+            )
+        elif written == 'repeat' and issubclass(cls, InstructionBlock):
+            _repeat(value, cls, where, problems, bare)
+        elif written == 'duration' and issubclass(cls, InstructionBlock):
+            problems.append(
+                Problem(
+                    where,
+                    "a block's duration follows from its commands. To stop it after a "
+                    'time, write `repeat_for`; to stop the whole protocol, write '
+                    '`duration` on the protocol.',
+                )
             )
         elif key == 'm_def':
             bare[key] = value
@@ -218,22 +244,68 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
     return bare
 
 
+def _renamed(written: str, cls: type) -> str:
+    """The field `written` stands for on `cls`: `commands` are a plan's `instructions`
+    and a block's `sub_instructions`. Only instructions and plans take other names."""
+    if not issubclass(cls, Instruction | Plan):
+        return written
+    if written == 'commands':
+        return 'instructions' if issubclass(cls, Plan) else 'sub_instructions'
+    return RENAMED.get(written, written)
+
+
+def _repeat(value, cls: type, where: str, problems: list, bare: dict) -> None:
+    """`repeat: 5` as `repeat_n`; `repeat: indefinitely`, like no `repeat` at all, as
+    none (§23)."""
+    if issubclass(cls, TimedRepeatingBlock):
+        problems.append(
+            Problem(
+                where,
+                'a timed block is stopped by its `repeat_for`; write no `repeat`.',
+            )
+        )
+    elif not issubclass(cls, CountingRepeatingBlock):
+        problems.append(
+            Problem(where, f'{cls.__name__} runs its commands once; write no `repeat`.')
+        )
+    elif value == REPEAT_INDEFINITELY:
+        return
+    elif value in RETIRED_REPEATS:
+        problems.append(
+            Problem(
+                where,
+                f'`repeat: {value}` is not written any more: write '
+                f'{RETIRED_REPEATS[value]}.',
+            )
+        )
+    elif isinstance(value, int) and not isinstance(value, bool):
+        bare['repeat_n'] = value
+    else:
+        problems.append(
+            Problem(
+                where,
+                f'could not read `repeat` {value!r}: write a number of times, or '
+                f'`{REPEAT_INDEFINITELY}`.',
+            )
+        )
+
+
 def _commands(entries, path: str, problems: list) -> list:
     if not isinstance(entries, list):
-        problems.append(Problem(path, 'expected a list of steps.'))
+        problems.append(Problem(path, 'expected a list of instructions.'))
         return []
     return [
-        step
+        read
         for index, entry in enumerate(entries)
-        for step in _step(entry, f'{path}[{index}]', problems)
+        for read in _instruction(entry, f'{path}[{index}]', problems)
     ]
 
 
-def _step(entry, path: str, problems: list) -> list[dict]:
-    """One authored entry as the steps it becomes: usually one, none when it cannot be
-    read, one per variable for a channel logged without a set point (§15.2)."""
+def _instruction(entry, path: str, problems: list) -> list[dict]:
+    """One authored entry as the instructions it becomes: usually one, none when it
+    cannot be read, one per variable for a channel logged without a set point (§15.2)."""
     if not isinstance(entry, dict):
-        problems.append(Problem(path, f'expected a step, got {entry!r}.'))
+        problems.append(Problem(path, f'expected an instruction, got {entry!r}.'))
         return []
     rest = {key: value for key, value in entry.items() if key != 'm_def'}
     qualified = entry.get('m_def')
@@ -248,9 +320,11 @@ def _step(entry, path: str, problems: list) -> list[dict]:
             return []
     elif 'channel' in rest:
         cls = None
+    elif 'repeat_for' in rest:
+        cls = TimedRepeatingBlock
     else:
-        cls = PlannedSubroutineStep
-    if cls is None or issubclass(cls, PlannedMonitorControlStep):
+        cls = CountingRepeatingBlock
+    if cls is None or issubclass(cls, MonitorControlInstruction):
         return _monitor_control(rest, cls, path, problems)
     return [{'m_def': m_def(cls), **_fields(rest, cls, path, problems)}]
 
@@ -330,7 +404,7 @@ class _Words:
             keys={
                 key: authored.pop(key)
                 for key in list(authored)
-                if key in VARIABLE_STEPS
+                if key in VARIABLE_INSTRUCTIONS
             },
             retired=retired,
             tracked=tracked,
@@ -342,7 +416,7 @@ class _Words:
 
 
 def _monitor_control(authored: dict, cls: type | None, path: str, problems: list):
-    """A monitor/control entry as the steps the schema stores (§15.2): the class its
+    """A monitor/control entry as the instructions the schema stores (§15.2): the class its
     `m_def`, `channel` or variable names, and `hold` or the variable's key as the
     `set_point`, which also sets `control`."""
     authored = dict(authored)
@@ -352,14 +426,14 @@ def _monitor_control(authored: dict, cls: type | None, path: str, problems: list
             Problem(
                 where,
                 f'`{word}` is not part of the schema any more (§15): '
-                f'{RETIRED_WORDS[word]}. The step is left out.',
+                f'{RETIRED_WORDS[word]}. The instruction is left out.',
             )
         )
     if words.retired:
         return []
     if words.tracked:
-        return _tracked_steps(words, authored, path, problems)
-    classes = _step_classes(words, cls, path, problems)
+        return _tracked_instructions(words, authored, path, problems)
+    classes = _instruction_classes(words, cls, path, problems)
     if not classes:
         return []
     bare = _fields(authored, classes[0], path, problems)
@@ -393,10 +467,10 @@ def _monitor_control(authored: dict, cls: type | None, path: str, problems: list
     return [{'m_def': m_def(each), **bare} for each in classes]
 
 
-def _tracked_steps(
+def _tracked_instructions(
     words: _Words, authored: dict, path: str, problems: list
 ) -> list[dict]:
-    """A step naming a point the cell decides, not a value to hold (§15.13).
+    """An instruction naming a point the cell decides, not a value to hold (§15.13).
 
     Asking for one is asking the load to be regulated, so it sets `control` exactly as a
     written set point does — there is simply no number to store beside it.
@@ -404,7 +478,10 @@ def _tracked_steps(
     if len(words.tracked) > 1:
         written = ', '.join(word for _, word, _ in words.tracked)
         problems.append(
-            Problem(path, f'a load sits at one point, but this step writes {written}.')
+            Problem(
+                path,
+                f'a load sits at one point, but this instruction writes {written}.',
+            )
         )
         return []
     where, word, value = words.tracked[0]
@@ -429,7 +506,7 @@ def _tracked_steps(
             Problem(
                 path,
                 f'`{word}` is where the cell decides, so it takes no set point, but this '
-                f'step also writes {", ".join(words.keys)}.',
+                f'instruction also writes {", ".join(words.keys)}.',
             )
         )
         return []
@@ -463,7 +540,7 @@ def _ramp_fields(
 ) -> dict | None:
     """`ramp: {from, to, rate}` as the fields the schema stores (§15.14).
 
-    `None` where the step cannot be read at all, so the caller leaves it out.
+    `None` where the instruction cannot be read at all, so the caller leaves it out.
     """
     where = _at(path, 'ramp')
     if (
@@ -474,7 +551,9 @@ def _ramp_fields(
         or words.keys
     ):
         problems.append(
-            Problem(where, 'a step ramps or holds, not both; write one of them.')
+            Problem(
+                where, 'an instruction ramps or holds, not both; write one of them.'
+            )
         )
         return None
     if not isinstance(words.ramp, dict):
@@ -498,8 +577,8 @@ def _ramp_fields(
     return bare
 
 
-def _step_classes(words: _Words, cls, path: str, problems: list) -> list[type]:
-    """The step classes a monitor/control entry becomes."""
+def _instruction_classes(words: _Words, cls, path: str, problems: list) -> list[type]:
+    """The instruction classes a monitor/control entry becomes."""
     if cls is not None and cls not in VARIABLE_KEYS:
         return [cls]  # the base, or a class the parser has no words for
     allowed = _allowed(words, cls, path, problems)
@@ -524,8 +603,8 @@ def _step_classes(words: _Words, cls, path: str, problems: list) -> list[type]:
         problems.append(
             Problem(
                 path,
-                f'a step sets one variable, but this one writes {", ".join(chosen)}; '
-                f'write one step per variable.',
+                f'an instruction sets one variable, but this one writes {", ".join(chosen)}; '
+                f'write one instruction per variable.',
             )
         )
         return []
@@ -540,22 +619,22 @@ def _step_classes(words: _Words, cls, path: str, problems: list) -> list[type]:
     if words.hold is not None or word != 'hold':
         problems.append(Problem(_at(path, word), _unplaced(words, word, allowed)))
         return []
-    # Nothing set: a channel logged as a whole, one step per variable (§15.2).
+    # Nothing set: a channel logged as a whole, one instruction per variable (§15.2).
     return [table[key] for key in allowed if key in table]
 
 
 def _kind(words: _Words, cls) -> tuple[dict, str]:
-    """Which kind of step an entry is, as the table naming its classes and the word that
+    """Which kind of instruction an entry is, as the table naming its classes and the word that
     chose it. `ramp:` and `hold_below:` choose their kinds — and so does a `Ramp…` or
     `HoldBelow…` class a bare archive names, which arrives without either word
     (§15.14, §17.5)."""
     if words.ramp is not None or cls in RAMP_KEYS:
-        return RAMP_STEPS, 'ramp'
+        return RAMP_INSTRUCTIONS, 'ramp'
     if words.between is not None or cls in HOLD_BETWEEN_KEYS:
-        return HOLD_BETWEEN_STEPS, 'hold_between'
+        return HOLD_BETWEEN_INSTRUCTIONS, 'hold_between'
     if words.below is not None or cls in HOLD_BELOW_KEYS:
-        return HOLD_BELOW_STEPS, 'hold_below'
-    return VARIABLE_STEPS, 'hold'
+        return HOLD_BELOW_INSTRUCTIONS, 'hold_below'
+    return VARIABLE_INSTRUCTIONS, 'hold'
 
 
 def _unplaced(words: _Words, word: str, allowed: tuple) -> str:
@@ -585,14 +664,14 @@ def _bound_fields(
 ) -> dict | None:
     """`hold_below: 55 %` as the field the schema stores (§17.5).
 
-    `None` where the step cannot be read at all, so the caller leaves it out.
+    `None` where the instruction cannot be read at all, so the caller leaves it out.
     """
     where = _at(path, 'hold_below')
     if words.hold is not None or words.tolerance is not None or words.keys:
         problems.append(
             Problem(
                 where,
-                'a step holds a value or keeps under a bound, not both; write one of them.',
+                'an instruction holds a value or keeps under a bound, not both; write one of them.',
             )
         )
         return None
@@ -607,9 +686,9 @@ def _between_fields(
     words: _Words, classes: list, path: str, problems: list
 ) -> dict | None:
     """`hold_between: {lower, upper}` as the fields the schema stores (§22). A bound
-    left out is reported by the step's own `normalize`, as a stored archive would be.
+    left out is reported by the instruction's own `normalize`, as a stored archive would be.
 
-    `None` where the step cannot be read at all, so the caller leaves it out.
+    `None` where the instruction cannot be read at all, so the caller leaves it out.
     """
     where = _at(path, 'hold_between')
     if (
@@ -621,7 +700,7 @@ def _between_fields(
         problems.append(
             Problem(
                 where,
-                'a step holds a value or keeps it in a range, not both; write one of '
+                'an instruction holds a value or keeps it in a range, not both; write one of '
                 'them.',
             )
         )
@@ -731,14 +810,14 @@ def _relative_humidity(written: dict, cls: type, where: str, problems: list):
     # Read through the water vapour's own hold: a bound has no `set_point` to ask.
     relative = _value(
         written['rh'],
-        VARIABLE_STEPS['absolute_humidity'],
+        VARIABLE_INSTRUCTIONS['absolute_humidity'],
         'set_point',
         _at(where, 'rh'),
         problems,
     )
     kelvin = _value(
         written['at'],
-        VARIABLE_STEPS['temperature'],
+        VARIABLE_INSTRUCTIONS['temperature'],
         'set_point',
         _at(where, 'at'),
         problems,
@@ -813,10 +892,10 @@ def _tolerance(words: _Words, cls: type, path: str, problems: list):
 def _unknown(key: str, cls: type) -> str:
     """NOMAD would drop an unknown key without a word (§9); this says so, and guesses."""
     known = [*cls.m_def.all_quantities, *cls.m_def.all_sub_sections]
-    if issubclass(cls, PlannedProcessStep):
+    if issubclass(cls, Instruction):
         known += AUTHORING_WORDS
-    if issubclass(cls, PlannedMonitorControlStep):
-        known += [*VARIABLE_STEPS, *RETIRED_WORDS, *TRACKED_POINTS]
+    if issubclass(cls, MonitorControlInstruction):
+        known += [*VARIABLE_INSTRUCTIONS, *RETIRED_WORDS, *TRACKED_POINTS]
     if issubclass(cls, StabilityProtocol):
         known += PROTOCOL_WORDS
     close = difflib.get_close_matches(key, known, n=1)
