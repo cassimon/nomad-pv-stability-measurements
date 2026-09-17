@@ -1,24 +1,3 @@
-"""The instructions that hold one value, one class per quantity (Design.md §15.1, §15.11).
-
-Each only fixes the unit of its `set_point`. What a set point means physically, which
-quantities are tied, and words that stand for values are no part of the schema: such
-logic belongs in a `normalize()` once it is needed, or in the parser.
-
-The atmosphere's gases are recorded as an absolute volume ratio — a plain dimensionless
-fraction, so `500 ppm` from a glovebox readout and `2 %` from a gas bottle land on one
-axis and compare without a conversion table. For an ideal gas the volume fraction and
-the mole fraction are the same number, so the glovebox convention (`ppm` is by volume,
-D6) needs no second axis (§15.7).
-
-Humidity has two classes, which never convert into each other here: `HoldAbsoluteHumidity`,
-that volume ratio (the glovebox sense of "absolute", not g/m³), and `HoldRelativeHumidity`,
-the relative humidity a standard states, which needs no temperature beside it to be
-written down (§20.6).
-
-`BalanceGas` holds something that is not a number — a gas — so it takes no `set_point`
-and subclasses the plain monitor/control instruction instead of `HoldInstruction` (§15.11). The load's
-tracked point is the same shape, and lives in `mpp_instructions.py` (§15.10).
-"""
 
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage

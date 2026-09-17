@@ -23,8 +23,7 @@ class GeoLocation(ArchiveSection):
     """Where on Earth a test ran, as coordinates.
 
     The place's *name* is deliberately not here: it goes in the protocol's own
-    `location`, as `Denver, U.S.`, and stays searchable as text. A section of
-    its own rather than two flat fields, so the pair travels together (Design.md §15.12).
+    `location`, as `Denver, U.S.`, and stays searchable as text.
     """
 
     latitude = Quantity(
@@ -41,8 +40,7 @@ class GeoLocation(ArchiveSection):
         type=np.float64,
         unit='m',
         description='Height above sea level; negative is below it. It sets the air '
-        'mass, and so the spectrum an outdoor test actually sees. Write the unit where '
-        'feet are meant (`5280 ft`): a bare number reads as metres (D6).',
+        'mass, and so the spectrum an outdoor test actually sees. ',
     )
 
     def normalize(self, archive, logger):
@@ -61,14 +59,7 @@ class GeoLocation(ArchiveSection):
 class StabilityProtocol(Plan):
     """A PV stability test protocol: the instructions a test runs.
 
-    All of the protocol's own instructions run in parallel. The first usually set what
-    holds for the whole run: monitor/control instructions without an
-    `estimated_duration`, which never finish. For readability, `.stability.yaml`
-    distinguishes `channel_settings` and `routine`; in the schema they are all just
-    instructions, started together. The protocol's `estimated_duration`, if written, is
-    where all of them are stopped.
-
-    A plan only: this plugin never calls `execute()`.
+    All of the protocol's own instructions run in parallel.
     """
 
     instruction_execution_mode = 'parallel'

@@ -34,10 +34,28 @@ def test_nomad_reads_an_authored_file_into_a_protocol_entry():
     assert archive.data.estimated_duration is None
 
 
+def test_a_file_with_options_is_one_entry_per_variant(tmp_path):
+    mainfile = tmp_path / 'P.stability.yaml'
+    mainfile.write_text(
+        'data:\n'
+        '  name: P\n'
+        '  channel_settings:\n'
+        '    temperature: {options: [{hold: 65 °C}, {hold: 85 °C}]}\n'
+    )
+
+    main, *children = parse(str(mainfile))
+
+    assert main.data is None
+    assert {child.metadata.mainfile_key: child.data.name for child in children} == {
+        'P (65 °C)': 'P (65 °C)',
+        'P (85 °C)': 'P (85 °C)',
+    }
+
+
 def test_problems_are_logged_with_their_path_and_the_rest_still_loads(tmp_path):
     mainfile = tmp_path / 'typo.stability.yaml'
     mainfile.write_text(
-        'data:\n  routine:\n    commands:\n      - {channel: temperature, duraton: 1 h}\n'
+        'data:\n  routine:\n    instructions:\n      - {channel: temperature, duraton: 1 h}\n'
     )
     logger = MagicMock()
     archive = EntryArchive(metadata=EntryMetadata())
@@ -45,6 +63,6 @@ def test_problems_are_logged_with_their_path_and_the_rest_still_loads(tmp_path):
     StabilityYamlParser().parse(str(mainfile), archive, logger)
 
     [(message,), details] = logger.error.call_args
-    assert details == {'path': 'data.routine.commands[0].duraton'}
+    assert details == {'path': 'data.routine.instructions[0].duraton'}
     assert 'Did you mean `duration`?' in message
     assert isinstance(archive.data.instructions[0].sub_instructions[0], HoldTemperature)

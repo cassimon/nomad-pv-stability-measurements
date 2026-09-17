@@ -1,15 +1,3 @@
-"""The instructions that keep one value under a bound, or between two, one class per quantity
-(Design.md §17.5, §22).
-
-A sibling of `hold_instructions.py`, not an extension of it: "keep under 55 %" is not "hold at
-55 %", so the bound is a field of its own rather than a second meaning of `set_point`.
-
-Only the quantities a standard actually bounds have a class: the relative humidity
-(`< 55 %`, `< 50 %` in ISOS Table 1), and the absolute humidity and oxygen that describe
-an inert atmosphere (§20.5); and the irradiance, the one quantity a standard gives a range
-for ("800–1000 W m⁻²", §22). Another quantity is one class here and one line in the
-parser's table, whenever a standard states one.
-"""
 
 import numpy as np
 from nomad.metainfo import Quantity, SchemaPackage

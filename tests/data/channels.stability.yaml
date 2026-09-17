@@ -17,7 +17,7 @@ data:
   routine:
     name: soak
     repeat: 1
-    commands:
+    instructions:
       - channel: temperature        # an episode: 500 h at 85 °C, logged fast
         hold: 85 °C
         duration: 500 h

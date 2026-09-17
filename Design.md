@@ -3273,3 +3273,83 @@ for `InstructionBlock` and its two repeating children; `PlannedMonitorControlSte
 paths — nothing was published in them. The 109 ISOS files write `repeat: indefinitely`.
 
 **Status: built.** 192 files, 52 tests (320 cases, 192 of them the ISOS table), ruff clean.
+
+## 24. Options — one file, every variant
+
+The ISOS table offers options (two temperatures, three loads, five biases, six light–dark cycles,
+the recommended irradiance range), and §18/§21.1 wrote every combination as a file of its own:
+192 files in 20 folders, most differing in one or two lines. A reviewer had to diff files to see
+what a variant is. Now each option is written once, where it differs, and the parser expands
+them.
+
+### 24.1 The notation
+
+```yaml
+electrical_load:
+  control: true
+  options:                     # in any section: its alternatives
+    - label: V_MPP             # optional; a single value is its own label, none otherwise
+      variable: voltage        # the keys written into the section for this alternative
+      reference_point: V_MPP
+    - {label: J_SC, variable: current, reference_point: J_SC}
+```
+
+- One rule: an alternative's keys are written into the section that lists the `options`. A key is
+  written beside the options or in an alternative, never both (reported). Nothing is merged
+  deeper than that.
+- Every combination of one alternative per `options` is a variant. An alternative may list
+  `options` of its own, which multiply only with it (the light–dark cycle holds the irradiance
+  range inside its light command).
+- `{}` is an alternative that adds nothing, and no label.
+- A variant's `name` gets its labels in parentheses, in the order the file writes them; they are
+  its `standard_variant` unless the file writes one. Two variants of one name are reported.
+- No references and no arithmetic. What repeats is repeated with plain YAML anchors
+  (`&light`, `<<: *light`), which `yaml.safe_load` resolves before the parser sees the file.
+- A coupled value that lives in another section cannot vary with an alternative. The notes that
+  named each bias (and "Fixed voltage bias near the MPP.") became one note per file; the label
+  says which bias.
+
+`parsers/options.py` does only this, on plain dicts, before the translator, which never sees
+`options`.
+
+### 24.2 In NOMAD
+
+The parser has `creates_children = True`. `is_mainfile` returns the variants' names for a file
+with options, so NOMAD makes one child entry per variant (`mainfile_key` and `entry_name` are the
+name); the file's own entry keeps no protocol and carries the problems of `options`. A file
+without options is one entry, as before.
+
+### 24.3 The files
+
+`example_uploads/isos/` holds 20 files, `ISOS-<designation>.stability.yaml`, and no folders. They
+expand to the same 192 protocols, which the ISOS table test checks field by field; it keys its
+expectations by name.
+
+**Status: built.** 20 ISOS files (192 variants), 58 tests (328 cases), ruff clean.
+
+## 25. `commands` → `instructions` in the authored format
+
+The authored word for a protocol's or a block's list is `instructions`, the schema's own word
+(§23). On a block it becomes `sub_instructions`, on the protocol `instructions`. `commands` is
+reported (`write instructions`) and still read, so one old word does not drop a routine. This
+replaces `commands` in §23.3 and in every example above. The ISOS files, `tests/data` and the
+ISOS README write `instructions`.
+
+## 26. Monitoring is written where the standard requires it
+
+`control` and `monitor` stay independent: Khenkin et al. name them separately ("monitored, controlled
+at 50% beyond 40 °C", Table 1; "RH (controlled or monitored)", Table 3), so neither is derived
+from the other. The ISOS files write `monitor: true` wherever the paper requires a reading:
+
+- uncontrolled ambient conditions (p.36, p.43) — as before;
+- a held or ramped temperature — Table 3 asks for the temperature sensor type;
+- a solar simulator and the light phase of a light–dark cycle — "the exact irradiance … should be
+  reported" (p.43), checked periodically with a reference cell (p.44);
+- a controlled relative humidity — Table 3's parameters are monitored "even if … not controlled"
+  (p.43), so controlled ones are too;
+- MPP tracking — it "holds the device at its normal operating voltage and measures the output"
+  (p.43).
+
+Not monitored: darkness, open circuit and fixed biases, which Table 3 lists only as conditions.
+ISOS-V's in situ dark current is "informative" (p.40), not required, and is not written. The ISOS
+table test expects each of these.

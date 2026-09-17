@@ -1,23 +1,25 @@
-"""Every ISOS protocol the plugin ships, one file per option (Design.md §16, §18, §20–§22).
+"""Every ISOS protocol the plugin ships, one variant per option (Design.md §16, §18, §20–§22,
+§24).
 
-Each file is compared with an expected archive **as a whole**: the loaded, normalized
+Each variant is compared with an expected archive **as a whole**: the loaded, normalized
 protocol's `m_to_dict()` must equal it exactly, so a field written wrongly fails and so
 does a field written that should not be there (§18.4). The expectations are built here
 from Khenkin et al. 2020 in SI units, independently of how the files were written.
 
 The files are read from the package, not from `tests/data/`: they are shipped
-documentation, and a second copy would be a second thing to keep in step. Each lies in a
-folder named after its `standard` (§18.1).
+documentation, and a second copy would be a second thing to keep in step. Each file is
+named after its `standard`, and each variant after its file and its choices (§24).
 """
 
 import itertools
 from pathlib import Path
 
 import pytest
-import yaml
 from nomad.datamodel import EntryArchive, EntryMetadata
 
 from nomad_pv_stability_measurements import example_uploads
+from nomad_pv_stability_measurements.parsers.options import expand
+from nomad_pv_stability_measurements.parsers.parser import read, stem
 from nomad_pv_stability_measurements.parsers.translate import m_def, translate
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
@@ -42,9 +44,6 @@ from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
 )
 
 EXAMPLES = Path(example_uploads.__file__).parent / 'isos'
-SHIPPED = sorted(
-    path.relative_to(EXAMPLES).as_posix() for path in EXAMPLES.rglob('*.stability.yaml')
-)
 #: "Very short" (§18.3): one or two sentences of what the standard says.
 NOTES_AT_MOST = 120
 #: What only a design decision would mention, and so no `notes` may (§18.3).
@@ -65,7 +64,12 @@ def kelvin(celsius: float):
 # The table's cells, as the instructions they are — read with the paper's text (§18.7, §20).
 
 DARK = instruction(HoldIrradiance, control=True, set_point=0.0)
-SOLAR_SIMULATOR = instruction(HoldIrradiance, control=True)
+#: What is measured is monitored, controlled or not: "even if a parameter is not controlled
+#: … it is still important to monitor and report the parameters listed in Table 3" (p.43).
+#: Light: "the exact irradiance … should be reported" (p.43), checked "with a reference
+#: cell" (p.44). Darkness, open circuit and a fixed bias are conditions to report, not
+#: readings (Table 3).
+SOLAR_SIMULATOR = instruction(HoldIrradiance, control=True, monitor=True)
 #: "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied"
 #: (p.43). A recommendation is a variant of its own (§21.1): every solar simulator comes
 #: without it and with it, the latter's option last. A range, never a target (§22).
@@ -74,6 +78,7 @@ LIGHTS = {
     ('800-1000Wm2', 'recommended 800–1000 W/m²'): instruction(
         HoldBetweenIrradiance,
         control=True,
+        monitor=True,
         lower_bound=pytest.approx(800),
         upper_bound=pytest.approx(1000),
     ),
@@ -96,7 +101,9 @@ AMBIENT_HUMIDITY = instruction(HoldRelativeHumidity, control=False, monitor=True
 #: Monitored, and controlled only above 40 °C: the condition stays in `notes` (§20.8).
 HUMIDITY_MONITORED = instruction(HoldRelativeHumidity, monitor=True)
 OPEN_CIRCUIT = instruction(VOCTracking, control=True)
-MPP = ('MPP', instruction(MPPTracking, control=True))
+#: MPP tracking "holds the device at its normal operating voltage and measures the output"
+#: (p.43).
+MPP = ('MPP', instruction(MPPTracking, control=True, monitor=True))
 #: Levels 1 and 2 under light: "options of exposure under open-circuit condition or using a
 #: fixed voltage bias near the MPP (instead of active MPP tracking)" (p.37).
 LOWER_LEVEL_LOADS = {
@@ -130,13 +137,19 @@ LIGHT_CYCLES = {
 
 
 def held(celsius: float) -> dict:
-    return instruction(HoldTemperature, control=True, set_point=kelvin(celsius))
+    """A held temperature, measured: Table 3 asks for the "temperature sensor type"."""
+    return instruction(
+        HoldTemperature, control=True, monitor=True, set_point=kelvin(celsius)
+    )
 
 
 def humidity(percent: float) -> dict:
     """A relative humidity, stored as the fraction itself — no temperature (§20.6)."""
     return instruction(
-        HoldRelativeHumidity, control=True, set_point=pytest.approx(percent / 100)
+        HoldRelativeHumidity,
+        control=True,
+        monitor=True,
+        set_point=pytest.approx(percent / 100),
     )
 
 
@@ -149,6 +162,7 @@ def ramping(start, end) -> dict:
     ramp = instruction(
         RampTemperature,
         control=True,
+        monitor=True,
         start_point=start,
         end_point=end,
         end_of_ramp_behavior='triangle',
@@ -162,6 +176,7 @@ def cycling(start, end) -> dict:
     cycle = instruction(
         RampTemperature,
         control=True,
+        monitor=True,
         start_point=start,
         end_point=end,
         end_of_ramp_behavior='cycle',
@@ -185,11 +200,10 @@ EXPECTED = {}
 
 
 def protocol(standard, options, instructions, environment='indoor'):
-    """The archive one file must load to. `options` are (file-name token, label), or
-    `None` for an option a variant does not take."""
+    """The archive one variant must load to. `options` are (token, label) in the order the
+    file writes them, or `None` for the alternative that adds nothing to its name."""
     options = [option for option in options if option]
     variant = ', '.join(label for _, label in options)
-    stem = '_'.join([standard, *(token for token, _ in options)])
     archive = {
         'm_def': m_def(StabilityProtocol),
         'name': f'{standard} ({variant})' if variant else standard,
@@ -201,9 +215,9 @@ def protocol(standard, options, instructions, environment='indoor'):
     }
     if variant:
         archive['standard_variant'] = variant
-    path = f'{standard}/{stem}.stability.yaml'
-    assert path not in EXPECTED
-    EXPECTED[path] = archive
+    # A variant is known by its name (§24).
+    assert archive['name'] not in EXPECTED
+    EXPECTED[archive['name']] = archive
 
 
 # ISOS-D — dark storage.
@@ -232,7 +246,7 @@ for light, simulator in LIGHTS.items():
     for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
         protocol(
             'ISOS-L-1',
-            [(l_token, l_label), light],
+            [light, (l_token, l_label)],
             [simulator, ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load],
         )
     for (token, (label, celsius)), (l_token, (l_label, load)) in itertools.product(
@@ -240,13 +254,13 @@ for light, simulator in LIGHTS.items():
     ):
         protocol(
             'ISOS-L-2',
-            [(token, label), (l_token, l_label), light],
+            [light, (token, label), (l_token, l_label)],
             [simulator, held(celsius), AMBIENT_HUMIDITY, load],
         )
     for token, (label, celsius) in TEMPERATURES.items():
         protocol(
             'ISOS-L-3',
-            [(token, label), light],
+            [light, (token, label)],
             [simulator, held(celsius), humidity(50), MPP[1]],
         )
 
@@ -288,13 +302,13 @@ for light, simulator in LIGHTS.items():
         for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
             protocol(
                 'ISOS-LC-1',
-                [*cycle_options, (l_token, l_label), light],
+                [(l_token, l_label), *cycle_options, light],
                 [ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load, routine],
             )
             for token, (label, celsius) in TEMPERATURES.items():
                 protocol(
                     'ISOS-LC-2',
-                    [*cycle_options, (token, label), (l_token, l_label), light],
+                    [(token, label), (l_token, l_label), *cycle_options, light],
                     [held(celsius), AMBIENT_HUMIDITY, load, routine],
                 )
 
@@ -308,12 +322,12 @@ for light, simulator in LIGHTS.items():
         ):
             protocol(
                 'ISOS-LT-1',
-                [(s_token, s_label), (l_token, l_label), light],
+                [light, (l_token, l_label), (s_token, s_label)],
                 [simulator, AMBIENT_HUMIDITY, load, routine],
             )
         protocol(
             'ISOS-LT-2',
-            [(l_token, l_label), light],
+            [light, (l_token, l_label)],
             [simulator, HUMIDITY_MONITORED, load, ramping(kelvin(5), kelvin(65))],
         )
     # Level 3, where MPP tracking is mandatory: the table's "MPP or OC" is no option.
@@ -324,23 +338,32 @@ for light, simulator in LIGHTS.items():
     )
 
 
-def read(name: str) -> dict:
-    with open(EXAMPLES / name) as file:
-        return yaml.safe_load(file)
+def shipped() -> dict:
+    """Every variant of every shipped file, by its key."""
+    variants = {}
+    for path in sorted(EXAMPLES.glob('*.stability.yaml')):
+        expansion = expand(read(path))
+        assert [(p.path, p.message) for p in expansion.problems] == []
+        for variant in expansion.variants:
+            variants[variant.key(stem(path))] = variant.document
+    return variants
+
+
+SHIPPED = shipped()
 
 
 @pytest.fixture
 def protocol_file(normalized, log):
-    """One shipped file, translated, loaded and normalized — asserted clean on the way
+    """One shipped variant, translated, loaded and normalized — asserted clean on the way
     through, because a typo in an example upload is a bug in the documentation."""
 
-    def run(name: str) -> StabilityProtocol:
-        translation = translate(read(name))
+    def run(key: str) -> StabilityProtocol:
+        translation = translate(SHIPPED[key])
         assert [(p.path, p.message) for p in translation.problems] == []
         loaded = StabilityProtocol.m_from_dict(translation.archive['data'])
         for each in loaded.instructions:
             normalized(each)
-        metadata = EntryMetadata(entry_name=name)
+        metadata = EntryMetadata(entry_name=key)
         loaded.normalize(EntryArchive(metadata=metadata, data=loaded), log)
         assert (log.errors, log.warnings) == ([], [])
         return loaded
@@ -348,16 +371,16 @@ def protocol_file(normalized, log):
     return run
 
 
-def test_every_file_has_an_expectation_and_every_expectation_a_file():
-    assert SHIPPED == sorted(EXPECTED)
+def test_every_variant_has_an_expectation_and_every_expectation_a_variant():
+    assert sorted(SHIPPED) == sorted(EXPECTED)
 
 
-@pytest.mark.parametrize('path', sorted(EXPECTED))
-def test_a_shipped_protocol_is_exactly_its_row_of_the_table(path, protocol_file):
-    archive = protocol_file(path).m_to_dict()
+@pytest.mark.parametrize('key', sorted(EXPECTED))
+def test_a_shipped_protocol_is_exactly_its_row_of_the_table(key, protocol_file):
+    archive = protocol_file(key).m_to_dict()
     notes = archive.pop('notes')
 
-    assert archive == EXPECTED[path]
+    assert archive == EXPECTED[key]
     # Short, and only what the standard says — never how it was transcribed (§18.3).
     assert 0 < len(notes) <= NOTES_AT_MOST
     assert not any(word in notes for word in SCHEMA_WORDS)

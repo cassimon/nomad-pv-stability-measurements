@@ -11,12 +11,6 @@ m_package = SchemaPackage()
 class MonitorControlInstruction(SingleInstruction):
     """
     One quantity, monitored, controlled, or both.
-
-    Never used on its own, and neither is any kind below: a subclass in `hold_instructions.py`,
-    `hold_below_instructions.py` or `ramp_instructions.py` is the quantity, and fixes
-    the unit of what it holds or moves. What a value means physically is no part of the schema
-    (Design.md §15.1). Without an `estimated_duration` the instruction never finishes;
-    the first instructions of a protocol set, this way, what holds for the whole run.
     """
 
     monitor = Quantity(
@@ -80,11 +74,7 @@ class HoldInstruction(MonitorControlInstruction):
 
 
 class HoldBelowInstruction(MonitorControlInstruction):
-    """One value, kept under a bound for as long as the instruction lasts (§17.5).
-
-    A sibling of `HoldInstruction`, not a subclass: a bound is not a value to hold, and sharing
-    `set_point` would give one field two meanings.
-    """
+    """One value, kept under a bound for as long as the instruction lasts."""
 
     upper_bound = Quantity(
         type=np.float64,
@@ -94,12 +84,7 @@ class HoldBelowInstruction(MonitorControlInstruction):
 
 
 class HoldBetweenInstruction(HoldBelowInstruction):
-    """One value, kept between two bounds for as long as the instruction lasts (§22).
-
-    A subclass of `HoldBelowInstruction`: a value kept between two bounds is kept below the
-    upper one, so `upper_bound` keeps its meaning. No target inside the range is named —
-    that would be a `HoldInstruction` with a tolerance, a set point the protocol never states.
-    """
+    """One value, kept between two bounds for as long as the instruction lasts."""
 
     lower_bound = Quantity(
         type=np.float64,
@@ -125,13 +110,7 @@ class HoldBetweenInstruction(HoldBelowInstruction):
 
 
 class RampInstruction(MonitorControlInstruction):
-    """One value, moving from `start_point` to `end_point` over the instruction (§15.11).
-
-    Linearly: any other shape is a curve the schema would have to evaluate, which is
-    the physics §15.1 keeps out. Whether it then cycles is its `end_of_ramp_behavior`;
-    `cycle` is the one member that states no path, where a standard names the two ends of
-    a cycle and nothing more — "RT to 65 °C" (§21.2).
-    """
+    """One value, moving from `start_point` to `end_point` over the instruction ."""
 
     start_point = Quantity(
         type=np.float64,
@@ -155,8 +134,7 @@ class RampInstruction(MonitorControlInstruction):
         description='Whether the ramp runs once and then holds end_point until the end of the instruction duration, '
         'repeats with an abrupt jump back to `start_point`, '
         'repeats with a downward ramp at the same rate back to `start_point`, '
-        'or cycles back to `start_point` by a path the protocol does not state — '
-        'where it writes no `ramp_rate` either (§21.2).',
+        'or cycles back to `start_point` by a path the protocol does not state ',
     )
 
     def normalize(self, archive, logger):

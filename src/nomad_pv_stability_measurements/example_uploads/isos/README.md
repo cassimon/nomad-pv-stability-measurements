@@ -6,7 +6,7 @@ ISOS procedures", *Nature Energy* **5**, 35–49 (2020), <https://doi.org/10.103
 
 Open any of them in the ELN, or copy one and add what your own run needs.
 
-| Family | What it stresses | Files |
+| Family | What it stresses | Protocols |
 |---|---|---|
 | ISOS-D | Dark storage | 5 |
 | ISOS-V | Electrical bias, in the dark | 25 |
@@ -20,20 +20,41 @@ Within each family the number is the level of sophistication: **1** needs the le
 **3** the most. Not written yet: **ISOS-LC-3** and the **ISOS-I** protocols in an inert
 atmosphere — see [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
 
-## One folder per standard, one file per option
+## One file per standard, one entry per option
 
 Where the standard offers options — two temperatures, MPP tracking, open circuit or a fixed
-voltage near the MPP, five biases, a light–dark cycle period and duty cycle — every combination is
-its own protocol, with the options in the file name. A recommendation is an option too: every
-solar-simulator protocol comes once without and once with the recommended 800–1000 W/m², named
-last:
+voltage near the MPP, five biases, a light–dark cycle period and duty cycle — the section they
+belong to lists them under `options:`, and every combination becomes its own protocol entry. A
+recommendation is an option too: every solar-simulator protocol comes once without and once with
+the recommended 800–1000 W/m².
+
+```yaml
+channel_settings:
+  irradiation:
+    control: true
+    options:
+      - {}                                     # adds nothing
+      - label: recommended 800–1000 W/m²
+        hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}
+  temperature:
+    options:
+      - hold: 65 °C                            # a single value is its own label
+      - hold: 85 °C
+```
+
+Each alternative's keys are written into the section that lists it; a key is written beside the
+options or inside them, never both. An alternative may list options of its own. The light–dark
+cycles repeat their light command with a YAML anchor (`&light`, `<<: *light`).
+
+Each entry is named after its alternatives, in the order the file writes them, and they are its
+`standard_variant`:
 
 ```
-ISOS-D-1/ISOS-D-1.stability.yaml                     no options
-ISOS-D-2/ISOS-D-2_65degC.stability.yaml              standard: ISOS-D-2, standard_variant: 65 °C
-ISOS-V-3/ISOS-V-3_65degC_minus-Jmpp.stability.yaml   standard_variant: 65 °C, −J_MPP
-ISOS-LC-2/ISOS-LC-2_24h_1-2_85degC_MPP.stability.yaml  standard_variant: 24 h, 1:2, 85 °C, MPP
-ISOS-L-1/ISOS-L-1_MPP_800-1000Wm2.stability.yaml    standard_variant: MPP, recommended 800–1000 W/m²
+ISOS-D-1                                          no options
+ISOS-D-2 (65 °C)                                  standard_variant: 65 °C
+ISOS-V-3 (65 °C, −J_MPP)
+ISOS-LC-2 (85 °C, MPP, 24 h, 1:2)
+ISOS-L-1 (recommended 800–1000 W/m², MPP)
 ```
 
 Search for `standard` to find every variant of a protocol, and for `standard_variant` to find one.
@@ -47,7 +68,7 @@ channel_settings:          # conditions that hold for the whole test
   electrical_load: {hold: mpp}
 routine:                   # only what changes during the test
   repeat: indefinitely
-  commands:
+  instructions:
     - {channel: irradiation, control: true, duration: 8 h}
     - {channel: irradiation, hold: dark, duration: 16 h}
 ```
@@ -59,6 +80,12 @@ cycle states its period, and repeats for as long as your test runs.
 - **Ambient means monitored, not regulated.** The standard assumes room temperature to be
   23 ± 4 °C without controlling it, and asks for every uncontrolled condition to be monitored and
   reported: `control: false`, `monitor: true`.
+- **What is measured is monitored, controlled or not.** The standard asks for the parameters of
+  its Table 3 to be monitored and reported "even if a parameter is not controlled" (p.43): a held
+  temperature (its sensor is reported), a light source (its exact irradiance, checked with a
+  reference cell, p.44), a controlled humidity, and MPP tracking, which measures the output while
+  it holds the point. They write `monitor: true` beside what they control. Darkness, open circuit
+  and a fixed bias are conditions to report, not readings, and are not monitored.
 - **Humidity is relative humidity**, as the standard states it (`85 %`), with no temperature
   beside it.
 - **A bias measured on the device** says which point in `reference_point` (`V_MPP`, `-J_MPP`, …):

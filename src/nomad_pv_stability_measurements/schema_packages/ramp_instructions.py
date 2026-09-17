@@ -1,15 +1,3 @@
-"""The instructions whose value moves, one class per quantity (Design.md §15.11).
-
-Each fixes the unit of `start_point`, `end_point` and `ramp_rate` — the rate in that
-unit per second, since a rate is the quantity over a time. One class per quantity, as
-`hold_instructions.py` has: `RampTemperature` and `HoldTemperature` are two kinds of
-instruction on one axis.
-
-The move is linear. Any other shape is a curve the schema would have to evaluate, which
-is the physics §15.1 keeps out, and a staircase is not a curve at all: it is a
-`CountingRepeatingBlock` of ordinary holds (§23). Where a standard names the two ends of a cycle and not
-the path, the ramp's `end_of_ramp_behavior` is `cycle` (§21.2).
-"""
 
 import numpy as np
 from nomad.metainfo import Quantity, SchemaPackage

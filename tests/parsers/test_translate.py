@@ -53,9 +53,9 @@ def entry(cls, **fields) -> dict:
     return {'m_def': m_def(cls), **fields}
 
 
-def commands(*authored):
-    """Authored commands, read the way a block reads them."""
-    return translate_section({'commands': list(authored)}, CountingRepeatingBlock)
+def instructions(*authored):
+    """Authored instructions, read the way a block reads them."""
+    return translate_section({'instructions': list(authored)}, CountingRepeatingBlock)
 
 
 def only(translation) -> dict:
@@ -96,11 +96,11 @@ def only(translation) -> dict:
     ],
 )
 def test_a_channel_and_a_value_become_one_instruction(authored, expected):
-    assert only(commands(authored)) == expected
+    assert only(instructions(authored)) == expected
 
 
 def test_a_channel_logged_as_a_whole_is_one_instruction_per_variable():
-    translation = commands({'channel': 'electrical_load', 'monitor': True})
+    translation = instructions({'channel': 'electrical_load', 'monitor': True})
 
     assert translation.problems == []
     assert translation.archive['sub_instructions'] == [
@@ -137,7 +137,7 @@ def test_a_channel_logged_as_a_whole_is_one_instruction_per_variable():
     ],
 )
 def test_named_values_and_tolerances(authored, expected):
-    assert only(commands(authored)) == expected
+    assert only(instructions(authored)) == expected
 
 
 @pytest.mark.parametrize(
@@ -160,7 +160,7 @@ def test_named_values_and_tolerances(authored, expected):
 def test_a_point_the_cell_decides_or_a_gas_is_named_not_given_a_number(
     authored, expected
 ):
-    assert only(commands(authored)) == expected
+    assert only(instructions(authored)) == expected
 
 
 @pytest.mark.parametrize(
@@ -203,7 +203,7 @@ def test_a_point_the_cell_decides_or_a_gas_is_named_not_given_a_number(
     ],
 )
 def test_ramp_hold_below_and_hold_between_choose_their_kind(authored, expected):
-    assert only(commands(authored)) == expected
+    assert only(instructions(authored)) == expected
 
 
 @pytest.mark.parametrize(
@@ -231,7 +231,7 @@ def test_ramp_hold_below_and_hold_between_choose_their_kind(authored, expected):
     ],
 )
 def test_humidity_is_relative_or_absolute(authored, expected):
-    assert only(commands(authored)) == expected
+    assert only(instructions(authored)) == expected
 
 
 # Blocks and repetition (§23).
@@ -252,7 +252,7 @@ def test_humidity_is_relative_or_absolute(authored, expected):
 )
 def test_how_a_block_repeats_and_runs(authored, expected):
     temperature = {'channel': 'temperature'}
-    translation = commands({**authored, 'commands': [temperature]})
+    translation = instructions({**authored, 'instructions': [temperature]})
 
     assert only(translation) == {
         **expected,
@@ -270,21 +270,23 @@ def test_how_a_block_repeats_and_runs(authored, expected):
         (
             {'duration': '1 h'},
             'duration',
-            "a block's duration follows from its commands",
+            "a block's duration follows from its instructions",
         ),
         ({'repeat_for': '1 h', 'repeat': 3}, 'repeat', 'stopped by its `repeat_for`'),
         (
             {'m_def': m_def(InstructionBlock), 'repeat': 3},
             'repeat',
-            'runs its commands once',
+            'runs its instructions once',
         ),
     ],
 )
 def test_what_a_block_cannot_say_is_reported(authored, path, reported):
-    translation = commands({**authored, 'commands': [{'channel': 'temperature'}]})
+    translation = instructions(
+        {**authored, 'instructions': [{'channel': 'temperature'}]}
+    )
 
     [problem] = translation.problems
-    assert problem.path == f'commands[0].{path}'
+    assert problem.path == f'instructions[0].{path}'
     assert reported in problem.message
 
 
@@ -305,7 +307,9 @@ def test_settings_come_first_then_the_routine():
             'data': {
                 'duration': '1000 h',
                 'channel_settings': {'temperature': {'hold': '65 °C'}},
-                'routine': {'commands': [{'channel': 'irradiation', 'hold': 'dark'}]},
+                'routine': {
+                    'instructions': [{'channel': 'irradiation', 'hold': 'dark'}]
+                },
             }
         }
     )
@@ -357,10 +361,10 @@ def test_a_bare_archive_reads_as_itself_even_in_the_old_spelling(archive):
 def test_a_value_that_cannot_be_read_is_a_problem_and_the_instruction_stays(
     authored, path, reported
 ):
-    translation = commands(authored)
+    translation = instructions(authored)
 
     [problem] = translation.problems
-    assert problem.path == f'commands[0].{path}'
+    assert problem.path == f'instructions[0].{path}'
     assert reported in problem.message
     assert len(translation.archive['sub_instructions']) == 1
 
@@ -383,8 +387,19 @@ def test_a_value_that_cannot_be_read_is_a_problem_and_the_instruction_stays(
     ],
 )
 def test_an_instruction_that_cannot_be_placed_is_left_out(authored, reported):
-    translation = commands(authored)
+    translation = instructions(authored)
 
     [problem] = translation.problems
     assert reported in problem.message
     assert translation.archive['sub_instructions'] == []
+
+
+def test_the_former_word_commands_is_reported_and_still_read():
+    translation = translate_section(
+        {'commands': [{'channel': 'temperature'}]}, CountingRepeatingBlock
+    )
+
+    [problem] = translation.problems
+    assert problem.path == 'commands'
+    assert 'write `instructions`' in problem.message
+    assert translation.archive['sub_instructions'] == [entry(HoldTemperature)]

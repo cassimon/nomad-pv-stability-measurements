@@ -1,0 +1,20 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-D-2
+  standard: ISOS-D-2
+  environment: indoor
+  notes: Dark storage in an oven in ambient air.
+  channel_settings:
+    irradiation:
+      hold: dark
+    temperature:
+      monitor: true
+      options:
+        - hold: 65 °C
+        - hold: 85 °C
+    atmosphere:
+      variable: relative_humidity
+      control: false
+      monitor: true
+    electrical_load:
+      hold: open_circuit

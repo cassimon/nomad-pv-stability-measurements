@@ -3,11 +3,11 @@ data:
   name: my protocol
   routine:
     name: example
-    commands:
+    instructions:
       - name: A
       - name: fork
         mode: parallel
-        commands:
+        instructions:
           - name: B
           - name: C
       - name: D

@@ -57,7 +57,7 @@ AUTHORING_WORDS = (
     'hold_between',
     'ramp',
     'duration',
-    'commands',
+    'instructions',
     'mode',
     'repeat',
     'repeat_for',
@@ -82,6 +82,8 @@ RETIRED_REPEATS = {
     'until_end_of_duration': 'a timed block, `repeat_for: 12 h`',
     'n_times': 'the number itself, `repeat: 5`',
 }
+#: The former word for `instructions` (§25).
+RETIRED_INSTRUCTIONS = 'commands'
 
 #: Both kinds back to their variable. A bare archive names either in its `m_def`, so a
 #: stored ramp has to read back as a ramp and not as a hold (§15.14).
@@ -109,7 +111,7 @@ _RELATIVE_HUMIDITY_UNIT = re.compile(r'%\s*rh$', re.IGNORECASE)
 
 @dataclass(frozen=True)
 class Problem:
-    #: Where in the file, e.g. `data.routine.commands[3].hold`.
+    #: Where in the file, e.g. `data.routine.instructions[3].hold`.
     path: str
     message: str
 
@@ -213,6 +215,12 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
     for written, value in authored.items():
         where = _at(path, written)
         key = _renamed(written, cls)
+        if written == RETIRED_INSTRUCTIONS and key != written:
+            problems.append(
+                Problem(
+                    where, '`commands` is not written any more: write `instructions`.'
+                )
+            )
         if key != written and key in authored:
             problems.append(
                 Problem(where, f'`{written}` and `{key}` are one field; write one.')
@@ -223,7 +231,7 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
             problems.append(
                 Problem(
                     where,
-                    "a block's duration follows from its commands. To stop it after a "
+                    "a block's duration follows from its instructions. To stop it after a "
                     'time, write `repeat_for`; to stop the whole protocol, write '
                     '`duration` on the protocol.',
                 )
@@ -235,7 +243,7 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
             if read is not None:
                 bare[key] = read
         elif key in sub_sections and sub_sections[key].repeats:
-            bare[key] = _commands(value, where, problems)
+            bare[key] = _instruction_list(value, where, problems)
         elif key in sub_sections:
             nested = sub_sections[key].sub_section.section_cls
             bare[key] = _section(value, nested, where, problems)
@@ -245,11 +253,11 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
 
 
 def _renamed(written: str, cls: type) -> str:
-    """The field `written` stands for on `cls`: `commands` are a plan's `instructions`
-    and a block's `sub_instructions`. Only instructions and plans take other names."""
+    """The field `written` stands for on `cls`: a block's `instructions` are its
+    `sub_instructions`. Only instructions and plans take other names."""
     if not issubclass(cls, Instruction | Plan):
         return written
-    if written == 'commands':
+    if written in ('instructions', RETIRED_INSTRUCTIONS):
         return 'instructions' if issubclass(cls, Plan) else 'sub_instructions'
     return RENAMED.get(written, written)
 
@@ -266,7 +274,9 @@ def _repeat(value, cls: type, where: str, problems: list, bare: dict) -> None:
         )
     elif not issubclass(cls, CountingRepeatingBlock):
         problems.append(
-            Problem(where, f'{cls.__name__} runs its commands once; write no `repeat`.')
+            Problem(
+                where, f'{cls.__name__} runs its instructions once; write no `repeat`.'
+            )
         )
     elif value == REPEAT_INDEFINITELY:
         return
@@ -290,7 +300,7 @@ def _repeat(value, cls: type, where: str, problems: list, bare: dict) -> None:
         )
 
 
-def _commands(entries, path: str, problems: list) -> list:
+def _instruction_list(entries, path: str, problems: list) -> list:
     if not isinstance(entries, list):
         problems.append(Problem(path, 'expected a list of instructions.'))
         return []
