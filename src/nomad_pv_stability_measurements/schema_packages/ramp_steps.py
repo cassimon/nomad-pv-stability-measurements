@@ -7,7 +7,8 @@ one axis, and R4 reads them as one (`utils.py`).
 
 The move is linear. Any other shape is a curve the schema would have to evaluate, which
 is the physics §15.1 keeps out, and a staircase is not a curve at all: it is a `repeat`
-block of ordinary holds (§15.8).
+block of ordinary holds (§15.8). Where a standard names the two ends of a cycle and not
+the path, the ramp's `end_of_ramp_behavior` is `cycle` (§21.2).
 """
 
 import numpy as np
@@ -116,7 +117,7 @@ class RampStrain(RampStep):
     )
 
 
-class RampWaterVaporFraction(RampStep):
+class RampAbsoluteHumidity(RampStep):
     """The water in the atmosphere around the sample, moving."""
 
     start_point = Quantity(
@@ -131,6 +132,24 @@ class RampWaterVaporFraction(RampStep):
     )
     ramp_rate = Quantity(
         type=np.float64, unit='1/s', description='How fast the fraction moves.'
+    )
+
+
+class RampRelativeHumidity(RampStep):
+    """The relative humidity around the sample, moving (§20.6)."""
+
+    start_point = Quantity(
+        type=np.float64,
+        unit='dimensionless',
+        description='Where the ramp starts, as a fraction: `30 %` is 0.3.',
+    )
+    end_point = Quantity(
+        type=np.float64,
+        unit='dimensionless',
+        description='Where the ramp ends, as a fraction.',
+    )
+    ramp_rate = Quantity(
+        type=np.float64, unit='1/s', description='How fast the relative humidity moves.'
     )
 
 

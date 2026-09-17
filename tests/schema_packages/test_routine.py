@@ -473,7 +473,7 @@ def test_a_ramp_needs_both_its_ends(normalized, log):
     normalized(RampTemperature(name='warm up', start_point=298.15 * ureg.kelvin))
 
     [error] = log.errors
-    assert 'warm up is a ramp missing an end' in error
+    assert 'warm up moves between two values but is missing an end' in error
 
 
 def test_a_ramp_derives_its_rate_from_its_duration(normalized, log):
@@ -535,6 +535,54 @@ def test_a_ramp_with_neither_a_rate_nor_a_duration_lasts_as_its_block_does(
     assert (log.errors, log.warnings) == ([], [])
 
 
+# A ramp that repeats is a cycle, and one member of them states no path (§21.2).
+
+
+def test_a_cycle_by_an_unstated_path_is_a_ramp_that_says_so(normalized, log):
+    step = normalized(
+        RampTemperature(
+            start_point=296.15 * ureg.kelvin,
+            end_point=338.15 * ureg.kelvin,
+            end_of_ramp_behavior='cycle',
+            estimated_duration=3600 * ureg.second,
+        )
+    )
+
+    # No path, so no rate along it is derived from the duration.
+    assert step.ramp_rate is None
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_a_cycle_by_an_unstated_path_takes_no_rate(normalized, log):
+    step = normalized(
+        RampTemperature(
+            name='thermal cycle',
+            start_point=296.15 * ureg.kelvin,
+            end_point=338.15 * ureg.kelvin,
+            end_of_ramp_behavior='cycle',
+            ramp_rate=60 * ureg.kelvin / ureg.hour,
+        )
+    )
+
+    # Reported, never repaired, and no duration derived from it (D13a).
+    assert step.estimated_duration is None
+    [error] = log.errors
+    assert 'thermal cycle cycles by a path the protocol does not state' in error
+
+
+def test_a_cycle_still_needs_both_its_ends(normalized, log):
+    normalized(
+        RampTemperature(
+            name='thermal cycle',
+            start_point=296.15 * ureg.kelvin,
+            end_of_ramp_behavior='cycle',
+        )
+    )
+
+    [error] = log.errors
+    assert 'thermal cycle moves between two values but is missing an end' in error
+
+
 def test_a_step_built_as_a_bare_kind_names_no_quantity(normalized, log):
     normalized(RampStep(name='stray'))
 
@@ -558,3 +606,64 @@ def test_a_count_without_n_times_has_no_effect(normalized, log):
     [warning] = log.warnings
     assert '`repeat_n`' in warning
     assert 'no effect' in warning
+
+
+# A block that repeats until the protocol ends (§20.1).
+
+
+def light_dark_cycle(**fields) -> PlannedSubroutineStep:
+    block = BLOCK(repeat='until_end_of_protocol', **fields)
+    block.steps = [
+        HoldIrradiance(control=True, estimated_duration=8 * ureg.hour),
+        HoldIrradiance(
+            control=True,
+            set_point=0 * ureg('W/m^2'),
+            estimated_duration=16 * ureg.hour,
+        ),
+    ]
+    return block
+
+
+def test_a_block_until_the_end_of_the_protocol_claims_no_length(normalized, log):
+    block = normalized(light_dark_cycle(name='cycle'))
+
+    # One iteration is the cycle the standard states; how many is not stated.
+    assert block.estimated_duration_one_iteration.to(ureg.hour).magnitude == (
+        pytest.approx(24)
+    )
+    assert block.estimated_duration is None
+    assert (log.errors, log.warnings) == ([], [])
+
+
+def test_nothing_around_it_claims_a_length_either(normalized, log):
+    outer = BLOCK(name='routine')
+    outer.steps = [light_dark_cycle()]
+
+    normalized(outer)
+
+    assert outer.estimated_duration is None
+
+
+@pytest.mark.parametrize(
+    'written', [{'repeat_n': 3}, {'estimated_duration': 48 * ureg.hour}]
+)
+def test_a_count_or_a_length_there_has_no_effect(normalized, log, written):
+    block = normalized(light_dark_cycle(name='cycle', **written))
+
+    [warning] = log.warnings
+    assert f'cycle writes `{next(iter(written))}`' in warning
+    assert 'repeats until the end of the protocol' in warning
+    # Reported, never repaired: what was written stands (D13a).
+    assert block.estimated_duration_one_iteration.to(ureg.hour).magnitude == (
+        pytest.approx(24)
+    )
+
+
+def test_its_one_iteration_is_still_checked(normalized, log):
+    block = BLOCK(name='cycle', repeat='until_end_of_protocol')
+    block.steps = [HoldIrradiance(), HoldIrradiance()]
+
+    normalized(block)
+
+    [error] = log.errors
+    assert '2 Irradiance steps overlap in cycle' in error

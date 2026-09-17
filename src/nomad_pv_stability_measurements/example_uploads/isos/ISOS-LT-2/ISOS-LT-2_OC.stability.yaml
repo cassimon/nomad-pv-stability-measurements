@@ -4,12 +4,12 @@ data:
   standard: ISOS-LT-2
   standard_variant: OC
   environment: indoor
-  notes: Solar-thermal cycling in an environmental chamber. Relative humidity controlled at 50 % above 40 °C.
+  notes: Solar-thermal cycling in an environmental chamber; RH controlled at 50 % above 40 °C.
   channel_settings:
     irradiation:
       control: true
     atmosphere:
-      variable: water_vapor
+      variable: relative_humidity
       monitor: true
     electrical_load:
       hold: open_circuit

@@ -10,8 +10,11 @@ data:
       control: true
     temperature:
       hold: RT
-    atmosphere:
-      variable: water_vapor
       control: false
+      monitor: true
+    atmosphere:
+      variable: relative_humidity
+      control: false
+      monitor: true
     electrical_load:
       hold: open_circuit

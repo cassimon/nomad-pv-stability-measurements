@@ -11,8 +11,10 @@ data:
     temperature:
       hold: 65 °C
     atmosphere:
-      variable: water_vapor
+      variable: relative_humidity
       control: false
+      monitor: true
     electrical_load:
       variable: voltage
       control: true
+      reference_point: V_oc

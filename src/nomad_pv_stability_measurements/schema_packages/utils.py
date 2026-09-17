@@ -8,7 +8,7 @@ def _is_monitor_control(step) -> bool:
 
 #: The kinds of step, as the prefixes of their class names — longest first, or
 #: `HoldBelow…` would lose only its `Hold` and land on a quantity of its own (§17.5).
-KIND_PREFIXES = ('HoldBelow', 'Hold', 'Ramp')
+KIND_PREFIXES = ('HoldBetween', 'HoldBelow', 'Hold', 'Ramp')
 
 
 def _quantity_of(step) -> str:

@@ -17,9 +17,9 @@ class PlannedMonitorControlStep(PlannedProcessStep):
     """
     One quantity, monitored, controlled, or both.
 
-    Never used on its own, and neither is either kind below: a subclass in
-    `hold_steps.py` or `ramp_steps.py` is the quantity, and fixes the unit of what it
-    holds or moves. What a value means physically is no part of the schema
+    Never used on its own, and neither is any kind below: a subclass in `hold_steps.py`,
+    `hold_below_steps.py` or `ramp_steps.py` is the quantity, and fixes
+    the unit of what it holds or moves. What a value means physically is no part of the schema
     (Design.md §15.1). Without an `estimated_duration` the step is a condition holding
     for its block's whole span; the first steps of a protocol set, this way, what holds
     for the whole run.
@@ -45,6 +45,13 @@ class PlannedMonitorControlStep(PlannedProcessStep):
         description='How fast to sample a continuous stream. Write this or '
         '`sample_every`; the other is derived from it.',
     )
+    reference_point = Quantity(
+        type=str,
+        description="A point on the device's own characteristic that the value is taken "
+        'from, where the protocol names one instead of a number — e.g. `V_MPP`, measured '
+        'on the fresh device. Free text here; a step class that has such points narrows '
+        'it to the ones it takes (Design.md §20.3).',
+    )
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
@@ -58,8 +65,8 @@ class PlannedMonitorControlStep(PlannedProcessStep):
             logger.error(
                 f'{self.name or "<unnamed>"} is a bare '
                 f'`{type(self).__name__}`, which names no quantity: use one of the '
-                f'step classes in `hold_steps.py`, `ramp_steps.py` or '
-                f'`hold_below_steps.py`.'
+                f'step classes in `hold_steps.py`, `hold_below_steps.py` or '
+                f'`ramp_steps.py`.'
             )
 
 
@@ -92,11 +99,44 @@ class HoldBelowStep(PlannedMonitorControlStep):
     )
 
 
+class HoldBetweenStep(HoldBelowStep):
+    """One value, kept between two bounds for as long as the step lasts (§22).
+
+    A subclass of `HoldBelowStep`: a value kept between two bounds is kept below the
+    upper one, so `upper_bound` keeps its meaning. No target inside the range is named —
+    that would be a `HoldStep` with a tolerance, a set point the protocol never states.
+    """
+
+    lower_bound = Quantity(
+        type=np.float64,
+        description='The least the value may be. Each step class declares it in its own '
+        'unit.',
+    )
+
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        if type(self) in ABSTRACT_STEPS:
+            return  # already reported, and the base's own fields carry no unit
+        where = self.name or '<unnamed>'
+        if self.lower_bound is None or self.upper_bound is None:
+            logger.error(
+                f'{where} keeps a value between two bounds but is missing one: write '
+                f'both `lower_bound` and `upper_bound`.'
+            )
+        elif self.lower_bound > self.upper_bound:
+            logger.error(
+                f'{where} writes a `lower_bound` above its `upper_bound`, so no value '
+                f'lies between them.'
+            )
+
+
 class RampStep(PlannedMonitorControlStep):
     """One value, moving from `start_point` to `end_point` over the step (§15.11).
 
     Linearly: any other shape is a curve the schema would have to evaluate, which is
-    the physics §15.1 keeps out.
+    the physics §15.1 keeps out. Whether it then cycles is its `end_of_ramp_behavior`;
+    `cycle` is the one member that states no path, where a standard names the two ends of
+    a cycle and nothing more — "RT to 65 °C" (§21.2).
     """
 
     start_point = Quantity(
@@ -106,7 +146,8 @@ class RampStep(PlannedMonitorControlStep):
     )
     end_point = Quantity(
         type=np.float64,
-        description='The value the step ends at, reached linearly from `start_point`.',
+        description='The value the step moves to. Each step class declares it in its '
+        'own unit.',
     )
     ramp_rate = Quantity(
         type=np.float64,
@@ -115,11 +156,13 @@ class RampStep(PlannedMonitorControlStep):
         'other is derived from it (D16).',
     )
     end_of_ramp_behavior = Quantity(
-        type=MEnum('hold', 'sawtooth', 'triangle'),
+        type=MEnum('hold', 'sawtooth', 'triangle', 'cycle'),
         default='hold',
         description='Whether the ramp runs once and then holds end_point until the end of the step duration, '
         'repeats with an abrupt jump back to `start_point`, '
-        'or repeats with a downward ramp at the same rate back to `start_point`.',
+        'repeats with a downward ramp at the same rate back to `start_point`, '
+        'or cycles back to `start_point` by a path the protocol does not state — '
+        'where it writes no `ramp_rate` either (§21.2).',
     )
 
     def normalize(self, archive, logger):
@@ -129,9 +172,16 @@ class RampStep(PlannedMonitorControlStep):
         where = self.name or '<unnamed>'
         if self.start_point is None or self.end_point is None:
             logger.error(
-                f'{where} is a ramp missing an end: write both `start_point` and '
-                f'`end_point`.'
+                f'{where} moves between two values but is missing an end: write both '
+                f'`start_point` and `end_point`.'
             )
+            return
+        if self.end_of_ramp_behavior == 'cycle':
+            if self.ramp_rate is not None:
+                logger.error(
+                    f'{where} cycles by a path the protocol does not state, so it has '
+                    f'no `ramp_rate`: write `triangle` or `sawtooth` for a linear one.'
+                )
             return
         span = abs(self.end_point - self.start_point)
         # The rate and the duration say one thing, so whichever was written, both are
@@ -158,7 +208,13 @@ class RampStep(PlannedMonitorControlStep):
 
 
 #: The bases that name no quantity: writing one directly is an authoring mistake.
-ABSTRACT_STEPS = (PlannedMonitorControlStep, HoldStep, HoldBelowStep, RampStep)
+ABSTRACT_STEPS = (
+    PlannedMonitorControlStep,
+    HoldStep,
+    HoldBelowStep,
+    HoldBetweenStep,
+    RampStep,
+)
 
 
 class PlannedSubroutineStep(PlannedProcessStep):
@@ -176,11 +232,13 @@ class PlannedSubroutineStep(PlannedProcessStep):
         "one hold for the block's whole span either way.",
     )
     repeat = Quantity(
-        type=MEnum('until_end_of_duration', 'n_times'),
+        type=MEnum('until_end_of_duration', 'n_times', 'until_end_of_protocol'),
         default='until_end_of_duration',
         description='How often this block runs its steps: `until_end_of_duration` for '
         'as long as its `estimated_duration` lasts, `n_times` for `repeat_n` '
-        'iterations of `estimated_duration_one_iteration` each.',
+        'iterations of `estimated_duration_one_iteration` each, '
+        '`until_end_of_protocol` again and again for as long as the protocol runs — '
+        'where a standard fixes the cycle but not how many (§20.1).',
     )
     repeat_n = Quantity(
         type=int,
@@ -190,8 +248,8 @@ class PlannedSubroutineStep(PlannedProcessStep):
         type=np.float64,
         unit='s',
         description='How long one iteration is planned to last. Only read with '
-        '`repeat: n_times`; left empty, it is derived from the steps. The block itself '
-        'then lasts `repeat_n` times this.',
+        '`repeat: n_times` or `until_end_of_protocol`; left empty, it is derived from '
+        'the steps. With `n_times` the block then lasts `repeat_n` times this.',
     )
     steps = SubSection(
         section_def=PlannedProcessStep,
@@ -204,6 +262,8 @@ class PlannedSubroutineStep(PlannedProcessStep):
         super().normalize(archive, logger)
         if self.repeat == 'n_times':
             self.normalize_iterations(logger)
+        elif self.repeat == 'until_end_of_protocol':
+            self.normalize_until_end_of_protocol(logger)
         else:
             self.report_unread_iteration_fields(logger)
             normalize_steps(self, self.execution_mode, logger)
@@ -217,6 +277,24 @@ class PlannedSubroutineStep(PlannedProcessStep):
                     f'{where} writes `{written}`, which is only read with '
                     f'`repeat: n_times`, so it has no effect here.'
                 )
+
+    def normalize_until_end_of_protocol(self, logger):
+        """The steps are one iteration, repeated for as long as the protocol runs: they
+        are checked against that one iteration, and the block derives no length of its
+        own, so nothing above it claims one either (§20.1)."""
+        where = self.name or '<unnamed>'
+        for written in ('repeat_n', 'estimated_duration'):
+            if getattr(self, written) is not None:
+                logger.warning(
+                    f'{where} writes `{written}`, but repeats until the end of the '
+                    f'protocol, so it has no effect here.'
+                )
+        if self.estimated_duration_one_iteration is None:
+            derived = derive_duration(self.steps, self.execution_mode)
+            if derived is not None:
+                self.estimated_duration_one_iteration = derived
+        one = self.estimated_duration_one_iteration
+        check_steps(self.steps, self.execution_mode, one, where, logger)
 
     def normalize_iterations(self, logger):
         """The steps are one iteration, run `repeat_n` times: they are checked against

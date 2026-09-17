@@ -1281,7 +1281,8 @@ src/nomad_pv_stability_measurements/
     routine.py        PlannedMonitorControlStep (monitor, control, the sampling pair),
                       its three kinds HoldStep (set_point, set_point_tolerance), HoldBelowStep
                       (upper_bound, §17.5) and RampStep (start_point,
-                      end_point, ramp_rate) (§15.11), and PlannedSubroutineStep
+                      end_point, ramp_rate, end_of_ramp_behavior — whose
+                      repeating members are the cycles, §21.2) (§15.11), and PlannedSubroutineStep
                       (execution_mode, steps, and repeat / repeat_n /
                       estimated_duration_one_iteration, §15.8); the checks that
                       hold for any archive (R4, R5, the sampling pair) (§15.1)
@@ -2344,6 +2345,12 @@ one place — ISOS-LT's humidity — so that is the only place a file asserts lo
 temperature: {control: false}      # ambient: not regulated. Not "logged every 600 s".
 ```
 
+*Amended by §18.7, after reading the consensus statement's text rather than Table 1 alone: the
+paper does ask for every uncontrolled condition to be monitored ("even if a parameter is not
+controlled … it is still important to monitor and report", p.43), so an ambient quantity is
+`{control: false, monitor: true}`. Rule 1 itself stands — it was applied to too narrow a source.
+Monitoring asserts that a quantity is logged, still not how often.*
+
 **Rule 2 — `channel_settings` is everything constant; `routine` is only what cannot be a
 constant.** The two parts of a file are a statement about the protocol, not a house style: a
 setting has no duration and therefore holds for the whole run (D13), which is precisely what a
@@ -2620,7 +2627,8 @@ read through the water vapour's own hold, since a bound has no `set_point` to re
 
 ## 18. One protocol per option — `standard_variant`, and the transcription settled
 
-**Status: settled in review; D, V, L, O and LT built (48 files), T and LC blocked (§18.5).**
+**Status: settled in review; D, V, L, O and LT built (55 files, after §18.7), T and LC blocked (§18.5).**
+*Amended by §20.9: T, LC-1/-2 and LT-1's step option built since — 117 files.*
 
 ### 18.1 An option is a protocol
 
@@ -2652,16 +2660,16 @@ ISOS-V-1 to -3** (`G8:G10`), and **the light/dark cycle spans ISOS-LC-1 to -3** 
 
 | The table says | The file writes |
 |---|---|
-| Temperature "Ambient (23 ± 4 °C)" | `temperature: {hold: RT}` — a stated value with a stated tolerance (§17.2) |
-| Temperature or humidity "Ambient" | `{control: false}` — stated only as *not regulated* |
+| Temperature "Ambient (23 ± 4 °C)" | `temperature: {hold: RT, control: false, monitor: true}` — an assumed value and tolerance, not regulated (*amended by §18.7*) |
+| Temperature or humidity "Ambient" | `{control: false, monitor: true}` (*amended by §18.7*) |
 | Light "None" | `irradiation: {hold: dark}` |
 | Light "Solar simulator" | `irradiation: {control: true}` — regulated, at no stated irradiance |
-| Light "Sunlight" | `irradiation: {control: false}`, with `environment: outdoor` |
+| Light "Sunlight" | `irradiation: {control: false, monitor: true}`, with `environment: outdoor` (*amended by §18.7*) |
 | "65, 85 °C" | one file each, `temperature: {hold: 65 °C}` |
 | Humidity "85%", "~ 50%" at a held temperature | `water_vapor: {rh: 85 %, at: 65 °C}` |
 | Humidity "Monitored, uncontrolled" | `{monitor: true, control: false}` |
 | Humidity "Monitored, controlled at 50% beyond 40 °C" | `{monitor: true}` — the conditional control stays in `notes` (§15.9) |
-| Load "OC" / "MPP" | `hold: open_circuit` / `hold: mpp` |
+| Load "OC" / "MPP" | `hold: open_circuit` / `hold: mpp`; at levels 1–2 under light also a fixed voltage near the MPP, `{variable: voltage, control: true}` (*§18.7*) |
 | Bias V_MPP, V_oc, −V_oc | `{variable: voltage, control: true}` — no set point, since each is measured on the device. E_g/q is no option (§18.6) |
 | Bias J_SC, −J_MPP | `{variable: current, control: true}` |
 | "Linear ramping between 5 °C and 65 °C" | `routine` with `ramp: {from: 5 °C, to: 65 °C}`, `end_of_ramp_behavior: triangle` |
@@ -2692,6 +2700,10 @@ a duration, a set point on a bias). The set of files and the set of expectations
 so no file ships untested. `notes` are checked to be present and short, not word for word.
 
 ### 18.5 Blocked: two things the current schema cannot say without inventing
+
+*Both built since: A as the repeat condition `until_end_of_protocol` (§20.1), B as `CycleStep`
+(§20.2). ISOS-LC-1/-2, ISOS-T and ISOS-LT-1's step option are written; ISOS-LC-3 waits on its
+humidity (§20.9).*
 
 **A — a cycle that repeats for as long as the test runs (all of ISOS-LC, 48 files).** The table
 states the cycle — period 2, 8 or 24 h, light:dark 1:1 or 1:2 — but not how many cycles or how
@@ -2745,3 +2757,425 @@ Four further findings, recorded and not acted on:
 - **The cycle shape is the author's to report, not the standard's to fix.** The reporting
   checklist (Table 3) asks for "Cycling procedure: Dwell and period times" — confirming §18.5 B:
   ISOS-T states no shape, so a file cannot either.
+
+### 18.7 The files read against the paper's text
+
+**Status: corrected and built.** Read in review against the full consensus statement (Khenkin et
+al., *Nature Energy* 5, 35–49, 2020), not only Table 1. Page numbers are the journal's.
+
+| # | Was | Is now | The text |
+|---|---|---|---|
+| 1 | "Ambient (23 ± 4 °C)" as `hold: RT` — which sets `control: true` | `{hold: RT, control: false, monitor: true}` (D-1, V-1, L-1; LT-1's `RT` ramp end is unchanged) | "ISOS-D-1 tests, where the cell environment is **monitored but not explicitly controlled** (room temperature in the laboratory is **assumed** to be 23±4 °C)" — p.36 |
+| 2 | Ambient temperature and humidity `{control: false}` | `{control: false, monitor: true}` (every ambient quantity) | "even if a parameter is not controlled during the ageing experiment (for example, temperature or RH …), it is still important to **monitor and report** the parameters listed in Table 3" — p.43; also p.36 for RH in D-1/D-2, p.39 for LC-1 |
+| 3 | Outdoor sunlight `{control: false}` | `{control: false, monitor: true}` (O-1, -2, -3) | Table 3, *Outdoor stability*: "Weather conditions throughout the exposure period — Temperature, humidity, **sunlight irradiance**" — p.40 |
+| 4 | Load "MPP or OC" as two files | three: MPP, OC, and a **fixed voltage near the MPP** (L-1, L-2, O-1, O-2, LT-1, LT-2) | "For lower levels of sophistication, we give options of exposure under open-circuit condition **or using a fixed voltage bias near the MPP** (instead of active MPP tracking)" — p.37 |
+| 5 | ISOS-O-1, -2, -3 with one shared note | notes state how each measures J–V curves, the one thing that tells them apart | "Under the ISOS-O-1 protocol, periodic measurements of J–V curves are done under illumination by a solar simulator. In ISOS-O-2, … by natural sunlight. ISOS-O-3 requires both in situ MPP tracking under natural sunlight and periodic performance measurements under a solar simulator." — p.37 |
+| 6 | D-3 note "Dark storage in an environmental chamber." | "Damp heat, dark storage in an environmental chamber." | "The ISOS-D-3 damp heat test" — p.36 |
+
+The fixed-voltage option is written in the V-family's form: a controlled voltage with no set
+point, since "near the MPP" names no number. **Net: +7 files, 55 in all.** The correction of #1
+leans on a translator behaviour worth naming: `hold:` sets `control` only by `setdefault`, so an
+explicit `control: false` beside it is kept.
+
+Confirmed by the text, and unchanged: 65 **or** 85 °C (pp.36, 39); 85 % RH at those temperatures
+(p.37); VMPP **or** VOC as positive bias, measured on a fresh device under AM1.5G one sun, with
+voltages **below** E_g/q (p.39); constant-current stress (J_SC, p.39); −VOC "for example" and
+"current enforced up to −JMPP" (pp.39–40); MPP tracking mandatory at level 3 (pp.37, 43); the LC
+cycle options and their light:dark reading, "12 h light and 12 h dark or 8 h light and 16 h dark"
+(p.39); RT as 23 ± 4 °C (p.36).
+
+**Found, not acted on:**
+
+- **Is the light cycled in ISOS-LT?** Table 1 writes "Solar simulator" (where LC writes "Solar
+  simulator/Dark"), but Fig. 3 places LT-1, -2 and -3 in the column *Light: cycled*. The files
+  follow the table and hold the light as a controlled condition. If Fig. 3 is right, LT's light is
+  a cycle with no stated shape — the §18.5 B gap — and LT joins T among the blocked families.
+- **The ageing irradiance.** "Ideally, light sources with an irradiance of 800–1000 W m⁻²
+  (1 sun = 1000 W m⁻²) should be applied" (p.43). *Ideally* makes it a recommendation, not a
+  condition, so no file writes it; §19 item 5 is what would let a file say so.
+- **The cycle shape is referred elsewhere.** "temperature cycling varies from simple turning on
+  and off a hotplate … to complex temperature and humidity cycles in an environmental chamber.
+  Examples of such cycles are available elsewhere¹¹,⁷⁸" (p.38); "The advanced, level 3 protocols
+  differ from LC-1,2 and T-1,2 in the temperature cycle and some technicalities that are reported
+  elsewhere¹¹" (p.42). ISOS-T needs Reese et al. 2011 (ref. 11) before it can be written.
+- **ISOS-LC-3's humidity** is "< 50%" in Table 1 and "RH is held at 50%" on p.39.
+- **ISOS-I** (Table 2, p.39): twelve further protocols, "inert atmosphere (nitrogen, argon, and so
+  on) … with the other parameters kept the same" (p.42). Not in Table 1, so not in scope so far;
+  §19 item 7 is what they need.
+
+---
+
+## 19. Schema shortcomings the paper exposes — implementation list
+
+**Status: proposed, not built.** Each item names the gap, the evidence, a sketch that fits the
+schema as it stands, and what it unblocks. Ordered by what it unblocks, then by size.
+
+### 19.1 Unblocks whole families
+
+**1. A repeat that lasts as long as the test does.** *(§18.5 A — ISOS-LC, 48 files)*
+A block without a written `estimated_duration` derives it from one pass of its steps, so a
+light/dark cycle claims a test one period long. The standard fixes the period, never the count.
+- `routine.py`: `repeat: n_times` with `repeat_n` optional — empty means "until the test ends".
+  With `repeat_n` empty the block derives `estimated_duration_one_iteration` but **not**
+  `estimated_duration`, and neither does anything above it.
+- Alternative: a third `repeat` member, `indefinitely`. Clearer to read; one more enum value.
+- Tests: an LC-shaped block keeps `estimated_duration` empty through the protocol's normalize.
+
+**2. A cycle between two values whose shape is not stated.** *(§18.5 B — ISOS-T, 6 files; LT-1
+step ramping, 2 files; LT's light if Fig. 3 is right)*
+- `routine.py`: `end_of_ramp_behavior` gains `unspecified` — the ramp cycles between its ends by
+  a path the protocol does not fix — so "RT to 65 °C, cycled" is one step with no invented shape.
+- Or a `CycleStep` kind (`low_point`, `high_point`, optional `dwell_low`, `dwell_high`,
+  `period`), which is also what Table 3's "Dwell and period times" reports.
+- Needs Reese et al. 2011 read first: if it does fix shapes for T-1…T-3, only the per-file
+  values are missing, not a schema feature.
+
+**3. Conditional control.** *(LT-2, LT-3: "controlled at 50% beyond 40 °C"; T-3 footnote b)*
+- A `control_condition` sub-section on a step: `quantity` (a step class name), `above` and/or
+  `below`, in that quantity's unit. Stored, not evaluated — the schema says *when* control
+  applies; a timeline or simulator evaluates it (§15.1 keeps the physics out).
+- Translator word: `control_when: {temperature: {above: 40 °C}}`.
+
+**4. Relative humidity during a temperature cycle.** *(T-3 "< 55%", LT-2/-3 "50%")*
+The compound `{rh, at}` needs one temperature; a cycling chamber has none, so no absolute ratio
+exists to store.
+- A `HoldRelativeHumidity` / `HoldBelowRelativeHumidity` pair storing RH itself, used **only**
+  where the temperature is not constant. This reopens §15.7 for exactly the case §15.7 could
+  not foresee, and leaves the absolute ratio the default everywhere else.
+
+### 19.2 Lets a file say what the standard says
+
+**5. Required versus recommended.** *("Ideally … 800–1000 W m⁻²", p.43; "we recommend voltages
+below E_g/q", p.39; "we stress that monitoring … is of critical importance", p.36)*
+Today a file can only assert a condition or stay silent, so a recommendation is lost.
+- A `requirement` MEnum (`required`, `recommended`) on `PlannedMonitorControlStep`, default
+  `required`. The 800–1000 W m⁻² band becomes `{hold: 900 W/m^2, hold_tolerance: 100 W/m^2,
+  requirement: recommended}` — which also exercises the symmetric tolerance of §17.4.
+
+**6. A value taken from the device.** *(V_MPP, V_oc, J_SC, J_MPP, E_g/q; "fixed voltage near the
+MPP"; footnote a of Table 1)*
+Every bias file stores a controlled voltage or current with no set point, and the *which* lives
+only in `notes` and the file name — unsearchable.
+- `set_point_reference` MEnum on `HoldVoltage` / `HoldCurrent`: `V_MPP`, `V_oc`, `E_g/q`,
+  `J_SC`, `J_MPP`; plus `set_point_sign` (+1 / −1) and `near` (bool, for "near the MPP").
+- The E_g/q ceiling as `HoldBelowVoltage` with `upper_bound_reference: E_g/q` and
+  `requirement: recommended` (item 5).
+- The reference is resolved against the fresh device's J–V curve in the measurement layer
+  (§4.5), never in the protocol.
+
+**7. An inert atmosphere.** *(ISOS-I, Table 2 — 12 protocols; "in the absence of humidity" for
+LC-3I, T-3I, p.42)*
+- `BalanceGas.gas` stays free text, and a `StandardValue` `InertAtmosphere` (§17.2) gives the
+  word `inert` a published definition: no oxygen and no water vapour stated as a fraction, gas
+  "nitrogen, argon, and so on". Translator word: `atmosphere: {balance_gas: inert}`.
+- Then ISOS-I is the same generator with the atmosphere swapped and `standard: ISOS-D-1I`, … .
+
+**8. Structured options.** *(§18.1)*
+`standard_variant` is free text, so "every ISOS-L-2 run at 85 °C" is a substring search.
+- A repeating `StandardOption` sub-section (`name`, `value`: `temperature` / `65 °C`), kept
+  beside `standard_variant`, which stays as the human label.
+
+### 19.3 Checks the standard implies
+
+**9. The level-3 rule.** "MPP tracking as mandatory only at the third, most advanced level" (p.37).
+- `standard_level` (int, 1–3), or derived from the designation's last digit for ISOS names. A
+  `normalize()` check: at level 3 under light, a load other than `MPPTracking` is reported.
+  This is the rule that removed LT-3's OC, made executable.
+
+**10. What the standard obliges a run to report.** Table 3 lists items that are *required to be
+reported* but not fixed by the protocol: location and dates for ISOS-O, MPPT hardware and
+algorithm, dwell and period times, number of samples, encapsulation.
+- Belongs to the measurement layer (§4.5): a `StabilityMeasurement` referencing its
+  `StabilityProtocol`, whose normalize reports what the protocol's `standard` requires and the
+  measurement lacks. `geo_location` (§15.12) is the first such field already in place.
+
+**11. Stop conditions.** "we suggest ageing the sample for at least 1000 h and using the PCE after
+1000 h" when T80 is not reached (p.44); T80 as "an optimal minimum ageing test time".
+- The `stop_when` of D15 / §4.2.1 (`conditions.py`), still unbuilt: `T80 or 1000 h`. A
+  recommendation, so it pairs with item 5.
+
+**12. Periodic characterization as a step.** ISOS-O-1 and -O-2 differ only in the light the J–V
+curves are measured under (p.37), which the schema cannot hold, so the difference lives in
+`notes` (§18.7 #5).
+- The J–V sweep `mpp_steps.py` was reserved for (D17): a `JVMeasurement` step with its light
+  source and repeat interval, where the standard fixes the light source and leaves the interval
+  to the author.
+
+### 19.4 Order
+
+1 and 2 first — they unblock 56 files and are small. Then 6 and 5, which change what the 25
+ISOS-V files and every "ideally" can say. 7 opens ISOS-I. 3 and 4 finish LT-2/-3 and T-3. 9 is a
+one-rule check once `standard_level` exists. 8, 10, 11, 12 wait for the measurement layer.
+
+---
+
+## 20. §19 settled — what is built
+
+**Status: settled in review, built.** The decisions on §19's list, item by item, as they were
+answered. §19's numbering is kept.
+
+### 20.1 A repeat until the protocol ends (§19 #1)
+
+**A repeat condition, not an optional `repeat_n`.** `PlannedSubroutineStep.repeat` gains a third
+member, **`until_end_of_protocol`**: the block runs its steps again and again for as long as the
+protocol runs. It derives `estimated_duration_one_iteration` from its steps, checks R4–R6 against
+that one iteration (as `n_times` does, §15.8), and **never derives its own
+`estimated_duration`** — so nothing above it derives one either, and an ISOS-LC file no longer
+claims a test one cycle long. A written `repeat_n` or `estimated_duration` has no effect there and
+is reported as a warning (dead configuration), never repaired.
+
+### 20.2 A cycle whose path is not stated (§19 #2)
+
+*Superseded in review by §21.2: a ramp that repeats is a cycle too, so the cycle is a
+behaviour of `RampStep`, not its parent. Kept as the record of what was built first.*
+
+**`CycleStep`, the parent of `RampStep`**, used directly where the path is open:
+
+```
+PlannedMonitorControlStep
+├── HoldStep            set_point …
+├── HoldBelowStep       upper_bound …
+└── CycleStep           start_point, end_point      the path between them not stated
+    └── RampStep        + ramp_rate, end_of_ramp_behavior   the path is linear
+```
+
+`start_point` / `end_point` move up from `RampStep`, and so does the "missing an end" report.
+`CycleTemperature` (`cycle_steps.py`) is the concrete class — only temperature, because only
+temperature is cycled without a stated path (ISOS-T, the step option of ISOS-LT-1), the rule
+§17.5 set for `HoldBelow`. Authored as `cycle: {from: RT, to: 65 °C}`; `rate` is no part of a
+cycle. R4 strips `Cycle` too, so a cycle and a hold of one temperature still collide.
+
+### 20.3 A point on the device's own characteristic (§19 #3)
+
+**`reference_point` on `PlannedMonitorControlStep`**, a free string there and narrowed to an
+`MEnum` by the children that have one. **Verified:** a child may redeclare a base `str` quantity as
+an `MEnum`; a value outside it is refused, and it round-trips.
+
+| Class | `reference_point` |
+|---|---|
+| `HoldVoltage` | `V_MPP`, `near V_MPP`, `V_oc`, `-V_oc` |
+| `HoldCurrent` | `J_SC`, `-J_MPP` |
+
+The sign is part of the value, so one field is searchable on its own. The reference is resolved
+against a measured J–V curve in the measurement layer (§4.5), never in the protocol. E_g/q is not
+a member: the standard recommends voltages *below* it, which no bias step can hold beside its
+own reference without a second step on the same quantity (R4). It stays in `notes`.
+
+### 20.4 Required and recommended, side by side (§19 #5)
+
+*Superseded in review by §21.1: a misreading. No `recommended_*` field exists; a protocol
+with the recommendation and one without are two variants. Kept as the record.*
+
+**Read in review as: both values on one step**, because a recommendation is usually *stricter*
+than the requirement it sits beside, so a step needs to carry both at once. Two parallel classes
+would put two steps on one quantity, which R4 reports.
+
+| Kind | Required | Recommended |
+|---|---|---|
+| `HoldStep` | `set_point`, `set_point_tolerance` | `recommended_set_point`, `recommended_set_point_tolerance` |
+| `HoldBelowStep` | `upper_bound` | `recommended_upper_bound` |
+
+Each concrete class declares the recommended pair in its own unit, exactly as the required pair.
+Authored as `recommended_hold`, `recommended_hold_tolerance`, `recommended_hold_below`, read like
+their required twins (named values such as `RT` included; a tolerance is a difference, §17.4).
+A recommendation **does not set `control`** — only a requirement asserts regulation. Ramps and
+cycles have none yet: nothing the standard says is a recommended ramp.
+
+### 20.5 An inert atmosphere (§19 #7)
+
+**Stated by thresholds and the gas, not by a word.** An inert atmosphere is oxygen and water each
+kept below a ppm threshold, in a named balance gas:
+
+```yaml
+atmosphere: {variable: oxygen, hold_below: 1 ppm}
+atmosphere: {variable: absolute_humidity, hold_below: 1 ppm}
+atmosphere: {balance_gas: N2}
+```
+
+This needs one class more, `HoldBelowOxygenFraction`. **ISOS-I is not written yet:** the paper
+names the gas ("nitrogen, argon, and so on") but no threshold, so there is no number to write —
+recorded as an open question in `example_uploads/isos/OPEN_QUESTIONS.md`.
+
+### 20.6 Relative and absolute humidity, as two variables (§19 #4)
+
+**Relative humidity becomes a variable of its own, semantically distinct, with no temperature
+required.** This reopens §15.7 on purpose: the standard states humidity as RH throughout, including
+where the temperature cycles (T-3, LT-2/-3) and no single temperature exists to convert it at.
+
+| Before | After |
+|---|---|
+| `HoldWaterVaporFraction`, `RampWaterVaporFraction`, `HoldBelowWaterVaporFraction` | `HoldAbsoluteHumidity`, `RampAbsoluteHumidity`, `HoldBelowAbsoluteHumidity` |
+| — | `HoldRelativeHumidity`, `RampRelativeHumidity`, `HoldBelowRelativeHumidity` |
+| key `water_vapor` | `absolute_humidity` — `water_vapor` still read as its old spelling |
+
+**"Absolute" here keeps §15.7's meaning: a volume ratio (`500 ppm`, `2 %`), not g/m³** — the
+glovebox sense of the word, said so in every description. Relative humidity is the fraction
+itself (`85 %` → 0.85) and also reads `85 %RH`. The two never convert into each other in the
+schema. `{rh: 85 %, at: 65 °C}` (§15.16) stays, as a way of writing an *absolute* humidity.
+
+**Compatibility (§13.1a):** bare archives name `HoldWaterVaporFraction` and friends in their
+`m_def`; the translator maps the three old class names to the renamed classes, as it maps §13's
+channel classes (`OLD_CLASSES`, `channels.py`).
+
+### 20.7 The level-3 rule (§19 #9)
+
+"MPP tracking as mandatory only at the third, most advanced level of ISOS protocols" (p.37).
+`StabilityProtocol.standard_level` (int, 1–3) is derived from an ISOS designation when left
+empty (`ISOS-L-3` → 3, `ISOS-LC-3I` → 3). At level 3, a protocol under light — any irradiance
+step that is not a hold at zero — whose electrical load is anything but `MPPTracking` is reported,
+never repaired. Dark level-3 protocols (D-3, V-3, T-3) are untouched.
+
+### 20.8 Later (§19 #8)
+
+**Deferred in review, to be worked on later:** structured options (`StandardOption`, name and
+value, beside the free-text `standard_variant`), the reporting obligations of Table 3 (location,
+MPPT hardware, dwell times, number of samples), stop conditions ("at least 1000 h"), and periodic
+J–V characterization as a step. All four belong with the measurement layer (§4.5).
+
+**Also still open:** conditional control ("controlled at 50 % beyond 40 °C", §19 #3) was not
+decided; those clauses stay in `notes`.
+
+### 20.9 The files, after §20
+
+*Amended by §21: the recommended irradiance is now a variant of its own (192 files), and every
+`cycle:` a ramp with `end_of_ramp_behavior: cycle`.*
+
+**Status: built.** 117 files, each equal as a whole to its expected archive
+(`tests/example_uploads/test_isos_protocols.py`), 605 tests in all.
+
+| What changed | Files |
+|---|---|
+| Humidity stated as **relative humidity**, as the paper does, with no temperature beside it (D-3, V-3 at 85 %; L-3 at 50 %; every ambient humidity) | all with a humidity |
+| Every bias names its `reference_point` (`V_MPP`, `V_oc`, `J_SC`, `-V_oc`, `-J_MPP`); the fixed voltage option is `near V_MPP` | ISOS-V; the `Vfixed` variants |
+| The solar simulator carries the **recommended** 800–1000 W m⁻² as `recommended_hold: 900 W/m^2 ± 100` (p.43) | ISOS-L, -LC, -LT |
+| **ISOS-T** written: the temperature a `cycle:` from RT to 65 / 85 °C, or −40 to 85 °C; T-3's humidity monitored, its condition in `notes` | +5 |
+| **ISOS-LT-1 step ramping** written as a `cycle:`, beside the linear `ramp:` | +3 |
+| **ISOS-LC-1, -2** written: settings for what is constant, a `routine` that `repeat`s `until_end_of_protocol` with a light and a dark step of the stated lengths | +54 |
+| `standard_level` derived in every file, and the level-3 MPP rule passing for L-3, O-3, LT-3 | all |
+
+**Not written: ISOS-LC-3** (Table 1 "< 50%" against p.39 "held at 50%") **and ISOS-I** (no ppm
+threshold for an inert atmosphere). Every question the standard leaves open, and what the files do
+meanwhile, is in `example_uploads/isos/OPEN_QUESTIONS.md` — a document for the reader of the
+standard, where this section is for the reader of the schema.
+
+---
+
+## 21. Review of §20 — recommendations as variants, the cycle as a ramp
+
+**Status: settled in review, built.** Two of §20's decisions were read wrongly and are replaced.
+
+### 21.1 A recommendation is a variant, not a field (replaces §20.4)
+
+**No `recommended_set_point`, `recommended_set_point_tolerance` or `recommended_upper_bound`.**
+The schema describes one protocol, and a protocol either holds a value or does not. Where the
+standard recommends something it does not require, **the standard has two protocols**: one
+without the recommendation, one with it written as an ordinary requirement. They are separate
+files, as every other option is (§18.1), and the recommendation's value is in the file name.
+
+| | Without | With the recommendation |
+|---|---|---|
+| Solar simulator (ISOS-L, -LC, -LT; "Ideally … 800–1000 W m⁻²", p.43) | `irradiation: {control: true}` | `irradiation: {hold: 900 W/m^2, hold_tolerance: 100 W/m^2}` |
+| File name | `ISOS-L-1_MPP` | `ISOS-L-1_MPP_800-1000Wm2` |
+| `standard_variant` | `MPP` | `MPP, recommended 800–1000 W/m²` |
+
+The token comes last, after the standard's own options. Every solar-simulator file therefore has
+a twin: ISOS-L 11 → 22, ISOS-LC 54 → 108, ISOS-LT 10 → 20, **117 → 192 files**.
+
+"Voltages below E_g/q" (p.39) is a recommendation too, but has no number a protocol can hold
+beside its own bias (§20.3). It stays in `notes` and gets no variant.
+
+The authoring words `recommended_hold`, `recommended_hold_tolerance`, `recommended_hold_below`
+go with the fields. Nothing stored ever used them outside this package's uncommitted work, so no
+compatibility mapping is kept.
+
+### 21.2 A cycle is a ramp that repeats (replaces §20.2)
+
+§20.2 made `CycleStep` the parent of `RampStep`, reading "cycle" as "two ends, no path". But a ramp
+that runs back and forth continuously — `triangle`, `sawtooth` — *is* a cycle, and a ramp that runs
+once is not, so the parent was named after what only some of its children do. **Whether a ramp
+cycles is its `end_of_ramp_behavior`**, and the cycle without a stated path is one more member:
+
+```
+PlannedMonitorControlStep
+├── HoldStep            set_point, set_point_tolerance
+├── HoldBelowStep       upper_bound
+└── RampStep            start_point, end_point, ramp_rate, end_of_ramp_behavior
+```
+
+| `end_of_ramp_behavior` | Cycles | Path | `ramp_rate` |
+|---|---|---|---|
+| `hold` (default) | no — runs once, then holds `end_point` | linear | read |
+| `sawtooth` | yes — jumps back to `start_point` | linear | read |
+| `triangle` | yes — ramps back at the same rate | linear | read |
+| **`cycle`** | yes — returns to `start_point` | **not stated** | **reported if written** |
+
+A `cycle` writes no rate: a rate along a path the protocol does not state says something the
+protocol does not, so it is an error (D13a), and no `estimated_duration` is derived from one.
+
+- **Removed:** `CycleStep`, `CycleTemperature`, `cycle_steps.py`, the `Cycle` kind prefix of R4,
+  and the authoring word `cycle:` with its translator table.
+- **Authored as** `ramp: {from: RT, to: 65 °C}` with `end_of_ramp_behavior: cycle`, on
+  `RampTemperature` — the class ISOS-LT's linear ramps already use, so a thermal cycle and a
+  thermal ramp are one kind on one quantity, and R4 needs no special case.
+- Every quantity with a ramp class can now cycle by an unstated path. No class is added for it.
+
+| Files | Before | After |
+|---|---|---|
+| ISOS-T-1, -2, -3; ISOS-LT-1 step ramping | `cycle: {from, to}` | `ramp: {from, to}`, `end_of_ramp_behavior: cycle` |
+| ISOS-LT-1 linear, -2, -3 | `ramp:`, `triangle` | unchanged |
+
+**Status after §21: built.** 192 files, 798 tests, ruff clean.
+
+---
+
+## 22. A range is a kind of its own — `hold_between`
+
+**Status: settled in review, built.** Replaces how §21.1 *writes* the recommended irradiance; the
+variants themselves stay.
+
+### 22.1 Why
+
+§21.1 wrote "800–1000 W m⁻²" as `hold: 900 W/m^2` with `hold_tolerance: 100 W/m^2`. The two
+describe the same interval, but not the same instruction: a hold names a target to regulate *to*,
+and a tolerance how far from it still counts. The standard names no target — any irradiance in the
+range will do. Writing 900 invents a set point the standard never states (§16.2, Rule 1).
+
+### 22.2 The kind
+
+```
+PlannedMonitorControlStep
+├── HoldStep            set_point, set_point_tolerance
+├── HoldBelowStep       upper_bound
+│   └── HoldBetweenStep + lower_bound
+└── RampStep            start_point, end_point, ramp_rate, end_of_ramp_behavior
+```
+
+**A subclass of `HoldBelowStep`**: a value kept between two bounds *is* kept below the upper one,
+so everything true of a bound stays true of a range, and `upper_bound` keeps one meaning. It adds
+`lower_bound`. `normalize` reports, never repairs (D13a), a range missing either bound or whose
+`lower_bound` exceeds its `upper_bound`.
+
+- **One class, `HoldBetweenIrradiance`**, in `hold_below_steps.py` beside the other bounded
+  steps — only what a standard states a range for has a class (§17.5).
+- **R4:** `HoldBetween` is stripped before `HoldBelow` and `Hold`, so a range and a hold of the
+  irradiance still collide.
+- **The level-3 rule (§20.7)** counts a range as light unless its `upper_bound` is zero.
+
+### 22.3 Authoring
+
+```yaml
+irradiation:
+  hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}
+```
+
+Both keys are required, and read like any value (named values such as `dark` included). Like
+`hold_below:`, it sets `control: true` unless written otherwise, and cannot be combined with
+`hold`, `hold_tolerance`, `hold_below`, `ramp` or a variable key.
+
+### 22.4 The files
+
+The 75 `800-1000Wm2` variants write `hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}`, stored
+as `HoldBetweenIrradiance` with `lower_bound` 800 and `upper_bound` 1000. Names, tokens and
+counts (192 files) are unchanged.
+
+**Status: built.** 192 files, 812 tests, ruff clean.

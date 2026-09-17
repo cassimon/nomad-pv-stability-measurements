@@ -11,9 +11,8 @@ data:
     temperature:
       hold: 85 °C
     atmosphere:
-      water_vapor:
-        rh: 85 %
-        at: 85 °C
+      relative_humidity: 85 %
     electrical_load:
       variable: current
       control: true
+      reference_point: -J_MPP

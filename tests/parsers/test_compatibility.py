@@ -18,16 +18,17 @@ from nomad_pv_stability_measurements.parsers.translate import (
 )
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     BalanceGas,
+    HoldAbsoluteHumidity,
     HoldBendRadius,
     HoldCurrent,
     HoldIrradiance,
     HoldOxygenFraction,
     HoldPressure,
+    HoldRelativeHumidity,
     HoldResistance,
     HoldStrain,
     HoldTemperature,
     HoldVoltage,
-    HoldWaterVaporFraction,
 )
 from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
     MPPTracking,
@@ -332,7 +333,8 @@ def test_the_atmosphere_channel_logs_all_of_its_variables(load, log):
     logged = load({'channel': 'atmosphere', 'monitor': True})
 
     assert [type(step) for step in logged] == [
-        HoldWaterVaporFraction,
+        HoldAbsoluteHumidity,
+        HoldRelativeHumidity,
         HoldOxygenFraction,
         HoldPressure,
         BalanceGas,
@@ -376,7 +378,7 @@ def test_water_vapour_is_written_either_as_the_variable_or_as_hold(load, log):
     ]:
         [step] = load(authored)
 
-        assert isinstance(step, HoldWaterVaporFraction)
+        assert isinstance(step, HoldAbsoluteHumidity)
         assert step.set_point.magnitude == pytest.approx(5e-4)
     assert log.errors == []
 
@@ -389,7 +391,9 @@ def test_humidity_is_reported_with_what_to_write_instead(load, log):
         {'channel': 'atmosphere', 'variable': 'humidity', 'hold': '85 %RH'},
     ]:
         assert load(authored) == []
-    assert ['water_vapor' in error for error in log.errors] == [True, True]
+    # Humidity is two variables now, and the message names both (§20.6).
+    assert ['relative_humidity' in error for error in log.errors] == [True, True]
+    assert ['absolute_humidity' in error for error in log.errors] == [True, True]
 
 
 def test_a_relative_humidity_loads_as_the_ratio_it_is(load, log):
@@ -398,7 +402,7 @@ def test_a_relative_humidity_loads_as_the_ratio_it_is(load, log):
         {'channel': 'atmosphere', 'water_vapor': {'rh': '85 %', 'at': '65 °C'}}
     )
 
-    assert isinstance(step, HoldWaterVaporFraction)
+    assert isinstance(step, HoldAbsoluteHumidity)
     assert step.set_point.magnitude == pytest.approx(0.2109, rel=1e-3)
     assert log.errors == []
 
@@ -407,6 +411,6 @@ def test_a_relative_humidity_value_on_the_water_axis_is_refused(load, log):
     [step] = load({'channel': 'atmosphere', 'water_vapor': '85 %RH'})
 
     # Reported, never repaired: the step stays, without a set point nobody can read.
-    assert (isinstance(step, HoldWaterVaporFraction), step.set_point) == (True, None)
+    assert (isinstance(step, HoldAbsoluteHumidity), step.set_point) == (True, None)
     [error] = log.errors
     assert 'not a volume ratio' in error

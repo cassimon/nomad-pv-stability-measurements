@@ -4,14 +4,16 @@ Each only fixes the unit of its `set_point`. What a set point means physically, 
 quantities are tied, and words that stand for values are no part of the schema: such
 logic belongs in a `normalize()` once it is needed, or in the parser.
 
-The atmosphere is recorded as an absolute volume ratio — a plain dimensionless fraction,
-so `500 ppm` from a glovebox readout and `2 %` from a gas bottle land on one axis and
-compare without a conversion table. For an ideal gas the volume fraction and the mole
-fraction are the same number, so the glovebox convention (`ppm` is by volume, D6) needs
-no second axis. Relative humidity is deliberately no set point: it is a property of the
-water content *and* the temperature, not of the atmosphere alone, so the same step would
-mean something different beside every temperature. Derive it in a `normalize()` if it is
-ever needed (§15.7).
+The atmosphere's gases are recorded as an absolute volume ratio — a plain dimensionless
+fraction, so `500 ppm` from a glovebox readout and `2 %` from a gas bottle land on one
+axis and compare without a conversion table. For an ideal gas the volume fraction and
+the mole fraction are the same number, so the glovebox convention (`ppm` is by volume,
+D6) needs no second axis (§15.7).
+
+Humidity has two classes, which never convert into each other here: `HoldAbsoluteHumidity`,
+that volume ratio (the glovebox sense of "absolute", not g/m³), and `HoldRelativeHumidity`,
+the relative humidity a standard states, which needs no temperature beside it to be
+written down (§20.6).
 
 `BalanceGas` holds something that is not a number — a gas — so it takes no `set_point`
 and subclasses the plain monitor/control step instead of `HoldStep` (§15.11). The load's
@@ -19,7 +21,7 @@ tracked point is the same shape, and lives in `mpp_steps.py` (§15.10).
 """
 
 import numpy as np
-from nomad.metainfo import Quantity, SchemaPackage
+from nomad.metainfo import MEnum, Quantity, SchemaPackage
 
 from nomad_pv_stability_measurements.schema_packages.routine import (
     HoldStep,
@@ -61,6 +63,12 @@ class HoldVoltage(HoldStep):
     """The voltage at the cell's terminals."""
 
     set_point = Quantity(type=np.float64, unit='V', description='Voltage to hold.')
+    reference_point = Quantity(
+        type=MEnum('V_MPP', 'near V_MPP', 'V_oc', '-V_oc'),
+        description='The voltage taken from the device instead of written as a number: '
+        'its maximum power point or open-circuit voltage, measured on the fresh device '
+        '(§20.3). The sign is part of the value.',
+    )
     set_point_tolerance = Quantity(
         type=np.float64,
         unit='V',
@@ -72,6 +80,12 @@ class HoldCurrent(HoldStep):
     """The current through the cell."""
 
     set_point = Quantity(type=np.float64, unit='A', description='Current to hold.')
+    reference_point = Quantity(
+        type=MEnum('J_SC', '-J_MPP'),
+        description='The current taken from the device instead of written as a number: '
+        'its short-circuit current, or its current at the maximum power point, measured '
+        'on the fresh device (§20.3). The sign is part of the value.',
+    )
     set_point_tolerance = Quantity(
         type=np.float64,
         unit='A',
@@ -120,15 +134,32 @@ class HoldStrain(HoldStep):
     )
 
 
-class HoldWaterVaporFraction(HoldStep):
-    """The water in the atmosphere around the sample, as a volume ratio."""
+class HoldAbsoluteHumidity(HoldStep):
+    """The water in the atmosphere around the sample, as a volume ratio (§20.6)."""
 
     set_point = Quantity(
         type=np.float64,
         unit='dimensionless',
         description='Water vapour to hold, as a volume ratio: the fraction itself, so '
-        '`500 ppm` is 5e-4 and `2 %` is 0.02. Absolute on purpose — relative humidity '
-        'depends on the temperature and is no part of the schema (§15.7).',
+        '`500 ppm` is 5e-4 and `2 %` is 0.02. "Absolute" in the glovebox sense, not '
+        'g/m³; for the relative humidity use `HoldRelativeHumidity` (§20.6).',
+    )
+    set_point_tolerance = Quantity(
+        type=np.float64,
+        unit='dimensionless',
+        description='How far either side of `set_point` still counts.',
+    )
+
+
+class HoldRelativeHumidity(HoldStep):
+    """The relative humidity around the sample, as the fraction itself (§20.6)."""
+
+    set_point = Quantity(
+        type=np.float64,
+        unit='dimensionless',
+        description='Relative humidity to hold, as a fraction: `85 %` is 0.85. At '
+        'whatever temperature the sample is at — the step states no temperature of its '
+        'own, and is not converted into a volume ratio.',
     )
     set_point_tolerance = Quantity(
         type=np.float64,

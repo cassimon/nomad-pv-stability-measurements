@@ -5,11 +5,13 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     BalanceGas,
+    HoldAbsoluteHumidity,
+    HoldCurrent,
     HoldIrradiance,
     HoldOxygenFraction,
     HoldPressure,
     HoldTemperature,
-    HoldWaterVaporFraction,
+    HoldVoltage,
 )
 from nomad_pv_stability_measurements.schema_packages.routine import (
     HoldStep,
@@ -31,7 +33,8 @@ def test_each_hold_class_is_one_quantity():
         'HoldResistance',
         'HoldBendRadius',
         'HoldStrain',
-        'HoldWaterVaporFraction',
+        'HoldAbsoluteHumidity',
+        'HoldRelativeHumidity',
         'HoldOxygenFraction',
         'HoldPressure',
     ]
@@ -55,8 +58,10 @@ def test_each_setpoint_uses_nomads_unit_system():
         'HoldResistance': 'ohm',
         'HoldBendRadius': 'meter',
         'HoldStrain': 'dimensionless',
-        # The atmosphere is a volume ratio, so its unit is the fraction (§15.7).
-        'HoldWaterVaporFraction': 'dimensionless',
+        # The atmosphere is a volume ratio, so its unit is the fraction (§15.7), and a
+        # relative humidity is a fraction too, of a different thing (§20.6).
+        'HoldAbsoluteHumidity': 'dimensionless',
+        'HoldRelativeHumidity': 'dimensionless',
         'HoldOxygenFraction': 'dimensionless',
         'HoldPressure': 'pascal',
     }
@@ -107,13 +112,13 @@ def test_a_glovebox_and_the_open_air_land_on_one_axis():
 def test_an_atmosphere_step_round_trips_as_the_fraction():
     data = {'monitor': True, 'control': True, 'set_point': 5e-4}
 
-    assert HoldWaterVaporFraction.m_from_dict(data).m_to_dict() == data
+    assert HoldAbsoluteHumidity.m_from_dict(data).m_to_dict() == data
 
 
 def test_no_atmosphere_step_knows_relative_humidity():
     # It is a property of the water content and the temperature together, so it is no
     # field of either step; a `normalize()` can derive it once something needs it.
-    for cls in [HoldWaterVaporFraction, HoldOxygenFraction]:
+    for cls in [HoldAbsoluteHumidity, HoldOxygenFraction]:
         assert 'humidity' not in set(cls.m_def.all_properties)
         assert str(cls.m_def.all_quantities['set_point'].unit) == 'dimensionless'
 
@@ -154,3 +159,26 @@ def test_a_temperature_tolerance_is_a_difference_in_kelvin():
     )
 
     assert step.set_point_tolerance.to(ureg.kelvin).magnitude == pytest.approx(2)
+
+
+# A point on the device's own characteristic (§20.3).
+
+
+@pytest.mark.parametrize(
+    ('cls', 'points'),
+    [
+        (HoldVoltage, ['V_MPP', 'near V_MPP', 'V_oc', '-V_oc']),
+        (HoldCurrent, ['J_SC', '-J_MPP']),
+    ],
+)
+def test_a_bias_names_the_point_of_the_device_it_is_taken_from(cls, points):
+    for point in points:
+        assert cls(reference_point=point).reference_point == point
+    # E_g/q is a ceiling the standard recommends staying under, not a bias (§18.6).
+    with pytest.raises(ValueError):
+        cls(reference_point='E_g/q')
+
+
+def test_the_base_takes_any_point_and_a_child_narrows_it():
+    assert set(PlannedMonitorControlStep.m_def.all_quantities) >= {'reference_point'}
+    assert HoldTemperature(reference_point='anything').reference_point == 'anything'

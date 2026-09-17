@@ -11,8 +11,6 @@ data:
     temperature:
       hold: 85 °C
     atmosphere:
-      water_vapor:
-        rh: 50 %
-        at: 85 °C
+      relative_humidity: 50 %
     electrical_load:
       hold: mpp

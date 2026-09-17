@@ -4,15 +4,13 @@ data:
   standard: ISOS-D-3
   standard_variant: 85 °C
   environment: indoor
-  notes: Dark storage in an environmental chamber.
+  notes: Damp heat, dark storage in an environmental chamber.
   channel_settings:
     irradiation:
       hold: dark
     temperature:
       hold: 85 °C
     atmosphere:
-      water_vapor:
-        rh: 85 %
-        at: 85 °C
+      relative_humidity: 85 %
     electrical_load:
       hold: open_circuit

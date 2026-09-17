@@ -3,12 +3,12 @@ data:
   name: ISOS-LT-3
   standard: ISOS-LT-3
   environment: indoor
-  notes: Solar-thermal cycling in an environmental chamber with freezing. Relative humidity controlled at 50 % above 40 °C.
+  notes: Solar-thermal cycling in a chamber with freezing; RH controlled at 50 % above 40 °C.
   channel_settings:
     irradiation:
       control: true
     atmosphere:
-      variable: water_vapor
+      variable: relative_humidity
       monitor: true
     electrical_load:
       hold: mpp

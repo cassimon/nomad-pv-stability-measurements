@@ -1,0 +1,29 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-LC-1 (2 h, 1:1, MPP, recommended 800–1000 W/m²)
+  standard: ISOS-LC-1
+  standard_variant: 2 h, 1:1, MPP, recommended 800–1000 W/m²
+  environment: indoor
+  notes: Light–dark cycling under a solar simulator.
+  channel_settings:
+    temperature:
+      hold: RT
+      control: false
+      monitor: true
+    atmosphere:
+      variable: relative_humidity
+      control: false
+      monitor: true
+    electrical_load:
+      hold: mpp
+  routine:
+    repeat: until_end_of_protocol
+    commands:
+      - channel: irradiation
+        hold_between:
+          lower: 800 W/m^2
+          upper: 1000 W/m^2
+        duration: 1 h
+      - channel: irradiation
+        hold: dark
+        duration: 1 h

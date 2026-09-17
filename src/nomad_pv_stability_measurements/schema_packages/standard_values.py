@@ -35,11 +35,12 @@ class StandardValue(ArchiveSection):
 
 
 class RoomTemperature(StandardValue):
-    """Room temperature, as ISOS Table 1 defines it: 23 ± 4 °C.
+    """Room temperature, as the ISOS consensus statement defines it: 23 ± 4 °C.
 
-    The table writes "Ambient (23 ± 4 °C)" in the rows that state a figure and "RT" in
-    those that do not; this is the one reading of the second that invents no number
-    (§16.2, §17.2). Khenkin et al., Nature Energy 5, 35–49 (2020).
+    "room temperature in the laboratory is assumed to be 23±4 °C" (Khenkin et al.,
+    Nature Energy 5, 35–49 (2020), p.36). An *assumed* value: a protocol writing `RT` for
+    an ambient laboratory states the figure without claiming anyone regulates it
+    (Design.md §17.2, §18.7).
     """
 
     name = Quantity(type=str, default='room temperature')

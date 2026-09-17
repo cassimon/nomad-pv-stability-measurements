@@ -6,10 +6,17 @@ from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
+from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
+    HoldBetweenIrradiance,
+)
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     HoldIrradiance,
     HoldTemperature,
     HoldVoltage,
+)
+from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+    MPPTracking,
+    VOCTracking,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import (
     GeoLocation,
@@ -284,3 +291,95 @@ def test_an_option_of_a_standard_is_a_protocol_of_its_own():
     assert (low.standard, low.standard_variant) == ('ISOS-D-2', '65 °C')
     assert StabilityProtocol.m_from_dict(high.m_to_dict()).standard_variant == '85 °C'
     assert StabilityProtocol().standard_variant is None
+
+
+# The level-3 rule (§20.7).
+
+
+def checked(standard, *steps, log, **fields) -> StabilityProtocol:
+    protocol = StabilityProtocol(standard=standard, **fields)
+    protocol.steps = list(steps)
+    metadata = EntryMetadata(entry_name='protocol')
+    protocol.normalize(EntryArchive(metadata=metadata, data=protocol), log)
+    return protocol
+
+
+#: A level the protocol writes itself, differing from its designation's.
+WRITTEN_LEVEL = 2
+
+
+@pytest.mark.parametrize(
+    ('standard', 'level'),
+    [
+        ('ISOS-D-1', 1),
+        ('ISOS-L-2', 2),
+        ('ISOS-L-3', 3),
+        ('ISOS-LC-3I', 3),
+        ('IEC 61215', None),
+    ],
+)
+def test_the_level_is_derived_from_an_isos_designation(standard, level, log):
+    assert checked(standard, log=log).standard_level == level
+
+
+def test_a_written_level_is_kept(log):
+    protocol = checked(
+        'ISOS-L-3',
+        HoldIrradiance(control=True),
+        VOCTracking(),
+        standard_level=WRITTEN_LEVEL,
+        log=log,
+    )
+
+    assert protocol.standard_level == WRITTEN_LEVEL
+    assert log.errors == []
+
+
+@pytest.mark.parametrize(
+    ('load', 'found'),
+    [(VOCTracking(), 'VOCTracking'), (HoldVoltage(control=True), 'HoldVoltage')],
+)
+def test_level_3_under_light_must_track_the_mpp(load, found, log):
+    checked('ISOS-L-3', HoldIrradiance(control=True), load, log=log)
+
+    [error] = log.errors
+    assert 'MPP tracking is mandatory' in error
+    assert f'writes {found}' in error
+
+
+def test_level_3_under_light_without_a_load_is_reported(log):
+    checked('ISOS-LT-3', HoldIrradiance(control=True), log=log)
+
+    [error] = log.errors
+    assert 'no electrical load at all' in error
+
+
+def test_what_the_rule_does_not_reach(log):
+    dark = HoldIrradiance(control=True, set_point=0 * ureg('W/m^2'))
+    checked('ISOS-L-3', HoldIrradiance(control=True), MPPTracking(), log=log)
+    checked('ISOS-D-3', dark, VOCTracking(), log=log)  # dark: no MPP to track
+    dark_range = HoldBetweenIrradiance(
+        lower_bound=0 * ureg('W/m^2'), upper_bound=0 * ureg('W/m^2')
+    )
+    checked('ISOS-D-3', dark_range, VOCTracking(), log=log)
+    checked('ISOS-L-2', HoldIrradiance(control=True), VOCTracking(), log=log)
+    checked(
+        'IEC 61215',
+        HoldIrradiance(control=True),
+        VOCTracking(),
+        standard_level=3,
+        log=log,
+    )
+
+    assert log.errors == []
+
+
+def test_a_range_of_irradiance_is_light_too(log):
+    # The recommended 800–1000 W m⁻² variants are under light (§22).
+    light = HoldBetweenIrradiance(
+        lower_bound=800 * ureg('W/m^2'), upper_bound=1000 * ureg('W/m^2')
+    )
+    checked('ISOS-L-3', light, VOCTracking(), log=log)
+
+    [error] = log.errors
+    assert 'MPP tracking is mandatory' in error

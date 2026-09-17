@@ -11,8 +11,10 @@ data:
     temperature:
       hold: 85 °C
     atmosphere:
-      variable: water_vapor
+      variable: relative_humidity
       control: false
+      monitor: true
     electrical_load:
       variable: current
       control: true
+      reference_point: J_SC

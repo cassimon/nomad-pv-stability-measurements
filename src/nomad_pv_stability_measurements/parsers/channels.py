@@ -5,36 +5,41 @@ class, `hold` becomes its `set_point`, and a named word becomes the value it sta
 """
 
 from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
-    HoldBelowWaterVaporFraction,
+    HoldBelowAbsoluteHumidity,
+    HoldBelowOxygenFraction,
+    HoldBelowRelativeHumidity,
+    HoldBetweenIrradiance,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     BalanceGas,
+    HoldAbsoluteHumidity,
     HoldBendRadius,
     HoldCurrent,
     HoldIrradiance,
     HoldOxygenFraction,
     HoldPressure,
+    HoldRelativeHumidity,
     HoldResistance,
     HoldStrain,
     HoldTemperature,
     HoldVoltage,
-    HoldWaterVaporFraction,
 )
 from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
     MPPTracking,
     VOCTracking,
 )
 from nomad_pv_stability_measurements.schema_packages.ramp_steps import (
+    RampAbsoluteHumidity,
     RampBendRadius,
     RampCurrent,
     RampIrradiance,
     RampOxygenFraction,
     RampPressure,
+    RampRelativeHumidity,
     RampResistance,
     RampStrain,
     RampTemperature,
     RampVoltage,
-    RampWaterVaporFraction,
 )
 from nomad_pv_stability_measurements.schema_packages.standard_values import (
     Dark,
@@ -50,7 +55,8 @@ VARIABLE_STEPS = {
     'resistance': HoldResistance,
     'bend_radius': HoldBendRadius,
     'strain': HoldStrain,
-    'water_vapor': HoldWaterVaporFraction,
+    'absolute_humidity': HoldAbsoluteHumidity,
+    'relative_humidity': HoldRelativeHumidity,
     'oxygen': HoldOxygenFraction,
     'pressure': HoldPressure,
     'balance_gas': BalanceGas,
@@ -70,16 +76,29 @@ RAMP_STEPS = {
     'resistance': RampResistance,
     'bend_radius': RampBendRadius,
     'strain': RampStrain,
-    'water_vapor': RampWaterVaporFraction,
+    'absolute_humidity': RampAbsoluteHumidity,
+    'relative_humidity': RampRelativeHumidity,
     'oxygen': RampOxygenFraction,
     'pressure': RampPressure,
 }
 
 #: The same variables when the step keeps under a bound instead, chosen by an authored
-#: `hold_below:` (§17.5). Only what a standard bounds; the rest are reported.
+#: `hold_below:` (§17.5). Only what a standard bounds — the relative humidity, and the
+#: water and oxygen of an inert atmosphere (§20.5); the rest are reported.
 HOLD_BELOW_STEPS = {
-    'water_vapor': HoldBelowWaterVaporFraction,
+    'absolute_humidity': HoldBelowAbsoluteHumidity,
+    'relative_humidity': HoldBelowRelativeHumidity,
+    'oxygen': HoldBelowOxygenFraction,
 }
+
+#: The same variables when the step keeps between two bounds, chosen by an authored
+#: `hold_between:` (§22). Only what a standard gives a range for: the irradiance.
+HOLD_BETWEEN_STEPS = {
+    'irradiance': HoldBetweenIrradiance,
+}
+
+#: A variable's former key, still read as the key it became (§13.1a, §20.6).
+VARIABLE_ALIASES = {'water_vapor': 'absolute_humidity'}
 
 #: The variables an authored `channel:` groups, in the order an author reads them.
 CHANNEL_VARIABLES = {
@@ -87,7 +106,13 @@ CHANNEL_VARIABLES = {
     'irradiation': ('irradiance',),
     'electrical_load': ('voltage', 'current', 'resistance'),
     'mechanical': ('bend_radius', 'strain'),
-    'atmosphere': ('water_vapor', 'oxygen', 'pressure', 'balance_gas'),
+    'atmosphere': (
+        'absolute_humidity',
+        'relative_humidity',
+        'oxygen',
+        'pressure',
+        'balance_gas',
+    ),
 }
 
 #: Words a set point reads as a value, per step class. Never global: `dark` is an
@@ -112,13 +137,21 @@ TRACKED_POINT_CHANNEL = 'electrical_load'
 
 #: Words the schema has no place for any more (§15), and why.
 RETIRED_WORDS = {
-    'humidity': 'the schema records the water in the atmosphere absolutely, as a '
-    'volume ratio — write `water_vapor: 500 ppm` or `water_vapor: 2 %`. A relative '
-    'humidity says nothing without the temperature it was read at, so write that '
-    'beside it: `water_vapor: {rh: 85 %, at: 65 °C}` (§15.16)',
+    'humidity': 'humidity is two variables — write `relative_humidity: 85 %`, or the '
+    'water as a volume ratio, `absolute_humidity: 500 ppm` (§20.6)',
 }
 
 _CHANNEL_COMMANDS = 'nomad_pv_stability_measurements.schema_packages.channel_commands'
+
+_SCHEMA = 'nomad_pv_stability_measurements.schema_packages'
+
+#: Classes renamed in the schema, which older bare archives still name in `m_def`, each
+#: read as the class it became (§13.1a, §20.6).
+OLD_CLASSES = {
+    f'{_SCHEMA}.hold_steps.HoldWaterVaporFraction': HoldAbsoluteHumidity,
+    f'{_SCHEMA}.ramp_steps.RampWaterVaporFraction': RampAbsoluteHumidity,
+    f'{_SCHEMA}.hold_below_steps.HoldBelowWaterVaporFraction': HoldBelowAbsoluteHumidity,
+}
 
 #: The channel classes that §13's bare archives name in `m_def`, each read as the
 #: channel it was.

@@ -4,14 +4,17 @@ data:
   standard: ISOS-O-1
   standard_variant: OC
   environment: outdoor
-  notes: Outdoor exposure to sunlight.
+  notes: Outdoors under sunlight; J–V curves measured periodically under a solar simulator.
   channel_settings:
     irradiation:
       control: false
+      monitor: true
     temperature:
       control: false
+      monitor: true
     atmosphere:
-      variable: water_vapor
+      variable: relative_humidity
       control: false
+      monitor: true
     electrical_load:
       hold: open_circuit

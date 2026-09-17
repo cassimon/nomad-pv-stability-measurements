@@ -1,0 +1,25 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-LC-2 (24 h, 1:2, 85 °C, MPP)
+  standard: ISOS-LC-2
+  standard_variant: 24 h, 1:2, 85 °C, MPP
+  environment: indoor
+  notes: Light–dark cycling under a solar simulator, at elevated temperature.
+  channel_settings:
+    temperature:
+      hold: 85 °C
+    atmosphere:
+      variable: relative_humidity
+      control: false
+      monitor: true
+    electrical_load:
+      hold: mpp
+  routine:
+    repeat: until_end_of_protocol
+    commands:
+      - channel: irradiation
+        control: true
+        duration: 8 h
+      - channel: irradiation
+        hold: dark
+        duration: 16 h

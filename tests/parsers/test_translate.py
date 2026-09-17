@@ -11,17 +11,22 @@ from nomad_pv_stability_measurements.parsers.translate import (
     translate_section,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
-    HoldBelowWaterVaporFraction,
+    HoldBelowAbsoluteHumidity,
+    HoldBelowOxygenFraction,
+    HoldBelowRelativeHumidity,
+    HoldBetweenIrradiance,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    BalanceGas,
+    HoldAbsoluteHumidity,
     HoldBendRadius,
     HoldCurrent,
     HoldIrradiance,
+    HoldRelativeHumidity,
     HoldResistance,
     HoldStrain,
     HoldTemperature,
     HoldVoltage,
-    HoldWaterVaporFraction,
 )
 from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
     MPPTracking,
@@ -466,14 +471,14 @@ def test_a_relative_humidity_is_read_with_the_temperature_beside_it():
     assert translation.problems == []
     [step] = translation.archive['steps']
     # The archive keeps the absolute ratio, exactly as §15.7 decided.
-    assert step['m_def'] == m_def(HoldWaterVaporFraction)
+    assert step['m_def'] == m_def(HoldAbsoluteHumidity)
     assert step['set_point'] == pytest.approx(0.2109, rel=1e-3)
 
 
 def test_a_relative_humidity_needs_both_halves():
     translation = steps({'channel': 'atmosphere', 'water_vapor': {'rh': '85 %'}})
 
-    assert translation.archive == {'steps': [entry(HoldWaterVaporFraction)]}
+    assert translation.archive == {'steps': [entry(HoldAbsoluteHumidity)]}
     assert 'both halves' in translation.problems[0].message
 
 
@@ -746,7 +751,7 @@ def test_hold_below_names_the_bounded_kind_of_the_variable():
     assert translation.archive == {
         'steps': [
             entry(
-                HoldBelowWaterVaporFraction,
+                HoldBelowAbsoluteHumidity,
                 upper_bound=pytest.approx(0.55),
                 control=True,
             )
@@ -793,8 +798,227 @@ def test_a_bound_that_cannot_be_placed_is_a_problem(authored, path, message):
 
 def test_a_stored_bound_reads_back_as_a_bound():
     # No `hold_below:` in a bare archive: the class alone must pick the kind (§17.5).
+    bare = {'steps': [entry(HoldBelowAbsoluteHumidity, upper_bound=0.5, control=True)]}
+
+    translation = translate_section(bare, BLOCK)
+
+    assert (translation.archive, translation.problems) == (bare, [])
+
+
+# A cycle by a path not stated is a ramp that says so (§21.2).
+
+
+def test_a_cycle_is_written_as_a_ramp_that_cycles():
+    translation = steps(
+        {
+            'channel': 'temperature',
+            'ramp': {'from': 'RT', 'to': '65 °C'},
+            'end_of_ramp_behavior': 'cycle',
+        }
+    )
+
+    assert translation.problems == []
+    assert translation.archive == {
+        'steps': [
+            entry(
+                RampTemperature,
+                start_point=pytest.approx(296.15),
+                end_point=pytest.approx(338.15),
+                end_of_ramp_behavior='cycle',
+                control=True,
+            )
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    ('authored', 'key'),
+    [
+        # Retired with §21: a cycle is no kind of its own, a recommendation no field.
+        ({'channel': 'temperature', 'cycle': {'from': 'RT', 'to': '65 °C'}}, 'cycle'),
+        (
+            {'channel': 'irradiation', 'recommended_hold': '900 W/m^2'},
+            'recommended_hold',
+        ),
+    ],
+)
+def test_a_word_retired_in_review_is_no_word_any_more(authored, key):
+    translation = steps(authored)
+
+    assert any(problem.path == f'steps[0].{key}' for problem in translation.problems)
+
+
+# Relative and absolute humidity (§20.6).
+
+
+@pytest.mark.parametrize('written', ['85 %', '85 %RH', '85%rh'])
+def test_a_relative_humidity_is_stored_as_the_fraction_itself(written):
+    translation = steps({'channel': 'atmosphere', 'relative_humidity': written})
+
+    assert translation.problems == []
+    assert translation.archive == {
+        'steps': [
+            entry(HoldRelativeHumidity, set_point=pytest.approx(0.85), control=True)
+        ]
+    }
+
+
+def test_an_absolute_humidity_still_refuses_a_relative_one():
+    translation = steps({'channel': 'atmosphere', 'absolute_humidity': '85 %RH'})
+
+    assert 'not a volume ratio' in translation.problems[0].message
+
+
+@pytest.mark.parametrize(
+    'authored',
+    [{'water_vapor': '500 ppm'}, {'variable': 'water_vapor', 'hold': '500 ppm'}],
+)
+def test_water_vapor_is_read_as_the_absolute_humidity_it_became(authored):
+    translation = steps({'channel': 'atmosphere', **authored})
+
+    assert translation.problems == []
+    assert translation.archive == {
+        'steps': [
+            entry(HoldAbsoluteHumidity, set_point=pytest.approx(5e-4), control=True)
+        ]
+    }
+
+
+def test_an_archive_naming_the_old_class_loads_as_the_renamed_one():
+    old = 'nomad_pv_stability_measurements.schema_packages.hold_steps.HoldWaterVaporFraction'
+
+    translation = steps({'m_def': old, 'set_point': 5e-4, 'control': True})
+
+    assert translation.problems == []
+    assert translation.archive == {
+        'steps': [entry(HoldAbsoluteHumidity, set_point=5e-4, control=True)]
+    }
+
+
+def test_a_relative_humidity_may_be_bounded():
+    translation = steps(
+        {'channel': 'atmosphere', 'variable': 'relative_humidity', 'hold_below': '55 %'}
+    )
+
+    assert translation.archive == {
+        'steps': [
+            entry(
+                HoldBelowRelativeHumidity, upper_bound=pytest.approx(0.55), control=True
+            )
+        ]
+    }
+
+
+# An inert atmosphere (§20.5).
+
+
+def test_an_inert_atmosphere_is_thresholds_and_a_gas():
+    translation = steps(
+        {'channel': 'atmosphere', 'variable': 'oxygen', 'hold_below': '1 ppm'},
+        {
+            'channel': 'atmosphere',
+            'variable': 'absolute_humidity',
+            'hold_below': '1 ppm',
+        },
+        {'channel': 'atmosphere', 'balance_gas': 'N2'},
+    )
+
+    assert translation.problems == []
+    assert translation.archive == {
+        'steps': [
+            entry(
+                HoldBelowOxygenFraction, upper_bound=pytest.approx(1e-6), control=True
+            ),
+            entry(
+                HoldBelowAbsoluteHumidity, upper_bound=pytest.approx(1e-6), control=True
+            ),
+            entry(BalanceGas, gas='N2', control=True),
+        ]
+    }
+
+
+# A range: `hold_between` (§22).
+
+
+def test_a_range_is_written_as_its_two_bounds():
+    translation = steps(
+        {
+            'channel': 'irradiation',
+            'hold_between': {'lower': '800 W/m^2', 'upper': '1 sun'},
+        }
+    )
+
+    assert translation.problems == []
+    assert translation.archive == {
+        'steps': [
+            entry(
+                HoldBetweenIrradiance,
+                lower_bound=pytest.approx(800),
+                upper_bound=pytest.approx(1000),
+                control=True,
+            )
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    ('authored', 'path', 'message'),
+    [
+        (
+            {'channel': 'irradiation', 'hold_between': '800 W/m^2'},
+            'hold_between',
+            'expected a section with `lower` and `upper`',
+        ),
+        (
+            {
+                'channel': 'irradiation',
+                'hold_between': {'lower': '800 W/m^2', 'middle': '900 W/m^2'},
+            },
+            'hold_between.middle',
+            'no part of a range',
+        ),
+        (
+            {
+                'channel': 'irradiation',
+                'hold': '900 W/m^2',
+                'hold_between': {'lower': '800 W/m^2', 'upper': '1000 W/m^2'},
+            },
+            'hold_between',
+            'not both',
+        ),
+        (
+            {
+                'channel': 'temperature',
+                'hold_between': {'lower': '20 °C', 'upper': '30 °C'},
+            },
+            'hold_between',
+            'no standard gives it a range yet',
+        ),
+        (
+            {
+                'channel': 'electrical_load',
+                'hold_between': {'lower': '0 V', 'upper': '1 V'},
+            },
+            'hold_between',
+            'say which variable is bounded',
+        ),
+    ],
+)
+def test_a_range_that_cannot_be_read_is_a_problem(authored, path, message):
+    translation = steps(authored)
+
+    assert any(problem.path == f'steps[0].{path}' for problem in translation.problems)
+    assert any(message in problem.message for problem in translation.problems)
+
+
+def test_a_stored_range_reads_back_as_a_range():
+    # No `hold_between:` in a bare archive: the class alone must pick the kind.
     bare = {
-        'steps': [entry(HoldBelowWaterVaporFraction, upper_bound=0.5, control=True)]
+        'steps': [
+            entry(
+                HoldBetweenIrradiance, lower_bound=800, upper_bound=1000, control=True
+            )
+        ]
     }
 
     translation = translate_section(bare, BLOCK)

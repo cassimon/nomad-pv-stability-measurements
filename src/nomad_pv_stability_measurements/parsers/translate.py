@@ -9,6 +9,7 @@ from loading (§7).
 
 import difflib
 import importlib
+import re
 from dataclasses import dataclass, field
 
 import pint
@@ -16,13 +17,16 @@ import pint
 from nomad_pv_stability_measurements.parsers.channels import (
     CHANNEL_VARIABLES,
     HOLD_BELOW_STEPS,
+    HOLD_BETWEEN_STEPS,
     NAMED_VALUES,
     OLD_CHANNEL_CLASSES,
+    OLD_CLASSES,
     RAMP_STEPS,
     RETIRED_WORDS,
     TRACKED_POINT_CHANNEL,
     TRACKED_POINTS,
     VALUE_FIELDS,
+    VARIABLE_ALIASES,
     VARIABLE_STEPS,
 )
 from nomad_pv_stability_measurements.parsers.units import (
@@ -45,6 +49,7 @@ AUTHORING_WORDS = (
     'hold',
     'hold_tolerance',
     'hold_below',
+    'hold_between',
     'ramp',
     'duration',
     'commands',
@@ -66,15 +71,24 @@ RENAMED = {
 #: stored ramp has to read back as a ramp and not as a hold (§15.14).
 RAMP_KEYS = {cls: key for key, cls in RAMP_STEPS.items()}
 HOLD_BELOW_KEYS = {cls: key for key, cls in HOLD_BELOW_STEPS.items()}
+HOLD_BETWEEN_KEYS = {cls: key for key, cls in HOLD_BETWEEN_STEPS.items()}
 VARIABLE_KEYS = (
-    {cls: key for key, cls in VARIABLE_STEPS.items()} | RAMP_KEYS | HOLD_BELOW_KEYS
+    {cls: key for key, cls in VARIABLE_STEPS.items()}
+    | RAMP_KEYS
+    | HOLD_BELOW_KEYS
+    | HOLD_BETWEEN_KEYS
 )
 
 #: The fields a named value such as `dark` or `RT` may be written into (D8a, §17.3).
-NAMED_FIELDS = ('set_point', 'start_point', 'end_point', 'upper_bound')
+NAMED_FIELDS = ('set_point', 'start_point', 'end_point', 'upper_bound', 'lower_bound')
 
 #: What a `ramp:` writes, and the field each becomes (§15.14).
 RAMP_FIELDS = {'from': 'start_point', 'to': 'end_point', 'rate': 'ramp_rate'}
+#: What a `hold_between:` writes, and the field each becomes (§22).
+BETWEEN_FIELDS = {'lower': 'lower_bound', 'upper': 'upper_bound'}
+
+#: A relative humidity may be written the way it is usually read, `85 %RH` (§20.6).
+_RELATIVE_HUMIDITY_UNIT = re.compile(r'%\s*rh$', re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -226,6 +240,8 @@ def _step(entry, path: str, problems: list) -> list[dict]:
     if qualified in OLD_CHANNEL_CLASSES:
         rest.setdefault('channel', OLD_CHANNEL_CLASSES[qualified])  # §13's archives
         cls = None
+    elif qualified in OLD_CLASSES:
+        cls = OLD_CLASSES[qualified]  # a class renamed since (§20.6)
     elif qualified is not None:
         cls = _resolve(qualified, path, problems)
         if cls is None:
@@ -271,6 +287,8 @@ class _Words:
     tolerance: object = None
     #: `hold_below: 55 %`, which picks the bounded kind (§17.5); `None` when not written
     below: object = None
+    #: `hold_between: {lower: …, upper: …}`, which picks the range kind (§22)
+    between: object = None
 
     @classmethod
     def take(cls, authored: dict, path: str) -> '_Words':
@@ -280,6 +298,12 @@ class _Words:
         ramp = authored.pop('ramp', None)
         tolerance = authored.pop('hold_tolerance', None)
         below = authored.pop('hold_below', None)
+        between = authored.pop('hold_between', None)
+        for old, new in VARIABLE_ALIASES.items():  # a key's former spelling (§20.6)
+            if old in authored:
+                authored.setdefault(new, authored.pop(old))
+            if authored.get('variable') == old:
+                authored['variable'] = new
         retired = [(_at(path, key), key) for key in authored if key in RETIRED_WORDS]
         for _, key in retired:
             authored.pop(key)
@@ -313,6 +337,7 @@ class _Words:
             ramp=ramp,
             tolerance=tolerance,
             below=below,
+            between=between,
         )
 
 
@@ -338,10 +363,9 @@ def _monitor_control(authored: dict, cls: type | None, path: str, problems: list
     if not classes:
         return []
     bare = _fields(authored, classes[0], path, problems)
-    if words.ramp is not None or words.below is not None:
-        read = (_ramp_fields if words.ramp is not None else _bound_fields)(
-            words, classes, path, problems
-        )
+    reader = _kind_fields(words)
+    if reader is not None:
+        read = reader(words, classes, path, problems)
         if read is None:
             return []
         bare.update(read)
@@ -424,6 +448,16 @@ def _tracked_steps(
     return [{'m_def': m_def(tracking), **bare}]
 
 
+def _kind_fields(words: _Words):
+    """The reader for the word that chose a kind other than a hold, if one was written:
+    `ramp:`, `hold_between:` or `hold_below:` (§15.14, §17.5, §22)."""
+    if words.ramp is not None:
+        return _ramp_fields
+    if words.between is not None:
+        return _between_fields
+    return _bound_fields if words.below is not None else None
+
+
 def _ramp_fields(
     words: _Words, classes: list, path: str, problems: list
 ) -> dict | None:
@@ -436,6 +470,7 @@ def _ramp_fields(
         words.hold is not None
         or words.tolerance is not None
         or words.below is not None
+        or words.between is not None
         or words.keys
     ):
         problems.append(
@@ -516,6 +551,8 @@ def _kind(words: _Words, cls) -> tuple[dict, str]:
     (§15.14, §17.5)."""
     if words.ramp is not None or cls in RAMP_KEYS:
         return RAMP_STEPS, 'ramp'
+    if words.between is not None or cls in HOLD_BETWEEN_KEYS:
+        return HOLD_BETWEEN_STEPS, 'hold_between'
     if words.below is not None or cls in HOLD_BELOW_KEYS:
         return HOLD_BELOW_STEPS, 'hold_below'
     return VARIABLE_STEPS, 'hold'
@@ -525,7 +562,7 @@ def _unplaced(words: _Words, word: str, allowed: tuple) -> str:
     """Why a value written on a channel of several variables could not be placed."""
     if word == 'ramp':
         return 'say which variable ramps: a whole channel cannot.'
-    if word == 'hold_below':
+    if word in ('hold_below', 'hold_between'):
         return 'say which variable is bounded: a whole channel cannot be.'
     return (
         f'could not place `hold` {words.hold!r}: say which variable it sets, '
@@ -536,6 +573,10 @@ def _unplaced(words: _Words, word: str, allowed: tuple) -> str:
 def _no_such_kind(key: str, word: str) -> str:
     if word == 'ramp':
         return f'`{key}` does not ramp: it holds one value and nothing else.'
+    if word == 'hold_between':
+        return (
+            f'`{key}` takes no `hold_between`: no standard gives it a range yet (§22).'
+        )
     return f'`{key}` takes no `{word}`: no standard bounds it yet (§17.5).'
 
 
@@ -560,6 +601,55 @@ def _bound_fields(
     else:
         bound = _value(words.below, classes[0], 'upper_bound', where, problems)
     return {} if bound is None else {'upper_bound': bound}
+
+
+def _between_fields(
+    words: _Words, classes: list, path: str, problems: list
+) -> dict | None:
+    """`hold_between: {lower, upper}` as the fields the schema stores (§22). A bound
+    left out is reported by the step's own `normalize`, as a stored archive would be.
+
+    `None` where the step cannot be read at all, so the caller leaves it out.
+    """
+    where = _at(path, 'hold_between')
+    if (
+        words.hold is not None
+        or words.tolerance is not None
+        or words.below is not None
+        or words.keys
+    ):
+        problems.append(
+            Problem(
+                where,
+                'a step holds a value or keeps it in a range, not both; write one of '
+                'them.',
+            )
+        )
+        return None
+    if not isinstance(words.between, dict):
+        problems.append(
+            Problem(
+                where,
+                f'expected a section with `lower` and `upper`, got {words.between!r}.',
+            )
+        )
+        return None
+    bare = {}
+    for written, value in words.between.items():
+        if written not in BETWEEN_FIELDS:
+            problems.append(
+                Problem(
+                    _at(where, written),
+                    f'`{written}` is no part of a range; it has '
+                    f'{", ".join(BETWEEN_FIELDS)}.',
+                )
+            )
+            continue
+        field_name = BETWEEN_FIELDS[written]
+        read = _value(value, classes[0], field_name, _at(where, written), problems)
+        if read is not None:
+            bare[field_name] = read
+    return bare
 
 
 def _allowed(words: _Words, cls, path: str, problems: list) -> tuple | None:
@@ -624,7 +714,7 @@ def _relative_humidity(written: dict, cls: type, where: str, problems: list):
     carries that temperature itself rather than borrowing a neighbour's.
     """
     axis = VARIABLE_KEYS.get(cls)
-    if axis != 'water_vapor':
+    if axis != 'absolute_humidity':
         problems.append(
             Problem(where, f'`{axis or cls.__name__}` takes a value, not a section.')
         )
@@ -641,7 +731,7 @@ def _relative_humidity(written: dict, cls: type, where: str, problems: list):
     # Read through the water vapour's own hold: a bound has no `set_point` to ask.
     relative = _value(
         written['rh'],
-        VARIABLE_STEPS['water_vapor'],
+        VARIABLE_STEPS['absolute_humidity'],
         'set_point',
         _at(where, 'rh'),
         problems,
@@ -677,6 +767,8 @@ def _value(value, cls: type, key: str, where: str, problems: list):
     text = value.strip()
     if not text:
         return None  # blank text asks nothing, like never writing the key (D8)
+    if VARIABLE_KEYS.get(cls) == 'relative_humidity':
+        text = _RELATIVE_HUMIDITY_UNIT.sub('%', text)  # `85 %RH` is `85 %` here only
     standard = _standard_value(text, cls) if key in NAMED_FIELDS else None
     read = parse_difference if key.endswith('_tolerance') else parse
     try:

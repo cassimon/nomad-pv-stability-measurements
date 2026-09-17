@@ -1,0 +1,24 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-LT-2 (fixed voltage near MPP)
+  standard: ISOS-LT-2
+  standard_variant: fixed voltage near MPP
+  environment: indoor
+  notes: Solar-thermal cycling in an environmental chamber; RH controlled at 50 % above 40 °C. Fixed voltage bias near the MPP.
+  channel_settings:
+    irradiation:
+      control: true
+    atmosphere:
+      variable: relative_humidity
+      monitor: true
+    electrical_load:
+      variable: voltage
+      control: true
+      reference_point: near V_MPP
+  routine:
+    commands:
+      - channel: temperature
+        ramp:
+          from: 5 °C
+          to: 65 °C
+        end_of_ramp_behavior: triangle

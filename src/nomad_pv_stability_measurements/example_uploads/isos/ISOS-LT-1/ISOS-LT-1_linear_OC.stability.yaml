@@ -9,9 +9,9 @@ data:
     irradiation:
       control: true
     atmosphere:
-      variable: water_vapor
-      monitor: true
+      variable: relative_humidity
       control: false
+      monitor: true
     electrical_load:
       hold: open_circuit
   routine:

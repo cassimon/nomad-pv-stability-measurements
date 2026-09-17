@@ -1,9 +1,9 @@
-"""Every row of ISOS Table 1, one protocol per option, as shipped (Design.md §16, §18).
+"""Every ISOS protocol the plugin ships, one file per option (Design.md §16, §18, §20–§22).
 
 Each file is compared with an expected archive **as a whole**: the loaded, normalized
 protocol's `m_to_dict()` must equal it exactly, so a field written wrongly fails and so
 does a field written that should not be there (§18.4). The expectations are built here
-from the table in SI units, independently of how the files were written.
+from Khenkin et al. 2020 in SI units, independently of how the files were written.
 
 The files are read from the package, not from `tests/data/`: they are shipped
 documentation, and a second copy would be a second thing to keep in step. Each lies in a
@@ -19,15 +19,15 @@ from nomad.datamodel import EntryArchive, EntryMetadata
 
 from nomad_pv_stability_measurements import example_uploads
 from nomad_pv_stability_measurements.parsers.translate import m_def, translate
-from nomad_pv_stability_measurements.parsers.units import (
-    volume_ratio_of_relative_humidity,
+from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
+    HoldBetweenIrradiance,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     HoldCurrent,
     HoldIrradiance,
+    HoldRelativeHumidity,
     HoldTemperature,
     HoldVoltage,
-    HoldWaterVaporFraction,
 )
 from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
     MPPTracking,
@@ -48,6 +48,8 @@ NOTES_AT_MOST = 120
 #: What only a design decision would mention, and so no `notes` may (§18.3).
 SCHEMA_WORDS = ('`', 'schema', 'set_point', 'hold:', 'file')
 ZERO_CELSIUS = 273.15
+HOUR = 3600
+MINUTE = 60
 
 
 def step(cls, **fields) -> dict:
@@ -58,36 +60,70 @@ def kelvin(celsius: float):
     return pytest.approx(celsius + ZERO_CELSIUS)
 
 
-# The table's cells, as the steps they are.
+# The table's cells, as the steps they are — read with the paper's text (§18.7, §20).
 
 DARK = step(HoldIrradiance, control=True, set_point=0.0)
 SOLAR_SIMULATOR = step(HoldIrradiance, control=True)
-SUNLIGHT = step(HoldIrradiance, control=False)
-#: "Ambient (23 ± 4 °C)" — a figure and a tolerance (§17.2).
+#: "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied"
+#: (p.43). A recommendation is a variant of its own (§21.1): every solar simulator comes
+#: without it and with it, the latter's option last. A range, never a target (§22).
+LIGHTS = {
+    None: SOLAR_SIMULATOR,
+    ('800-1000Wm2', 'recommended 800–1000 W/m²'): step(
+        HoldBetweenIrradiance,
+        control=True,
+        lower_bound=pytest.approx(800),
+        upper_bound=pytest.approx(1000),
+    ),
+}
+#: Table 3 has an outdoor test report the sunlight irradiance, so it is monitored.
+SUNLIGHT = step(HoldIrradiance, control=False, monitor=True)
+#: "Ambient (23 ± 4 °C)": "monitored but not explicitly controlled (room temperature in
+#: the laboratory is assumed to be 23±4 °C)" (p.36) — the figure, not regulated.
 ROOM_TEMPERATURE = step(
     HoldTemperature,
-    control=True,
+    control=False,
+    monitor=True,
     set_point=kelvin(23),
     set_point_tolerance=pytest.approx(4),
 )
-#: Bare "Ambient" — not regulated, and nothing more.
-AMBIENT_TEMPERATURE = step(HoldTemperature, control=False)
-AMBIENT_HUMIDITY = step(HoldWaterVaporFraction, control=False)
-HUMIDITY_MONITORED = step(HoldWaterVaporFraction, monitor=True)
-HUMIDITY_MONITORED_UNCONTROLLED = step(
-    HoldWaterVaporFraction, monitor=True, control=False
-)
+#: Bare "Ambient": "even if a parameter is not controlled … it is still important to
+#: monitor and report" it (p.43). Humidity is stated as RH throughout (§20.6).
+AMBIENT_TEMPERATURE = step(HoldTemperature, control=False, monitor=True)
+AMBIENT_HUMIDITY = step(HoldRelativeHumidity, control=False, monitor=True)
+#: Monitored, and controlled only above 40 °C: the condition stays in `notes` (§20.8).
+HUMIDITY_MONITORED = step(HoldRelativeHumidity, monitor=True)
 OPEN_CIRCUIT = step(VOCTracking, control=True)
-LOADS = {'MPP': step(MPPTracking, control=True), 'OC': OPEN_CIRCUIT}
+MPP = ('MPP', step(MPPTracking, control=True))
+#: Levels 1 and 2 under light: "options of exposure under open-circuit condition or using a
+#: fixed voltage bias near the MPP (instead of active MPP tracking)" (p.37).
+LOWER_LEVEL_LOADS = {
+    'MPP': MPP,
+    'OC': ('OC', OPEN_CIRCUIT),
+    'Vfixed': (
+        'fixed voltage near MPP',
+        step(HoldVoltage, control=True, reference_point='near V_MPP'),
+    ),
+}
 TEMPERATURES = {'65degC': ('65 °C', 65), '85degC': ('85 °C', 85)}
-#: Every bias is measured on the device, so none has a set point (§18.2). E_g/q is no
-#: option: the text recommends voltages *below* it (§18.6).
+#: Every bias is taken from the device, and says which point in `reference_point`
+#: (§20.3). E_g/q is no option: the text recommends voltages *below* it (§18.6).
 BIASES = {
-    'Vmpp': ('V_MPP', HoldVoltage),
-    'Voc': ('V_oc', HoldVoltage),
-    'Jsc': ('J_SC', HoldCurrent),
-    'minus-Voc': ('−V_oc', HoldVoltage),
-    'minus-Jmpp': ('−J_MPP', HoldCurrent),
+    'Vmpp': ('V_MPP', HoldVoltage, 'V_MPP'),
+    'Voc': ('V_oc', HoldVoltage, 'V_oc'),
+    'Jsc': ('J_SC', HoldCurrent, 'J_SC'),
+    'minus-Voc': ('−V_oc', HoldVoltage, '-V_oc'),
+    'minus-Jmpp': ('−J_MPP', HoldCurrent, '-J_MPP'),
+}
+#: "cycle periods of 2, 8, or 24 h and duty cycles (light:dark) of 1:1 or 1:2" (p.39):
+#: (period, duty) → light and dark, in seconds. "8 h light and 16 h dark" is the text's.
+LIGHT_CYCLES = {
+    ('2h', '2 h', '1-1', '1:1'): (1 * HOUR, 1 * HOUR),
+    ('2h', '2 h', '1-2', '1:2'): (40 * MINUTE, 80 * MINUTE),
+    ('8h', '8 h', '1-1', '1:1'): (4 * HOUR, 4 * HOUR),
+    ('8h', '8 h', '1-2', '1:2'): (160 * MINUTE, 320 * MINUTE),
+    ('24h', '24 h', '1-1', '1:1'): (12 * HOUR, 12 * HOUR),
+    ('24h', '24 h', '1-2', '1:2'): (8 * HOUR, 16 * HOUR),
 }
 
 
@@ -95,17 +131,19 @@ def held(celsius: float) -> dict:
     return step(HoldTemperature, control=True, set_point=kelvin(celsius))
 
 
-def humidity(percent: float, celsius: float) -> dict:
-    ratio = volume_ratio_of_relative_humidity(percent / 100, celsius + ZERO_CELSIUS)
-    return step(HoldWaterVaporFraction, control=True, set_point=pytest.approx(ratio))
+def humidity(percent: float) -> dict:
+    """A relative humidity, stored as the fraction itself — no temperature (§20.6)."""
+    return step(
+        HoldRelativeHumidity, control=True, set_point=pytest.approx(percent / 100)
+    )
 
 
-def bias(cls) -> dict:
-    return step(cls, control=True)
+def bias(cls, point: str) -> dict:
+    return step(cls, control=True, reference_point=point)
 
 
-def cycle(start, end) -> dict:
-    """The routine of a solar-thermal cycle: linear ramps between two temperatures."""
+def ramping(start, end) -> dict:
+    """A routine of linear ramps between two temperatures, up and down (§15.14)."""
     ramp = step(
         RampTemperature,
         control=True,
@@ -116,17 +154,47 @@ def cycle(start, end) -> dict:
     return step(PlannedSubroutineStep, steps=[ramp])
 
 
+def cycling(start, end) -> dict:
+    """A routine cycling between two temperatures by a path not stated: a ramp that
+    cycles (§21.2)."""
+    cycle = step(
+        RampTemperature,
+        control=True,
+        start_point=start,
+        end_point=end,
+        end_of_ramp_behavior='cycle',
+    )
+    return step(PlannedSubroutineStep, steps=[cycle])
+
+
+def light_dark(light: float, dark: float, lit: dict) -> dict:
+    """A routine of light and dark, repeated for as long as the protocol runs (§20.1)."""
+    return step(
+        PlannedSubroutineStep,
+        repeat='until_end_of_protocol',
+        estimated_duration_one_iteration=pytest.approx(light + dark),
+        steps=[
+            {**lit, 'estimated_duration': pytest.approx(light)},
+            {**DARK, 'estimated_duration': pytest.approx(dark)},
+        ],
+    )
+
+
 EXPECTED = {}
 
 
 def protocol(standard, options, steps, environment='indoor'):
-    """The archive one file must load to. `options` are (file-name token, label)."""
+    """The archive one file must load to. `options` are (file-name token, label), or
+    `None` for an option a variant does not take."""
+    options = [option for option in options if option]
     variant = ', '.join(label for _, label in options)
     stem = '_'.join([standard, *(token for token, _ in options)])
     archive = {
         'm_def': m_def(StabilityProtocol),
         'name': f'{standard} ({variant})' if variant else standard,
         'standard': standard,
+        # The last digit of the designation, derived when the file writes none (§20.7).
+        'standard_level': int(standard.rsplit('-', 1)[1].rstrip('I')),
         'environment': environment,
         'steps': steps,
     }
@@ -142,15 +210,12 @@ protocol('ISOS-D-1', [], [DARK, ROOM_TEMPERATURE, AMBIENT_HUMIDITY, OPEN_CIRCUIT
 for token, (label, celsius) in TEMPERATURES.items():
     option = [(token, label)]
     protocol('ISOS-D-2', option, [DARK, held(celsius), AMBIENT_HUMIDITY, OPEN_CIRCUIT])
-    protocol(
-        'ISOS-D-3',
-        option,
-        [DARK, held(celsius), humidity(85, celsius), OPEN_CIRCUIT],
-    )
+    # "humidity (set at 85% RH) when devices are kept at … (65 or 85 °C)" (p.37).
+    protocol('ISOS-D-3', option, [DARK, held(celsius), humidity(85), OPEN_CIRCUIT])
 
-# ISOS-V — the five biases span all three rows (the merged cells G8:G10).
-for b_token, (b_label, cls) in BIASES.items():
-    load = bias(cls)
+# ISOS-V — the biases span all three rows (the merged cells G8:G10).
+for b_token, (b_label, cls, point) in BIASES.items():
+    load = bias(cls, point)
     protocol(
         'ISOS-V-1',
         [(b_token, b_label)],
@@ -159,63 +224,103 @@ for b_token, (b_label, cls) in BIASES.items():
     for token, (label, celsius) in TEMPERATURES.items():
         options = [(token, label), (b_token, b_label)]
         protocol('ISOS-V-2', options, [DARK, held(celsius), AMBIENT_HUMIDITY, load])
-        protocol(
-            'ISOS-V-3', options, [DARK, held(celsius), humidity(85, celsius), load]
-        )
+        protocol('ISOS-V-3', options, [DARK, held(celsius), humidity(85), load])
 
 # ISOS-L — light soaking.
-for l_token, load in LOADS.items():
-    protocol(
-        'ISOS-L-1',
-        [(l_token, l_token)],
-        [SOLAR_SIMULATOR, ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load],
-    )
-for (token, (label, celsius)), (l_token, load) in itertools.product(
-    TEMPERATURES.items(), LOADS.items()
-):
-    protocol(
-        'ISOS-L-2',
-        [(token, label), (l_token, l_token)],
-        [SOLAR_SIMULATOR, held(celsius), AMBIENT_HUMIDITY, load],
-    )
-for token, (label, celsius) in TEMPERATURES.items():
-    protocol(
-        'ISOS-L-3',
-        [(token, label)],
-        [SOLAR_SIMULATOR, held(celsius), humidity(50, celsius), LOADS['MPP']],
-    )
+for light, simulator in LIGHTS.items():
+    for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
+        protocol(
+            'ISOS-L-1',
+            [(l_token, l_label), light],
+            [simulator, ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load],
+        )
+    for (token, (label, celsius)), (l_token, (l_label, load)) in itertools.product(
+        TEMPERATURES.items(), LOWER_LEVEL_LOADS.items()
+    ):
+        protocol(
+            'ISOS-L-2',
+            [(token, label), (l_token, l_label), light],
+            [simulator, held(celsius), AMBIENT_HUMIDITY, load],
+        )
+    for token, (label, celsius) in TEMPERATURES.items():
+        protocol(
+            'ISOS-L-3',
+            [(token, label), light],
+            [simulator, held(celsius), humidity(50), MPP[1]],
+        )
 
-# ISOS-O — outdoors, where nothing but the load is regulated. No site is stated.
+# ISOS-O — outdoors, where nothing but the load is regulated, and the weather is monitored.
+# No site is stated: it is reported, not prescribed (Table 3).
 OUTDOOR = [SUNLIGHT, AMBIENT_TEMPERATURE, AMBIENT_HUMIDITY]
-for l_token, load in LOADS.items():
+for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
     for standard in ('ISOS-O-1', 'ISOS-O-2'):
-        protocol(standard, [(l_token, l_token)], [*OUTDOOR, load], 'outdoor')
-protocol('ISOS-O-3', [], [*OUTDOOR, LOADS['MPP']], 'outdoor')
+        protocol(standard, [(l_token, l_label)], [*OUTDOOR, load], 'outdoor')
+# Level 3: "ISOS-O-3 requires both in situ MPP tracking under natural sunlight …" (p.37).
+protocol('ISOS-O-3', [], [*OUTDOOR, MPP[1]], 'outdoor')
 
-# ISOS-LT — the one cycle the table says is linear. Only the temperature varies, so it
-# alone is the routine (§16.2, Rule 2).
-for l_token, load in LOADS.items():
-    protocol(
-        'ISOS-LT-1',
-        [('linear', 'linear ramping'), (l_token, l_token)],
-        [
-            SOLAR_SIMULATOR,
-            HUMIDITY_MONITORED_UNCONTROLLED,
-            load,
-            cycle(kelvin(23), kelvin(65)),
-        ],
-    )
-    protocol(
-        'ISOS-LT-2',
-        [(l_token, l_token)],
-        [SOLAR_SIMULATOR, HUMIDITY_MONITORED, load, cycle(kelvin(5), kelvin(65))],
-    )
-# Level 3, where MPP tracking is mandatory: the table's "MPP or OC" is no option (§18.6).
+# ISOS-T — thermal cycling in the dark, the path left to ref. 11 (§21.2).
+for token, (label, celsius) in TEMPERATURES.items():
+    for standard in ('ISOS-T-1', 'ISOS-T-2'):
+        protocol(
+            standard,
+            [(token, label)],
+            [
+                DARK,
+                AMBIENT_HUMIDITY,
+                OPEN_CIRCUIT,
+                cycling(kelvin(23), kelvin(celsius)),
+            ],
+        )
+# "< 55%", controlled only above 40 °C (footnote b): monitored, the condition in `notes`.
 protocol(
-    'ISOS-LT-3',
+    'ISOS-T-3',
     [],
-    [SOLAR_SIMULATOR, HUMIDITY_MONITORED, LOADS['MPP'], cycle(kelvin(-25), kelvin(65))],
+    [DARK, HUMIDITY_MONITORED, OPEN_CIRCUIT, cycling(kelvin(-40), kelvin(85))],
 )
+
+# ISOS-LC — the light is what varies, so it alone is the routine (§16.2, Rule 2). LC-3's
+# humidity is an open question and not written (OPEN_QUESTIONS.md).
+for light, simulator in LIGHTS.items():
+    for (p_token, p_label, d_token, d_label), (on, off) in LIGHT_CYCLES.items():
+        cycle_options = [(p_token, p_label), (d_token, d_label)]
+        routine = light_dark(on, off, simulator)
+        for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
+            protocol(
+                'ISOS-LC-1',
+                [*cycle_options, (l_token, l_label), light],
+                [ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load, routine],
+            )
+            for token, (label, celsius) in TEMPERATURES.items():
+                protocol(
+                    'ISOS-LC-2',
+                    [*cycle_options, (token, label), (l_token, l_label), light],
+                    [held(celsius), AMBIENT_HUMIDITY, load, routine],
+                )
+
+# ISOS-LT — only the temperature varies, so it alone is the routine (§16.2, Rule 2).
+for light, simulator in LIGHTS.items():
+    for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
+        # "Linear or step ramping": linear is a triangle, a step's path is not stated.
+        for s_token, s_label, routine in (
+            ('linear', 'linear ramping', ramping(kelvin(23), kelvin(65))),
+            ('step', 'step ramping', cycling(kelvin(23), kelvin(65))),
+        ):
+            protocol(
+                'ISOS-LT-1',
+                [(s_token, s_label), (l_token, l_label), light],
+                [simulator, AMBIENT_HUMIDITY, load, routine],
+            )
+        protocol(
+            'ISOS-LT-2',
+            [(l_token, l_label), light],
+            [simulator, HUMIDITY_MONITORED, load, ramping(kelvin(5), kelvin(65))],
+        )
+    # Level 3, where MPP tracking is mandatory: the table's "MPP or OC" is no option.
+    protocol(
+        'ISOS-LT-3',
+        [light],
+        [simulator, HUMIDITY_MONITORED, MPP[1], ramping(kelvin(-25), kelvin(65))],
+    )
 
 
 def read(name: str) -> dict:
@@ -265,3 +370,15 @@ def test_a_shipped_protocol_round_trips(name):
     again = translate(bare)
 
     assert (again.archive, again.problems) == (bare, [])
+
+
+@pytest.mark.parametrize(
+    'path', [path for path in SHIPPED if path.startswith('ISOS-LC')]
+)
+def test_no_light_cycling_protocol_claims_a_length(path, protocol_file):
+    # The standard fixes the cycle, never how many: a file that derived a length from one
+    # cycle would claim a test hours long (§20.1).
+    loaded = protocol_file(path)
+
+    assert loaded.estimated_duration is None
+    assert loaded.steps[-1].estimated_duration_one_iteration is not None

@@ -1,12 +1,49 @@
+import re
+
 import numpy as np
 from nomad.datamodel.data import ArchiveSection, EntryData
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
 
 # The protocol's steps name these classes; importing them registers them with NOMAD.
 from nomad_pv_stability_measurements.schema_packages.general import PlannedProcess
+from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
+    HoldBetweenIrradiance,
+)
+from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    HoldCurrent,
+    HoldIrradiance,
+    HoldResistance,
+    HoldVoltage,
+)
+from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+    MPPTracking,
+    VOCTracking,
+)
+from nomad_pv_stability_measurements.schema_packages.ramp_steps import (
+    RampCurrent,
+    RampIrradiance,
+    RampResistance,
+    RampVoltage,
+)
 from nomad_pv_stability_measurements.schema_packages.utils import normalize_steps
 
 m_package = SchemaPackage()
+
+#: An ISOS designation, its level the last digit: `ISOS-L-3`, `ISOS-LC-3I` (§20.7).
+_ISOS_DESIGNATION = re.compile(r'^ISOS-[A-Z]+-(?P<level>[1-3])I?$')
+#: ISOS makes MPP tracking mandatory at this level, under light (p.37).
+_MPP_MANDATORY_LEVEL = 3
+#: The steps that set the electrical load, whichever way.
+_LOAD_STEPS = (
+    MPPTracking,
+    VOCTracking,
+    HoldVoltage,
+    HoldCurrent,
+    HoldResistance,
+    RampVoltage,
+    RampCurrent,
+    RampResistance,
+)
 
 
 class GeoLocation(ArchiveSection):
@@ -71,6 +108,13 @@ class StabilityProtocol(PlannedProcess, EntryData):
         'its own; leave empty where the standard offers none. Free text (Design.md §18.1).',
     )
 
+    standard_level = Quantity(
+        type=int,
+        description='The level of sophistication within the standard, 1 to 3 in ISOS. '
+        'Left empty, it is derived from an ISOS designation (`ISOS-L-3` is 3) '
+        '(Design.md §20.7).',
+    )
+
     environment = Quantity(
         type=MEnum('indoor', 'outdoor', 'other'),
         description='Where the test is run. `indoor` is a lab, `outdoor` is a field test, and `other` is anything else. Free text in `notes` can be used for additional details.',
@@ -93,6 +137,41 @@ class StabilityProtocol(PlannedProcess, EntryData):
         super().normalize(archive, logger)
         # The protocol's own steps run in sequence, like a sequential block's (§15.4).
         normalize_steps(self, 'sequential', logger)
+        designation = _ISOS_DESIGNATION.match(self.standard or '')
+        if designation is not None:
+            if self.standard_level is None:
+                self.standard_level = int(designation.group('level'))
+            self.report_a_level_3_load_without_mpp_tracking(logger)
+
+    def report_a_level_3_load_without_mpp_tracking(self, logger):
+        """ "we indicate MPP tracking as mandatory only at the third, most advanced level
+        of ISOS protocols" (Khenkin et al. 2020, p.37) — under light, since a dark test has
+        no maximum power point to track. Reported, never repaired (D13a, §20.7)."""
+        if self.standard_level != _MPP_MANDATORY_LEVEL:
+            return
+        steps = list(self.m_all_contents(depth_first=True))
+        lit = any(
+            isinstance(step, RampIrradiance)
+            or (
+                isinstance(step, HoldIrradiance)
+                and (step.set_point is None or step.set_point.magnitude != 0)
+            )
+            or (
+                isinstance(step, HoldBetweenIrradiance)
+                and (step.upper_bound is None or step.upper_bound.magnitude != 0)
+            )
+            for step in steps
+        )
+        if not lit:
+            return
+        loads = [step for step in steps if isinstance(step, _LOAD_STEPS)]
+        others = sorted({type(step).__name__ for step in loads} - {'MPPTracking'})
+        if others or not loads:
+            found = ', '.join(others) if others else 'no electrical load at all'
+            logger.error(
+                f'{self.standard} is level {self.standard_level} under light, where MPP '
+                f'tracking is mandatory, but it writes {found}.'
+            )
 
 
 m_package.__init_metainfo__()
