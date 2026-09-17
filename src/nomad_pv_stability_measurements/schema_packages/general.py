@@ -1,9 +1,17 @@
+import re
 from datetime import datetime, timedelta
 
 import numpy as np
 from nomad.datamodel.data import ArchiveSection, EntryData
 from nomad.datamodel.metainfo.basesections.v2 import Activity, ActivityStep
-from nomad.metainfo import Datetime, MEnum, Quantity, SchemaPackage, SubSection
+from nomad.metainfo import (
+    Datetime,
+    MEnum,
+    Quantity,
+    SchemaPackage,
+    Section,
+    SubSection,
+)
 from nomad.metainfo.metainfo import SectionProxy
 from nomad.units import ureg
 
@@ -21,6 +29,29 @@ def combined_duration(durations, mode: str):
     return (max(seconds) if mode == 'parallel' else sum(seconds)) * ureg.second
 
 
+def shown(quantity) -> str:
+    """A quantity the way a person reads it: a temperature in °C, a fraction in %, a
+    time in the largest of h, min and s that counts it whole."""
+    if quantity.check('[temperature]'):
+        quantity = quantity.to('degC')
+    elif quantity.check('[time]'):
+        seconds = quantity.to('s').magnitude
+        for unit, size in (('h', 3600), ('min', 60)):
+            if seconds >= size and float(seconds / size).is_integer():
+                return f'{seconds / size:.4g} {unit}'
+        return f'{seconds:.4g} s'
+    elif quantity.dimensionless:
+        quantity = quantity.to('percent')
+    return f'{quantity.magnitude:.4g} {quantity.units:~P}'
+
+
+def words(class_name: str) -> str:
+    """`HoldRelativeHumidity` as `Hold relative humidity`; acronyms stay: `MPP tracking`."""
+    parts = re.findall(r'[A-Z]+(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|\d+', class_name)
+    text = ' '.join(part if part.isupper() else part.lower() for part in parts)
+    return text[:1].upper() + text[1:]
+
+
 class Instruction(ArchiveSection):
     """Something to be done, which is completed after its `estimated_duration`.
 
@@ -28,7 +59,15 @@ class Instruction(ArchiveSection):
     what it contains. Only a `Plan` stops its instructions early.
     """
 
+    m_def = Section(label_quantity='label')
+
     name = Quantity(type=str, description='A short name for this instruction.')
+
+    label = Quantity(
+        type=str,
+        description='How the instruction is listed: its `name`, or else what it does, '
+        'from what is written in it. Derived.',
+    )
 
     description = Quantity(
         type=str, description='Anything else worth saying about this instruction.'
@@ -54,6 +93,12 @@ class Instruction(ArchiveSection):
                 f'{self.name or "<unnamed>"} writes an `estimated_duration` of '
                 f'{self.estimated_duration.to("s").magnitude:g} s: it must be positive.'
             )
+        self.label = self.name or self.describe()
+
+    def describe(self) -> str:
+        """What the instruction does, in a few words. Only what is written counts, not
+        what `normalize` derives, so the label does not change when normalized again."""
+        return words(type(self).__name__)
 
 
 class SingleInstruction(Instruction):
@@ -90,6 +135,19 @@ class InstructionBlock(Instruction):
             )
         self.estimated_duration = self.derive_duration()
 
+    def describe(self) -> str:
+        count = len(self.sub_instructions)
+        parallel = (
+            ', in parallel' if self.sub_instruction_execution_mode == 'parallel' else ''
+        )
+        return (
+            f'{self.describe_repetition()} ({count} '
+            f'instruction{"" if count == 1 else "s"}{parallel})'
+        )
+
+    def describe_repetition(self) -> str:
+        return 'Run once'
+
     def one_iteration(self):
         """How long the sub-instructions take once; `None` if they never finish."""
         return combined_duration(
@@ -108,6 +166,9 @@ class RepeatingBlock(InstructionBlock):
     a counting one should. On its own it is not known to finish, so its
     `estimated_duration` is empty.
     """
+
+    def describe_repetition(self) -> str:
+        return 'Repeat indefinitely'
 
     def derive_duration(self):
         return None
@@ -134,6 +195,11 @@ class TimedRepeatingBlock(RepeatingBlock):
                 f'`repeat_duration`.'
             )
         super().normalize(archive, logger)
+
+    def describe_repetition(self) -> str:
+        if self.repeat_duration is None:
+            return 'Repeat'
+        return f'Repeat for {shown(self.repeat_duration)}'
 
     def derive_duration(self):
         return self.repeat_duration
@@ -180,6 +246,11 @@ class CountingRepeatingBlock(RepeatingBlock):
                 f'{name} counts its repetitions, but a sub-instruction never finishes, '
                 f'so it never finishes either.'
             )
+
+    def describe_repetition(self) -> str:
+        if self.repeat_n is None:
+            return 'Repeat'
+        return 'Run once' if self.repeat_n == 1 else f'Repeat {self.repeat_n} times'
 
     def derive_duration(self):
         one = self.one_iteration()

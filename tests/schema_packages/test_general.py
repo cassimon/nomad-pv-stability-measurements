@@ -168,3 +168,38 @@ def test_an_impossible_instruction_is_reported(normalized, log, section, reporte
 
     [error] = log.errors
     assert reported in error
+
+
+@pytest.mark.parametrize(
+    ('block', 'label'),
+    [
+        (InstructionBlock(sub_instructions=[single(60)]), 'Run once (1 instruction)'),
+        (
+            CountingRepeatingBlock(
+                repeat_n=3,
+                sub_instruction_execution_mode='parallel',
+                sub_instructions=[single(60), single(60)],
+            ),
+            'Repeat 3 times (2 instructions, in parallel)',
+        ),
+        (
+            TimedRepeatingBlock(
+                repeat_duration=43200 * ureg.second, sub_instructions=[single(60)]
+            ),
+            'Repeat for 12 h (1 instruction)',
+        ),
+        (
+            IndefiniteRepeatingBlock(sub_instructions=[single(60)]),
+            'Repeat indefinitely (1 instruction)',
+        ),
+        # A name, where one is written, is the label.
+        (
+            IndefiniteRepeatingBlock(name='soak', sub_instructions=[single(60)]),
+            'soak',
+        ),
+    ],
+)
+def test_an_instruction_is_listed_by_its_name_or_by_what_it_does(
+    normalized, block, label
+):
+    assert normalized(block).label == label

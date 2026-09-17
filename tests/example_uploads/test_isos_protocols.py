@@ -371,13 +371,23 @@ def protocol_file(normalized, log):
     return run
 
 
+def without_labels(value):
+    """An archive without the instructions' `label`s: they are derived for display, from
+    what the rows below already compare, and are not part of the standard."""
+    if isinstance(value, dict):
+        return {k: without_labels(v) for k, v in value.items() if k != 'label'}
+    if isinstance(value, list):
+        return [without_labels(each) for each in value]
+    return value
+
+
 def test_every_variant_has_an_expectation_and_every_expectation_a_variant():
     assert sorted(SHIPPED) == sorted(EXPECTED)
 
 
 @pytest.mark.parametrize('key', sorted(EXPECTED))
 def test_a_shipped_protocol_is_exactly_its_row_of_the_table(key, protocol_file):
-    archive = protocol_file(key).m_to_dict()
+    archive = without_labels(protocol_file(key).m_to_dict())
     notes = archive.pop('notes')
 
     assert archive == EXPECTED[key]

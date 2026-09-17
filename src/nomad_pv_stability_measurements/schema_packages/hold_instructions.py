@@ -190,5 +190,8 @@ class BalanceGas(MonitorControlInstruction):
         'like `HoldIrradiance.spectrum`.',
     )
 
+    def describe_values(self) -> str:
+        return f' {self.gas}' if self.gas else ''
+
 
 m_package.__init_metainfo__()

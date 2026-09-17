@@ -3,7 +3,11 @@ from math import isclose
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage
 
-from nomad_pv_stability_measurements.schema_packages.general import SingleInstruction
+from nomad_pv_stability_measurements.schema_packages.general import (
+    SingleInstruction,
+    shown,
+    words,
+)
 
 m_package = SchemaPackage()
 
@@ -12,6 +16,10 @@ class MonitorControlInstruction(SingleInstruction):
     """
     One quantity, monitored, controlled, or both.
     """
+
+    #: The start of a class name that says the kind, not the quantity: `Hold` in
+    #: `HoldTemperature`. Empty for a class that names what it does as a whole.
+    kind = ''
 
     monitor = Quantity(
         type=bool,
@@ -40,6 +48,25 @@ class MonitorControlInstruction(SingleInstruction):
         'on the fresh device. Free text here; an instruction class that has such points narrows '
         'it to the ones it takes (Design.md §20.3).',
     )
+
+    def describe(self) -> str:
+        """`Hold temperature 65 °C`; `Monitor relative humidity` where the quantity is
+        only logged."""
+        name = type(self).__name__
+        if not self.kind or not name.startswith(self.kind):
+            return words(name) + self.describe_values()
+        verb = 'Monitor' if self.monitor and not self.control else 'Hold'
+        if self.kind == 'Ramp' and verb == 'Hold':
+            verb = 'Ramp'
+        quantity = words(name.removeprefix(self.kind))
+        quantity = quantity if quantity[:2].isupper() else quantity.lower()
+        return f'{verb} {quantity}{self.describe_values()}'
+
+    def describe_values(self) -> str:
+        """What follows the quantity: its value, point or bounds."""
+        if self.reference_point is not None:
+            return f' at {self.reference_point}'
+        return ''
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
@@ -72,6 +99,12 @@ class HoldInstruction(MonitorControlInstruction):
         '`4 K`, never `4 °C` (§17.4). Each instruction class declares it in its own unit.',
     )
 
+    kind = 'Hold'
+
+    def describe_values(self) -> str:
+        value = f' {shown(self.set_point)}' if self.set_point is not None else ''
+        return value + super().describe_values() + held_for(self)
+
 
 class HoldBelowInstruction(MonitorControlInstruction):
     """One value, kept under a bound for as long as the instruction lasts."""
@@ -82,6 +115,13 @@ class HoldBelowInstruction(MonitorControlInstruction):
         'unit.',
     )
 
+    kind = 'HoldBelow'
+
+    def describe_values(self) -> str:
+        if self.upper_bound is None:
+            return held_for(self)
+        return f' below {shown(self.upper_bound)}' + held_for(self)
+
 
 class HoldBetweenInstruction(HoldBelowInstruction):
     """One value, kept between two bounds for as long as the instruction lasts."""
@@ -91,6 +131,16 @@ class HoldBetweenInstruction(HoldBelowInstruction):
         description='The least the value may be. Each instruction class declares it in its own '
         'unit.',
     )
+
+    kind = 'HoldBetween'
+
+    def describe_values(self) -> str:
+        if self.lower_bound is None or self.upper_bound is None:
+            return held_for(self)
+        return (
+            f' between {shown(self.lower_bound)} and {shown(self.upper_bound)}'
+            + held_for(self)
+        )
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
@@ -137,6 +187,17 @@ class RampInstruction(MonitorControlInstruction):
         'or cycles back to `start_point` by a path the protocol does not state ',
     )
 
+    kind = 'Ramp'
+
+    def describe_values(self) -> str:
+        """The ends, and how it goes on — never the duration, which may be derived."""
+        values = ''
+        if self.start_point is not None and self.end_point is not None:
+            values = f' {shown(self.start_point)} → {shown(self.end_point)}'
+        if self.end_of_ramp_behavior != 'hold':
+            values += f' ({self.end_of_ramp_behavior})'
+        return values
+
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
         if type(self) in ABSTRACT_INSTRUCTIONS:
@@ -177,6 +238,13 @@ class RampInstruction(MonitorControlInstruction):
             f'{self.estimated_duration.to("s").magnitude:g} s make it '
             f'{derived.magnitude:g}.'
         )
+
+
+def held_for(instruction) -> str:
+    """` for 12 h`, where a hold writes its duration; a hold never derives one."""
+    if instruction.estimated_duration is None:
+        return ''
+    return f' for {shown(instruction.estimated_duration)}'
 
 
 #: The bases that name no quantity: writing one directly is an authoring mistake.

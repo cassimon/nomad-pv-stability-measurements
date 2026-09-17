@@ -217,3 +217,47 @@ def test_dark_is_exactly_no_light():
 
     assert dark.value.magnitude == 0
     assert dark.tolerance is None
+
+
+@pytest.mark.parametrize(
+    ('instruction', 'label'),
+    [
+        (
+            HoldTemperature(control=True, set_point=338.15 * K),
+            'Hold temperature 65 °C',
+        ),
+        (
+            HoldRelativeHumidity(control=False, monitor=True),
+            'Monitor relative humidity',
+        ),
+        (
+            HoldIrradiance(
+                set_point=0 * ureg('W/m^2'), estimated_duration=4800 * ureg.s
+            ),
+            'Hold irradiance 0 W/m² for 80 min',
+        ),
+        (HoldVoltage(reference_point='near V_MPP'), 'Hold voltage at near V_MPP'),
+        (
+            HoldBelowRelativeHumidity(upper_bound=0.55 * ureg.dimensionless),
+            'Hold relative humidity below 55 %',
+        ),
+        (
+            HoldBetweenIrradiance(
+                lower_bound=800 * ureg('W/m^2'), upper_bound=1000 * ureg('W/m^2')
+            ),
+            'Hold irradiance between 800 W/m² and 1000 W/m²',
+        ),
+        (
+            RampTemperature(
+                start_point=296.15 * K,
+                end_point=338.15 * K,
+                end_of_ramp_behavior='triangle',
+            ),
+            'Ramp temperature 23 °C → 65 °C (triangle)',
+        ),
+        (MPPTracking(control=True), 'MPP tracking'),
+        (BalanceGas(gas='N2'), 'Balance gas N2'),
+    ],
+)
+def test_an_instruction_is_listed_by_what_it_does(normalized, instruction, label):
+    assert normalized(instruction).label == label

@@ -282,7 +282,7 @@ def _repeat(value, cls: type, where: str, problems: list, bare: dict) -> None:
         )
     elif value == REPEAT_INDEFINITELY and issubclass(cls, CountingRepeatingBlock):
         message = 'a CountingRepeatingBlock counts: write a number of times.'
-    elif _is_count(value) and issubclass(cls, IndefiniteRepeatingBlock):
+    elif _is_count(value) and cls is IndefiniteRepeatingBlock:
         message = (
             'an IndefiniteRepeatingBlock never finishes: write no number of times.'
         )

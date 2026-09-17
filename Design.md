@@ -3375,3 +3375,23 @@ Authoring: `repeat: 5` is a counting block, `repeat_for: 12 h` a timed one, and 
 indefinitely` — or no `repeat` at all — an indefinite one. With an `m_def`, a count on an
 indefinite block and `indefinitely` on a counting block are reported. The ISOS routines are
 `IndefiniteRepeatingBlock`s; `tests/data/tree.archive.yaml` follows.
+
+## 28. Instructions are listed by what they do
+
+NOMAD's GUIs list a repeating sub-section's items by the section's `label_quantity`, else by a
+`label`, `name`, `type` or `id` quantity (GUI v2; the legacy GUI skips `label`), else by index. No
+GUI draws a sub-section tree; items are navigated one level at a time.
+
+`Instruction` has a derived `label`, and `Section(label_quantity='label')`: its `name` where one is
+written, else `describe()` — `Hold temperature 65 °C`, `Monitor relative humidity`,
+`Hold irradiance 0 W/m² for 80 min`, `Ramp temperature 23 °C → 65 °C (cycle)`, `MPP tracking`,
+`Repeat indefinitely (2 instructions)`. Values are shown in °C, %, and the largest of h/min/s that
+counts a time whole.
+
+A label reads only what is written, never what `normalize` derives (a ramp's duration), so a second
+normalize gives the same label. The ISOS table ignores labels; `test_general` and
+`test_instructions` pin them.
+
+`IndefiniteRepeatingBlock` is now an alias of `RepeatingBlock` (edited in `general.py`): the
+translator writes `m_def: …general.RepeatingBlock` for an indefinite block, compares the class
+exactly when a count is written, and `tests/data/tree.archive.yaml` follows.
