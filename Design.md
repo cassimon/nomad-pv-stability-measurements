@@ -3228,15 +3228,18 @@ Plan (EntryData)                name, description, estimated_duration, instructi
 and the routine start together, so the routine is not left waiting behind them. With settings in
 every file, a protocol claims no length unless it writes `duration`.
 
-The PV checks stay out of `general.py`: `StabilityProtocol.normalize` runs them over its own
-instructions and every block inside it (`utils.check_instructions`):
+**No cross-instruction checks.** R4 (two instructions on one quantity at once), R5 (an
+instruction that never runs) and the level-3 MPP rule are dropped, with `utils.py`. They
+recovered from class names what the structure does not say, which is a modelling gap, not a
+check to keep. A contradiction or a dead instruction now loads silently; if it matters, a
+higher specialization can rule it out structurally — e.g. one non-repeating slot per quantity in
+a parallel block, which would also close the MPP/open-circuit gap. What stays is what one section
+can check of itself: both ends of a ramp, the order of two bounds, a positive duration, a block
+with contents, `repeat_n` ≥ 1, a latitude within ±90°.
 
-- **R4** — two instructions on one quantity in a `parallel` run overlap (error). One after
-  another they never do.
-- **R5** — in a `sequential` run, an instruction after one that never finishes, or after a timed
-  block's `repeat_duration` is used up, never runs (warning).
-- **R6 is gone.** Nothing is shortened to fit a block: a block's length follows from its
-  instructions, and stopping is the plan's or a timed block's job.
+**Tests encode the specification, not the implementation**: one test per rule a reader of the
+schema or of `.stability.yaml` relies on, tables as parametrized cases, messages matched by their
+telling fragment only. The ISOS table (§16, §18) stays whole.
 
 ### 23.3 Authoring
 
@@ -3269,4 +3272,4 @@ for `InstructionBlock` and its two repeating children; `PlannedMonitorControlSte
 `PlannedProcess`; `location` is the protocol's own quantity now. No alias maps the old class
 paths — nothing was published in them. The 109 ISOS files write `repeat: indefinitely`.
 
-**Status: built.** 192 files, 814 tests, ruff clean.
+**Status: built.** 192 files, 52 tests (320 cases, 192 of them the ISOS table), ruff clean.

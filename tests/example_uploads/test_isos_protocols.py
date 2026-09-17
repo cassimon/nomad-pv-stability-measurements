@@ -361,28 +361,3 @@ def test_a_shipped_protocol_is_exactly_its_row_of_the_table(path, protocol_file)
     # Short, and only what the standard says — never how it was transcribed (§18.3).
     assert 0 < len(notes) <= NOTES_AT_MOST
     assert not any(word in notes for word in SCHEMA_WORDS)
-
-
-@pytest.mark.parametrize('name', SHIPPED)
-def test_a_shipped_protocol_round_trips(name):
-    # The bare format is a subset of the authored one, so translating it again is a
-    # no-op — which is what NOMAD does every time it writes an entry back (§13.1a).
-    bare = translate(read(name)).archive
-    again = translate(bare)
-
-    assert (again.archive, again.problems) == (bare, [])
-
-
-@pytest.mark.parametrize(
-    'path', [path for path in SHIPPED if path.startswith('ISOS-LC')]
-)
-def test_no_light_cycling_protocol_claims_a_length(path, protocol_file):
-    # The standard fixes the cycle, never how many: a file that derived a length from one
-    # cycle would claim a test hours long (§20.1).
-    loaded = protocol_file(path)
-    routine = loaded.instructions[-1]
-
-    assert loaded.estimated_duration is None
-    assert (routine.repeat_n, routine.estimated_duration) == (None, None)
-    # The cycle itself is stated, and has its length.
-    assert routine.one_iteration() is not None

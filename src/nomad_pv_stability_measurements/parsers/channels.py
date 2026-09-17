@@ -67,7 +67,7 @@ VARIABLE_INSTRUCTIONS = {
 VALUE_FIELDS = {BalanceGas: 'gas'}
 
 #: The same variables when the instruction ramps instead, chosen by an authored `ramp:`
-#: (§15.14). One key, two kinds — which is what R4 reads as one axis (§15.11).
+#: (§15.14). One key, two kinds (§15.11).
 RAMP_INSTRUCTIONS = {
     'temperature': RampTemperature,
     'irradiance': RampIrradiance,

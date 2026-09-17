@@ -5,49 +5,18 @@ from nomad.datamodel.data import ArchiveSection
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
 
 # The protocol's instructions name these classes; importing them registers them with NOMAD.
-from nomad_pv_stability_measurements.schema_packages.general import (
-    InstructionBlock,
-    Plan,
-    TimedRepeatingBlock,
+from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
+    hold_below_instructions,
+    hold_instructions,
+    mpp_instructions,
+    ramp_instructions,
 )
-from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
-    HoldBetweenIrradiance,
-)
-from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
-    HoldCurrent,
-    HoldIrradiance,
-    HoldResistance,
-    HoldVoltage,
-)
-from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
-    MPPTracking,
-    VOCTracking,
-)
-from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
-    RampCurrent,
-    RampIrradiance,
-    RampResistance,
-    RampVoltage,
-)
-from nomad_pv_stability_measurements.schema_packages.utils import check_instructions
+from nomad_pv_stability_measurements.schema_packages.general import Plan
 
 m_package = SchemaPackage()
 
 #: An ISOS designation, its level the last digit: `ISOS-L-3`, `ISOS-LC-3I` (§20.7).
 _ISOS_DESIGNATION = re.compile(r'^ISOS-[A-Z]+-(?P<level>[1-3])I?$')
-#: ISOS makes MPP tracking mandatory at this level, under light (p.37).
-_MPP_MANDATORY_LEVEL = 3
-#: The instructions that set the electrical load, whichever way.
-_LOAD_INSTRUCTIONS = (
-    MPPTracking,
-    VOCTracking,
-    HoldVoltage,
-    HoldCurrent,
-    HoldResistance,
-    RampVoltage,
-    RampCurrent,
-    RampResistance,
-)
 
 
 class GeoLocation(ArchiveSection):
@@ -148,67 +117,9 @@ class StabilityProtocol(Plan):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        self.check_instructions(logger)
         designation = _ISOS_DESIGNATION.match(self.standard or '')
-        if designation is not None:
-            if self.standard_level is None:
-                self.standard_level = int(designation.group('level'))
-            self.report_a_level_3_load_without_mpp_tracking(logger)
-
-    def check_instructions(self, logger):
-        """R4 and R5 over the protocol's own instructions and over every block's."""
-        check_instructions(
-            self.instructions,
-            self.instruction_execution_mode,
-            self.estimated_duration,
-            self.name or '<unnamed>',
-            logger,
-        )
-        for block in self.m_all_contents():
-            if not isinstance(block, InstructionBlock):
-                continue
-            stop = (
-                block.repeat_duration
-                if isinstance(block, TimedRepeatingBlock)
-                else None
-            )
-            check_instructions(
-                block.sub_instructions,
-                block.sub_instruction_execution_mode,
-                stop,
-                block.name or '<unnamed>',
-                logger,
-            )
-
-    def report_a_level_3_load_without_mpp_tracking(self, logger):
-        """ "we indicate MPP tracking as mandatory only at the third, most advanced level
-        of ISOS protocols" (Khenkin et al. 2020, p.37) — under light, since a dark test has
-        no maximum power point to track. Reported, never repaired (D13a, §20.7)."""
-        if self.standard_level != _MPP_MANDATORY_LEVEL:
-            return
-        instructions = list(self.m_all_contents(depth_first=True))
-        lit = any(
-            isinstance(each, RampIrradiance)
-            or (
-                isinstance(each, HoldIrradiance)
-                and (each.set_point is None or each.set_point.magnitude != 0)
-            )
-            or (
-                isinstance(each, HoldBetweenIrradiance)
-                and (each.upper_bound is None or each.upper_bound.magnitude != 0)
-            )
-            for each in instructions
-        )
-        if not lit:
-            return
-        loads = [each for each in instructions if isinstance(each, _LOAD_INSTRUCTIONS)]
-        others = sorted({type(each).__name__ for each in loads} - {'MPPTracking'})
-        if others or not loads:
-            found = ', '.join(others) if others else 'no electrical load at all'
-            logger.error(
-                f'{self.standard} is level {self.standard_level} under light, where MPP '
-                f'tracking is mandatory, but it writes {found}.'
-            )
+        if designation is not None and self.standard_level is None:
+            self.standard_level = int(designation.group('level'))
 
 
 m_package.__init_metainfo__()

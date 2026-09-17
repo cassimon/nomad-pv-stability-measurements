@@ -165,8 +165,8 @@ class Plan(EntryData):
     estimated_duration = Quantity(
         type=np.float64,
         unit='s',
-        description='How long this plan lasts. Can be used to stop its instructions before they finish. ' \
-        'Empty means the plan has the potential to be executed indefinitely (end defined elsewhere' \
+        description='How long this plan lasts. Can be used to stop its instructions before they finish. '
+        'Empty means the plan has the potential to be executed indefinitely (end defined elsewhere'
         ').',
     )
 

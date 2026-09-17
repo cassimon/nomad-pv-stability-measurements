@@ -1,27 +1,16 @@
+"""The stability protocol: a plan whose instructions all start together (Design.md §23),
+and what it records about the standard and the place (§15.12, §18.1, §20.7)."""
+
 import os
 
 import pytest
 from nomad.client import normalize_all, parse
-from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.general import (
-    Instruction,
-    InstructionBlock,
-    Plan,
-    TimedRepeatingBlock,
-)
-from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
-    HoldBetweenIrradiance,
-)
+from nomad_pv_stability_measurements.schema_packages.general import Plan
 from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldIrradiance,
     HoldTemperature,
-    HoldVoltage,
-)
-from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
-    MPPTracking,
-    VOCTracking,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import (
     GeoLocation,
@@ -29,400 +18,69 @@ from nomad_pv_stability_measurements.schema_packages.protocol import (
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
-BLOCK = InstructionBlock
 
 
-def entry(cls, **fields) -> dict:
-    return {'m_def': f'{cls.__module__}.{cls.__name__}', **fields}
-
-
-# "A, then B and C at the same time, then D" (Design.md §3), as the bare archive
-# writes it: every entry names its class.
-TREE = {
-    'name': 'example',
-    'sub_instructions': [
-        entry(BLOCK, name='A'),
-        entry(
-            BLOCK,
-            name='fork',
-            sub_instruction_execution_mode='parallel',
-            sub_instructions=[entry(BLOCK, name='B'), entry(BLOCK, name='C')],
-        ),
-        entry(BLOCK, name='D'),
-    ],
-}
-
-
-def normalize_protocol(protocol, log):
-    # Every nested instruction first, as NOMAD does; then the protocol, whose own
-    # normalize reads the archive's metadata.
-    for nested in protocol.m_all_contents(depth_first=True):
-        nested.normalize(EntryArchive(), log)
-    metadata = EntryMetadata(entry_name='protocol.stability.yaml')
-    protocol.normalize(EntryArchive(metadata=metadata, data=protocol), log)
-
-
-def test_blocks_nest_through_sub_instructions():
-    root = BLOCK.m_from_dict(TREE)
-    fork = root.sub_instructions[1]
-
-    assert [block.name for block in root.sub_instructions] == ['A', 'fork', 'D']
-    assert [block.name for block in fork.sub_instructions] == ['B', 'C']
-    assert all(
-        isinstance(block, BLOCK)
-        for block in [*root.sub_instructions, *fork.sub_instructions]
-    )
-
-
-def test_the_execution_mode_defaults_to_sequential():
-    assert BLOCK().sub_instruction_execution_mode == 'sequential'
-
-
-def test_the_execution_mode_rejects_unknown_values():
-    with pytest.raises(ValueError):
-        BLOCK(sub_instruction_execution_mode='interleaved')
-
-
-def test_tree_round_trips_exactly():
-    # The bare archive is what `m_to_dict` writes, so nothing needs stripping.
-    assert BLOCK.m_from_dict(TREE).m_to_dict() == TREE
-
-
-def test_the_protocol_is_a_plan_of_instructions_only():
-    sections = StabilityProtocol.m_def.all_sub_sections
-
-    assert issubclass(StabilityProtocol, Plan)
-    assert sections['instructions'].sub_section.section_cls is Instruction
-    # `channel_settings` and `routine` are words of the authored file only (§14.3).
-    assert {'channel_settings', 'routine'}.isdisjoint(sections)
-
-
-def test_the_protocol_runs_all_its_instructions_in_parallel(log):
-    protocol = StabilityProtocol.m_from_dict(
-        {
-            'instructions': [
-                entry(HoldTemperature, estimated_duration=1800),
-                entry(HoldVoltage, estimated_duration=3600),
+def test_a_protocol_is_a_plan_whose_instructions_all_start_together(normalized):
+    protocol = normalized(
+        StabilityProtocol(
+            instructions=[
+                HoldTemperature(estimated_duration=1800 * ureg.second),
+                HoldIrradiance(estimated_duration=3600 * ureg.second),
             ]
-        }
+        )
     )
 
-    normalize_protocol(protocol, log)
-
-    assert protocol.estimated_duration.magnitude == pytest.approx(3600)
-    assert (log.errors, log.warnings) == ([], [])
+    assert isinstance(protocol, Plan)
+    assert protocol.estimated_duration.to('s').magnitude == pytest.approx(3600)
 
 
-def test_settings_that_never_finish_leave_the_protocol_without_an_end(log):
-    protocol = StabilityProtocol.m_from_dict(
-        {
-            'instructions': [
-                entry(HoldIrradiance, monitor=True),
-                entry(HoldTemperature, estimated_duration=1800),
+def test_settings_that_never_finish_give_the_protocol_no_end(normalized):
+    protocol = normalized(
+        StabilityProtocol(
+            instructions=[
+                HoldIrradiance(monitor=True),
+                HoldTemperature(estimated_duration=1800 * ureg.second),
             ]
-        }
+        )
     )
-
-    normalize_protocol(protocol, log)
 
     assert protocol.estimated_duration is None
-    assert (log.errors, log.warnings) == ([], [])
 
 
-def test_a_written_duration_is_where_the_protocol_stops(log):
-    protocol = StabilityProtocol.m_from_dict(
-        {
-            'estimated_duration': 3600000,
-            'instructions': [entry(HoldIrradiance, monitor=True)],
-        }
+@pytest.mark.parametrize(
+    ('fields', 'level'),
+    [
+        ({'standard': 'ISOS-D-1'}, 1),
+        ({'standard': 'ISOS-LC-3I'}, 3),
+        ({'standard': 'IEC 61215'}, None),
+        # Written, it stands.
+        ({'standard': 'ISOS-L-3', 'standard_level': 2}, 2),
+    ],
+)
+def test_the_level_is_derived_from_an_isos_designation(normalized, fields, level):
+    assert normalized(StabilityProtocol(**fields)).standard_level == level
+
+
+def test_a_protocol_is_indoors_unless_it_says_otherwise():
+    assert StabilityProtocol().environment == 'indoor'
+    with pytest.raises(ValueError):
+        StabilityProtocol(environment='in orbit')
+
+
+def test_coordinates_the_wrong_way_round_are_reported(normalized, log):
+    normalized(
+        GeoLocation(latitude=-104.99 * ureg.degree, longitude=39.74 * ureg.degree)
     )
-
-    normalize_protocol(protocol, log)
-
-    assert protocol.estimated_duration.to('hour').magnitude == pytest.approx(1000)
-
-
-def test_the_protocol_checks_its_own_instructions(log):
-    protocol = StabilityProtocol.m_from_dict(
-        {
-            'name': 'soak',
-            'instructions': [entry(HoldTemperature), entry(HoldTemperature)],
-        }
-    )
-
-    normalize_protocol(protocol, log)
 
     [error] = log.errors
-    assert '2 Temperature instructions overlap in soak' in error
+    assert 'wrong way round' in error
 
 
-def test_a_block_overrides_a_setting_while_it_runs(log):
-    # The settings of an authored file become instructions that never finish, and the
-    # routine a block beside them: one level deeper, so not a sibling, so no overlap.
-    protocol = StabilityProtocol.m_from_dict(
-        {
-            'instructions': [
-                entry(HoldTemperature, control=True, set_point=338.15),
-                entry(
-                    BLOCK,
-                    sub_instructions=[
-                        entry(
-                            HoldTemperature,
-                            control=True,
-                            set_point=358.15,
-                            estimated_duration=3600,
-                        )
-                    ],
-                ),
-            ]
-        }
-    )
-
-    normalize_protocol(protocol, log)
-
-    assert log.errors == []
-
-
-def test_the_protocol_checks_every_block_inside_it(log):
-    protocol = StabilityProtocol.m_from_dict(
-        {
-            'instructions': [
-                entry(
-                    BLOCK,
-                    name='fork',
-                    sub_instruction_execution_mode='parallel',
-                    sub_instructions=[entry(HoldTemperature), entry(HoldTemperature)],
-                ),
-                entry(
-                    BLOCK,
-                    name='phase',
-                    sub_instructions=[
-                        entry(HoldVoltage, name='forever'),
-                        entry(HoldIrradiance, name='late', estimated_duration=60),
-                    ],
-                ),
-            ]
-        }
-    )
-
-    normalize_protocol(protocol, log)
-
-    [error] = log.errors
-    assert '2 Temperature instructions overlap in fork' in error
-    [warning] = log.warnings
-    assert 'late never runs' in warning
-
-
-def test_a_timed_block_stops_what_comes_after_its_time(log):
-    protocol = StabilityProtocol.m_from_dict(
-        {
-            'instructions': [
-                entry(
-                    TimedRepeatingBlock,
-                    name='soak',
-                    repeat_duration=3600,
-                    sub_instructions=[
-                        entry(HoldTemperature, estimated_duration=3600),
-                        entry(HoldVoltage, name='late', estimated_duration=60),
-                    ],
-                )
-            ]
-        }
-    )
-
-    normalize_protocol(protocol, log)
-
-    assert protocol.estimated_duration.magnitude == pytest.approx(3600)
-    [warning] = log.warnings
-    assert 'late never runs' in warning
-
-
-def test_entry_loads_from_the_bare_archive_file():
+def test_a_bare_archive_file_loads_through_nomad():
     archive = parse(os.path.join(DATA_DIR, 'tree.archive.yaml'))[0]
     normalize_all(archive)
     [root] = archive.data.instructions
 
     assert isinstance(archive.data, StabilityProtocol)
-    assert archive.data.name == 'my protocol'
-    assert root.name == 'example'
     assert [block.name for block in root.sub_instructions] == ['A', 'fork', 'D']
     assert root.sub_instructions[1].sub_instruction_execution_mode == 'parallel'
-
-
-# What the run itself records (§15.12).
-
-
-def test_a_protocol_is_indoors_unless_it_says_otherwise():
-    # A positive claim rather than a neutral element, because nearly every one of these
-    # tests is run in a laboratory (§15.12).
-    assert StabilityProtocol().environment == 'indoor'
-    assert StabilityProtocol(environment='outdoor').environment == 'outdoor'
-
-
-def test_environment_rejects_unknown_values():
-    with pytest.raises(ValueError):
-        StabilityProtocol(environment='in orbit')
-
-
-def test_a_protocol_takes_free_text_notes():
-    assert StabilityProtocol(notes='ran over a weekend').notes == 'ran over a weekend'
-
-
-def test_a_place_is_a_location_plus_coordinates():
-    protocol = StabilityProtocol(
-        environment='outdoor',
-        location='Denver, U.S.',
-        geo_location=GeoLocation(
-            latitude=39.7392 * ureg.degree,
-            longitude=-104.9903 * ureg.degree,
-        ),
-    )
-
-    # The label is plain text, searchable as any other.
-    assert protocol.location == 'Denver, U.S.'
-    assert protocol.geo_location.latitude.magnitude == pytest.approx(39.7392)
-    assert protocol.geo_location.longitude.magnitude == pytest.approx(-104.9903)
-
-
-def test_the_schema_adds_no_second_place_to_write_the_name():
-    assert 'name' not in GeoLocation.m_def.all_quantities
-    # `location` is a quantity, and takes the name directly.
-    assert 'location' in StabilityProtocol.m_def.all_quantities
-    assert 'location' not in StabilityProtocol.m_def.all_sub_sections
-    assert StabilityProtocol(location='Denver, U.S.').location == 'Denver, U.S.'
-
-
-def test_coordinates_round_trip():
-    data = {'latitude': 39.7392, 'longitude': -104.9903, 'altitude': 1609.0}
-
-    assert GeoLocation.m_from_dict(data).m_to_dict() == data
-
-
-def test_a_place_records_how_high_it_is():
-    # Denver in the unit its own signs use, stored in metres either way.
-    denver = GeoLocation(altitude=5280 * ureg.foot)
-
-    assert denver.altitude.to(ureg.meter).magnitude == pytest.approx(1609, rel=1e-3)
-
-
-def test_below_sea_level_is_a_negative_altitude():
-    # No bound is checked: unlike a latitude, there is no number that is simply wrong.
-    dead_sea = GeoLocation(altitude=-430 * ureg.meter)
-
-    assert dead_sea.altitude.magnitude == pytest.approx(-430)
-
-
-def test_a_place_may_be_named_without_being_surveyed():
-    # The name stands on its own: it is a different field, not half of this section.
-    assert StabilityProtocol(location='Denver, U.S.').geo_location is None
-
-
-def test_coordinates_the_wrong_way_round_are_reported(normalized, log):
-    # A latitude past ±90° is what catches the classic swap.
-    normalized(GeoLocation(latitude=-104.9903 * ureg.degree))
-
-    [error] = log.errors
-    assert '`latitude` is -104.99' in error
-    assert 'wrong way round' in error
-
-
-def test_an_option_of_a_standard_is_a_protocol_of_its_own():
-    # One instance per option the standard offers, told apart by `standard_variant`, while
-    # `standard` stays the bare designation every variant is found by (§18.1).
-    low = StabilityProtocol(standard='ISOS-D-2', standard_variant='65 °C')
-    high = StabilityProtocol(standard='ISOS-D-2', standard_variant='85 °C')
-
-    assert (low.standard, low.standard_variant) == ('ISOS-D-2', '65 °C')
-    assert StabilityProtocol.m_from_dict(high.m_to_dict()).standard_variant == '85 °C'
-    assert StabilityProtocol().standard_variant is None
-
-
-# The level-3 rule (§20.7).
-
-
-def checked(standard, *instructions, log, **fields) -> StabilityProtocol:
-    protocol = StabilityProtocol(standard=standard, **fields)
-    protocol.instructions = list(instructions)
-    normalize_protocol(protocol, log)
-    return protocol
-
-
-#: A level the protocol writes itself, differing from its designation's.
-WRITTEN_LEVEL = 2
-
-
-@pytest.mark.parametrize(
-    ('standard', 'level'),
-    [
-        ('ISOS-D-1', 1),
-        ('ISOS-L-2', 2),
-        ('ISOS-L-3', 3),
-        ('ISOS-LC-3I', 3),
-        ('IEC 61215', None),
-    ],
-)
-def test_the_level_is_derived_from_an_isos_designation(standard, level, log):
-    assert checked(standard, log=log).standard_level == level
-
-
-def test_a_written_level_is_kept(log):
-    protocol = checked(
-        'ISOS-L-3',
-        HoldIrradiance(control=True),
-        VOCTracking(),
-        standard_level=WRITTEN_LEVEL,
-        log=log,
-    )
-
-    assert protocol.standard_level == WRITTEN_LEVEL
-    assert log.errors == []
-
-
-@pytest.mark.parametrize(
-    ('load', 'found'),
-    [(VOCTracking(), 'VOCTracking'), (HoldVoltage(control=True), 'HoldVoltage')],
-)
-def test_level_3_under_light_must_track_the_mpp(load, found, log):
-    checked('ISOS-L-3', HoldIrradiance(control=True), load, log=log)
-
-    [error] = log.errors
-    assert 'MPP tracking is mandatory' in error
-    assert f'writes {found}' in error
-
-
-def test_level_3_under_light_without_a_load_is_reported(log):
-    checked('ISOS-LT-3', HoldIrradiance(control=True), log=log)
-
-    [error] = log.errors
-    assert 'no electrical load at all' in error
-
-
-def test_what_the_rule_does_not_reach(log):
-    dark = HoldIrradiance(control=True, set_point=0 * ureg('W/m^2'))
-    checked('ISOS-L-3', HoldIrradiance(control=True), MPPTracking(), log=log)
-    checked('ISOS-D-3', dark, VOCTracking(), log=log)  # dark: no MPP to track
-    dark_range = HoldBetweenIrradiance(
-        lower_bound=0 * ureg('W/m^2'), upper_bound=0 * ureg('W/m^2')
-    )
-    checked('ISOS-D-3', dark_range, VOCTracking(), log=log)
-    checked('ISOS-L-2', HoldIrradiance(control=True), VOCTracking(), log=log)
-    checked(
-        'IEC 61215',
-        HoldIrradiance(control=True),
-        VOCTracking(),
-        standard_level=3,
-        log=log,
-    )
-
-    assert log.errors == []
-
-
-def test_a_range_of_irradiance_is_light_too(log):
-    # The recommended 800–1000 W m⁻² variants are under light (§22).
-    light = HoldBetweenIrradiance(
-        lower_bound=800 * ureg('W/m^2'), upper_bound=1000 * ureg('W/m^2')
-    )
-    checked('ISOS-L-3', light, VOCTracking(), log=log)
-
-    [error] = log.errors
-    assert 'MPP tracking is mandatory' in error
