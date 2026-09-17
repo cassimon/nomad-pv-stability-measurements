@@ -5,19 +5,36 @@ class, `hold` becomes its `setpoint`, and a named word becomes the value it stan
 """
 
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    BalanceGas,
     HoldBendRadius,
     HoldCurrent,
     HoldIrradiance,
     HoldOxygenFraction,
+    HoldPressure,
     HoldResistance,
     HoldStrain,
     HoldTemperature,
     HoldVoltage,
     HoldWaterVaporFraction,
 )
+from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+    MPPTracking,
+    VOCTracking,
+)
+from nomad_pv_stability_measurements.schema_packages.ramp_steps import (
+    RampBendRadius,
+    RampCurrent,
+    RampIrradiance,
+    RampOxygenFraction,
+    RampPressure,
+    RampResistance,
+    RampStrain,
+    RampTemperature,
+    RampVoltage,
+    RampWaterVaporFraction,
+)
 
-#: The step class each variable key names. The held kind: a ramp has no authored
-#: spelling yet (§15.11).
+#: The step class each variable key names when the step holds one value (§15.11).
 VARIABLE_STEPS = {
     'temperature': HoldTemperature,
     'irradiance': HoldIrradiance,
@@ -28,6 +45,27 @@ VARIABLE_STEPS = {
     'strain': HoldStrain,
     'water_vapor': HoldWaterVaporFraction,
     'oxygen': HoldOxygenFraction,
+    'pressure': HoldPressure,
+    'balance_gas': BalanceGas,
+}
+
+#: Where a written value lands for a class that does not keep it in `setpoint`. The
+#: balance is a gas's name, not a number, so it has a field of its own (§15.15).
+VALUE_FIELDS = {BalanceGas: 'gas'}
+
+#: The same variables when the step ramps instead, chosen by an authored `ramp:`
+#: (§15.14). One key, two kinds — which is what R4 reads as one axis (§15.11).
+RAMP_STEPS = {
+    'temperature': RampTemperature,
+    'irradiance': RampIrradiance,
+    'voltage': RampVoltage,
+    'current': RampCurrent,
+    'resistance': RampResistance,
+    'bend_radius': RampBendRadius,
+    'strain': RampStrain,
+    'water_vapor': RampWaterVaporFraction,
+    'oxygen': RampOxygenFraction,
+    'pressure': RampPressure,
 }
 
 #: The variables an authored `channel:` groups, in the order an author reads them.
@@ -36,20 +74,32 @@ CHANNEL_VARIABLES = {
     'irradiation': ('irradiance',),
     'electrical_load': ('voltage', 'current', 'resistance'),
     'mechanical': ('bend_radius', 'strain'),
-    'atmosphere': ('water_vapor', 'oxygen'),
+    'atmosphere': ('water_vapor', 'oxygen', 'pressure', 'balance_gas'),
 }
 
 #: Words a setpoint reads as a value, per step class. Never global: `dark` is an
 #: irradiance and means nothing on the temperature axis, or in a duration (D8a).
 NAMED_SETPOINTS = {HoldIrradiance: {'dark': 0.0}}
 
+#: Words that name a step outright, with no value to hold: the load is driven to a point
+#: the cell decides, not to a number the protocol writes (§15.13). `open_circuit` is what
+#: ISOS Table 1 writes for `voc`, and is read as the same step.
+TRACKED_POINTS = {
+    'mpp': MPPTracking,
+    'voc': VOCTracking,
+    'open_circuit': VOCTracking,
+}
+
+#: The channel those points belong to. Written on any other, they are reported, the way
+#: `dark` is refused off the irradiance axis (D8a).
+TRACKED_POINT_CHANNEL = 'electrical_load'
+
 #: Words the schema has no place for any more (§15), and why.
 RETIRED_WORDS = {
-    'open_circuit': 'the terminals left open have no setpoint to hold',
     'humidity': 'the schema records the water in the atmosphere absolutely, as a '
-    'volume ratio — write `water_vapor: 500 ppm` or `water_vapor: 2 %`. An authored '
-    '`%RH` is not translated, since it says nothing without the temperature it was '
-    'measured at',
+    'volume ratio — write `water_vapor: 500 ppm` or `water_vapor: 2 %`. A relative '
+    'humidity says nothing without the temperature it was read at, so write that '
+    'beside it: `water_vapor: {rh: 85 %, at: 65 °C}` (§15.16)',
 }
 
 _CHANNEL_COMMANDS = 'nomad_pv_stability_measurements.schema_packages.channel_commands'

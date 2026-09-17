@@ -17,17 +17,24 @@ from nomad_pv_stability_measurements.parsers.translate import (
     translate_section,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
+    BalanceGas,
     HoldBendRadius,
     HoldCurrent,
     HoldIrradiance,
     HoldOxygenFraction,
+    HoldPressure,
     HoldResistance,
     HoldStrain,
     HoldTemperature,
     HoldVoltage,
     HoldWaterVaporFraction,
 )
+from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+    MPPTracking,
+    VOCTracking,
+)
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
+from nomad_pv_stability_measurements.schema_packages.ramp_steps import RampTemperature
 from nomad_pv_stability_measurements.schema_packages.routine import (
     PlannedSubroutineStep,
 )
@@ -77,9 +84,8 @@ def magnitude(value, unit):
 def test_the_channels_file(load_file, log):
     *settings, soak = load_file('channels.stability.yaml').steps
 
-    # The one thing the example writes that the schema has no place for (§15.2).
-    [error] = log.errors
-    assert '`open_circuit` is not part of the schema any more' in error
+    # Every word the example writes now has a place in the schema (§15.13).
+    assert log.errors == []
 
     # Settings: conditions for the whole run — a unit-ful value, the sun, and a load
     # logged as a whole, one step per variable.
@@ -98,7 +104,7 @@ def test_the_channels_file(load_file, log):
 
     # The routine: a block after the settings, overriding them for its span.
     assert soak.name == 'soak'
-    hot, drift, dark, held = soak.steps
+    hot, drift, dark, held, opened = soak.steps
     assert magnitude(hot.setpoint, ureg.degC) == pytest.approx(85)
     # `500 h` is hours, not Planck's constant (§6 step 2).
     assert magnitude(hot.estimated_duration, ureg.hour) == pytest.approx(500)
@@ -108,9 +114,11 @@ def test_the_channels_file(load_file, log):
     assert magnitude(dark.setpoint, IRRADIANCE) == pytest.approx(0)
     assert isinstance(held, HoldVoltage)
     assert magnitude(held.setpoint, ureg.V) == pytest.approx(0.8)
+    # The load left at open circuit: a step of its own, asking for no number (§15.13).
+    assert (type(opened), opened.control) == (VOCTracking, True)
     # The routine wrote no duration of its own: it lasts as long as its episodes
-    # together, 500 h + 100 h + 100 h + 24 h (§15.4).
-    assert magnitude(soak.estimated_duration, ureg.hour) == pytest.approx(724)
+    # together, 500 h + 100 h + 100 h + 24 h + 1 h (§15.4).
+    assert magnitude(soak.estimated_duration, ureg.hour) == pytest.approx(725)
 
 
 def test_the_tree_file(load_file, log):
@@ -191,10 +199,37 @@ def test_the_isos_l_2_form(load, log):
     assert magnitude(step.sample_every, ureg.s) == pytest.approx(0.1)
 
 
-def test_open_circuit_is_reported_and_its_step_left_out(load, log):
+def test_open_circuit_loads_as_the_step_that_sits_there(load, log):
+    # The word the old format wrote still reads, and now reaches a step (§15.13).
     for authored in [{'hold': 'open_circuit'}, {'open_circuit': True}]:
-        assert load({'channel': 'electrical_load', **authored}) == []
-    assert ['open_circuit' in error for error in log.errors] == [True, True]
+        [step] = load({'channel': 'electrical_load', **authored})
+
+        assert (type(step), step.control) == (VOCTracking, True)
+    assert log.errors == []
+
+
+def test_mpp_loads_as_the_tracking_step(load, log):
+    [step] = load({'channel': 'electrical_load', 'hold': 'mpp', 'duration': '24 h'})
+
+    assert isinstance(step, MPPTracking)
+    assert magnitude(step.estimated_duration, ureg.hour) == pytest.approx(24)
+    assert log.errors == []
+
+
+def test_a_ramp_loads_as_the_ramping_step(load, log):
+    [step] = load(
+        {
+            'channel': 'temperature',
+            'ramp': {'from': '25 °C', 'to': '85 °C', 'rate': '2 K/min'},
+        }
+    )
+
+    assert isinstance(step, RampTemperature)
+    assert magnitude(step.start_point, ureg.degC) == pytest.approx(25)
+    assert magnitude(step.end_point, ureg.degC) == pytest.approx(85)
+    # 60 K at 2 K/min is half an hour, which the schema works out for itself (§15.11).
+    assert magnitude(step.estimated_duration, ureg.minute) == pytest.approx(30)
+    assert log.errors == []
 
 
 def test_a_named_setpoint_becomes_the_value_it_stands_for(load):
@@ -289,12 +324,35 @@ def test_a_variable_the_channel_does_not_have_is_reported(load, log):
 # The atmosphere, written as an absolute volume ratio (§15.7).
 
 
-def test_the_atmosphere_channel_logs_both_its_variables(load, log):
-    water, oxygen = load({'channel': 'atmosphere', 'monitor': True})
+def test_the_atmosphere_channel_logs_all_of_its_variables(load, log):
+    logged = load({'channel': 'atmosphere', 'monitor': True})
 
-    assert (type(water), type(oxygen)) == (HoldWaterVaporFraction, HoldOxygenFraction)
-    assert [step.monitor for step in (water, oxygen)] == [True, True]
+    assert [type(step) for step in logged] == [
+        HoldWaterVaporFraction,
+        HoldOxygenFraction,
+        HoldPressure,
+        BalanceGas,
+    ]
+    assert all(step.monitor for step in logged)
     assert log.errors == []
+
+
+def test_the_atmosphere_takes_a_pressure_and_a_balance_gas(load, log):
+    [pressure] = load({'channel': 'atmosphere', 'pressure': '1013.25 mbar'})
+    [balance] = load({'channel': 'atmosphere', 'balance_gas': 'N2'})
+
+    assert magnitude(pressure.setpoint, ureg.pascal) == pytest.approx(101325)
+    # The gas is a name, so it lands in `gas` — there is no setpoint to put it in.
+    assert balance.gas == 'N2'
+    assert 'setpoint' not in BalanceGas.m_def.all_quantities
+    assert log.errors == []
+
+
+def test_a_gas_does_not_ramp(load, log):
+    assert load({'channel': 'atmosphere', 'balance_gas': 'N2', 'ramp': {}}) == []
+
+    [error] = log.errors
+    assert 'does not ramp' in error
 
 
 def test_a_glovebox_figure_and_a_volume_percent_share_one_axis(load, log):
@@ -328,6 +386,17 @@ def test_humidity_is_reported_with_what_to_write_instead(load, log):
     ]:
         assert load(authored) == []
     assert ['water_vapor' in error for error in log.errors] == [True, True]
+
+
+def test_a_relative_humidity_loads_as_the_ratio_it_is(load, log):
+    # ISOS Table 1 prints `85%` at 65 °C; the archive keeps the absolute ratio (§15.16).
+    [step] = load(
+        {'channel': 'atmosphere', 'water_vapor': {'rh': '85 %', 'at': '65 °C'}}
+    )
+
+    assert isinstance(step, HoldWaterVaporFraction)
+    assert step.setpoint.magnitude == pytest.approx(0.2109, rel=1e-3)
+    assert log.errors == []
 
 
 def test_a_relative_humidity_value_on_the_water_axis_is_refused(load, log):

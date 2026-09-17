@@ -18,8 +18,14 @@ from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     HoldStrain,
     HoldTemperature,
     HoldVoltage,
+    HoldWaterVaporFraction,
+)
+from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+    MPPTracking,
+    VOCTracking,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
+from nomad_pv_stability_measurements.schema_packages.ramp_steps import RampTemperature
 from nomad_pv_stability_measurements.schema_packages.routine import (
     PlannedSubroutineStep,
 )
@@ -320,19 +326,105 @@ def test_a_channel_logged_as_a_whole_becomes_one_step_per_variable():
 
 
 @pytest.mark.parametrize(
-    ('authored', 'path'),
+    'authored',
     [
-        ({'hold': 'open_circuit'}, 'steps[0].hold'),
-        ({'open_circuit': True}, 'steps[0].open_circuit'),
+        {'hold': 'open_circuit'},
+        {'open_circuit': True},
+        {'hold': 'voc'},
+        {'voc': True},
     ],
 )
-def test_open_circuit_is_reported_and_its_step_left_out(authored, path):
+def test_open_circuit_names_the_step_that_sits_there(authored):
+    # ISOS writes `OC`; the schema calls it `VOCTracking`, and both words reach it.
     translation = steps({'channel': 'electrical_load', **authored})
 
+    assert translation.problems == []
+    assert translation.archive == {'steps': [entry(VOCTracking, control=True)]}
+
+
+def test_mpp_names_the_tracking_step():
+    translation = steps(
+        {'channel': 'electrical_load', 'hold': 'mpp', 'duration': '24 h'}
+    )
+
+    assert translation.problems == []
+    assert translation.archive == {
+        'steps': [entry(MPPTracking, estimated_duration=86400.0, control=True)]
+    }
+
+
+def test_a_point_written_on_another_channel_is_a_problem():
+    # Per channel, never global, exactly as `dark` is refused off irradiance (D8a).
+    translation = steps({'channel': 'temperature', 'hold': 'mpp'})
+
     assert translation.archive == {'steps': []}
+    assert 'not of `temperature`' in translation.problems[0].message
+
+
+def test_a_point_takes_no_setpoint_beside_it():
+    translation = steps({'channel': 'electrical_load', 'mpp': True, 'voltage': '0.8 V'})
+
+    assert translation.archive == {'steps': []}
+    assert 'takes no setpoint' in translation.problems[0].message
+
+
+# Ramps: `ramp:` picks the ramping kind of the variable (§15.14).
+
+
+def test_a_ramp_names_the_ramping_kind_of_the_variable():
+    translation = steps(
+        {
+            'channel': 'temperature',
+            'ramp': {'from': '25 °C', 'to': '85 °C', 'rate': '2 K/min'},
+            'duration': '1 h',
+        }
+    )
+
+    assert translation.problems == []
+    assert translation.archive == {
+        'steps': [
+            entry(
+                RampTemperature,
+                estimated_duration=3600.0,
+                start_point=pytest.approx(298.15),
+                end_point=pytest.approx(358.15),
+                ramp_rate=pytest.approx(2 / 60),
+                control=True,
+            )
+        ]
+    }
+
+
+def test_a_ramp_may_leave_its_rate_to_the_duration():
+    # D16 gives a ramp a rate or a duration; the schema derives the other (§15.11).
+    translation = steps(
+        {'channel': 'temperature', 'ramp': {'from': '25 °C', 'to': '85 °C'}}
+    )
+
+    assert translation.problems == []
+    assert 'ramp_rate' not in translation.archive['steps'][0]
+
+
+def test_a_step_ramps_or_holds_but_not_both():
+    translation = steps(
+        {'channel': 'temperature', 'hold': '65 °C', 'ramp': {'from': '25 °C'}}
+    )
+
+    assert translation.archive == {'steps': []}
+    assert 'ramps or holds' in translation.problems[0].message
+
+
+def test_an_unknown_key_inside_a_ramp_is_a_problem():
+    translation = steps(
+        {
+            'channel': 'temperature',
+            'ramp': {'from': '25 °C', 'to': '85 °C', 'slope': 3},
+        }
+    )
+
     [problem] = translation.problems
-    assert problem.path == path
-    assert 'not part of the schema any more' in problem.message
+    assert problem.path == 'steps[0].ramp.slope'
+    assert 'no part of a ramp' in problem.message
 
 
 def test_spectrum_is_a_plain_field_of_the_irradiance_step():
@@ -358,6 +450,36 @@ def test_spectrum_is_no_field_of_another_step():
 
     assert translation.problems[0].path == 'steps[0].spectrum'
     assert 'not a field of HoldTemperature' in translation.problems[0].message
+
+
+# A relative humidity, carrying the temperature it was read at (§15.16).
+
+
+def test_a_relative_humidity_is_read_with_the_temperature_beside_it():
+    translation = steps(
+        {'channel': 'atmosphere', 'water_vapor': {'rh': '85 %', 'at': '65 °C'}}
+    )
+
+    assert translation.problems == []
+    [step] = translation.archive['steps']
+    # The archive keeps the absolute ratio, exactly as §15.7 decided.
+    assert step['m_def'] == m_def(HoldWaterVaporFraction)
+    assert step['setpoint'] == pytest.approx(0.2109, rel=1e-3)
+
+
+def test_a_relative_humidity_needs_both_halves():
+    translation = steps({'channel': 'atmosphere', 'water_vapor': {'rh': '85 %'}})
+
+    assert translation.archive == {'steps': [entry(HoldWaterVaporFraction)]}
+    assert 'both halves' in translation.problems[0].message
+
+
+def test_only_the_water_axis_reads_a_section():
+    translation = steps(
+        {'channel': 'temperature', 'hold': {'rh': '85 %', 'at': '65 °C'}}
+    )
+
+    assert 'takes a value, not a section' in translation.problems[0].message
 
 
 # Keys NOMAD would drop without a word (§9).
@@ -445,8 +567,8 @@ def test_a_file_without_data_is_a_problem():
 @pytest.mark.parametrize(
     ('name', 'paths'),
     [
-        # The example keeps `open_circuit`, which has no place in the schema (§15.2).
-        ('channels', ['data.routine.commands[4].hold']),
+        # Every word the example writes now has a place in the schema (§15.13).
+        ('channels', []),
         ('tree', []),
     ],
 )

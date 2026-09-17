@@ -15,6 +15,7 @@ from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     HoldTemperature,
     HoldVoltage,
 )
+from nomad_pv_stability_measurements.schema_packages.mpp_steps import VOCTracking
 from nomad_pv_stability_measurements.schema_packages.ramp_steps import RampTemperature
 from nomad_pv_stability_measurements.schema_packages.routine import (
     PlannedMonitorControlStep,
@@ -328,6 +329,8 @@ def test_entry_loads_the_bare_archive_file():
         HoldTemperature,
         HoldIrradiance,
         HoldVoltage,
+        # The example's `open_circuit`, which now reaches a step of its own (§15.13).
+        VOCTracking,
     ]
     hot = soak.steps[0]
     assert hot.estimated_duration.to(ureg.hour).magnitude == pytest.approx(500)

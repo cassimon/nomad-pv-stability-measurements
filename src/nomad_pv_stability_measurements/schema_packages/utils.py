@@ -8,9 +8,15 @@ def _is_monitor_control(step) -> bool:
 
 def _axis_of(step) -> str:
     """The quantity a step speaks to. `HoldTemperature` and `RampTemperature` are two
-    kinds of step on one axis, and contradict each other exactly as two holds do; this
-    module imports no schema class, so it reads the name (§15.11)."""
-    return type(step).__name__.removeprefix('Hold').removeprefix('Ramp')
+    kinds of step on one axis, and contradict each other exactly as two holds do.
+
+    A class may name its axis outright — `axis = 'OperatingPoint'`, which is how
+    `MPPTracking` and `VOCTracking` say they are one thing (§15.13). Otherwise it is the
+    class name without its kind prefix. This module imports no schema class, so it reads
+    the class itself, never a type it would have to import (§15.11).
+    """
+    cls = type(step)
+    return getattr(cls, 'axis', cls.__name__.removeprefix('Hold').removeprefix('Ramp'))
 
 
 def report_overlapping_steps(steps, mode: str, where: str, logger) -> None:

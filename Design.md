@@ -1290,9 +1290,10 @@ src/nomad_pv_stability_measurements/
                       number at all (§15.1, §15.7, §15.10, §15.11)
     ramp_steps.py     one RampStep per quantity, each fixing the unit of both ends and
                       of the rate (RampTemperature, ...) (§15.11)
-    mpp_steps.py      the electrical load tracked rather than set: OperatingPoint (a
-                      point of the JV curve, mpp or voc), and the file a JV sweep and
-                      any tracker settings would go in (D17, §15.10)
+    mpp_steps.py      the electrical load driven to a point it finds rather than to a
+                      number: MPPTracking (with the perturbation settings an operator
+                      sets) and VOCTracking, both declaring axis = 'OperatingPoint';
+                      the file a JV sweep would go in (D17, §15.10, §15.13)
     utils.py          the checks a block and the protocol share: R4, R5, and R6, which
                       fits steps to their block's duration (§15.4); check_steps runs the
                       three over one iteration of a repeating block (§15.8)
@@ -1938,15 +1939,15 @@ row per ISOS protocol, meant to become one example `.stability.yaml` each. Check
 it stands, most of the table is already expressible — fixed temperature/irradiance setpoints,
 `dark` for "Light source: None", a bare monitored condition for "Ambient", and the ISOS-LC-1
 dark/light duty cycle (a `repeat` block alternating two `Irradiance` steps, §15.8). Four gaps
-remained, in the order worth closing them — **T1, T2 and T3 are built (§15.10, §15.11); T4 is
-decided but not built**:
+remained, in the order worth closing them. **All four are built** (§15.10–§15.16), schema and
+authored words alike, so every row of the table can now be written as a `.stability.yaml`:
 
 | | Gap | Blocks | Why |
 |---|---|---|---|
 | T1 ✅ | **MPP tracking** — no schema representation | ISOS-L (all 3), ISOS-O (all 3), ISOS-LC (all 3), ISOS-LT (all 3), half of ISOS-V-1 | `Voltage` / `Current` / `Resistance` (`activity_steps.py`) only take a fixed `setpoint`. `track: mpp` existed pre-§15 (§4.1) but was dropped with everything else in that rewrite, and nothing in §15 replaces it. Roughly half the table's rows use MPP as the load condition. |
 | T2 ✅ | **Open circuit as an explicit, nameable step** | ISOS-D (all 3), ISOS-T (all 3), negative branch of ISOS-V-1 | `open_circuit` is a **retired word** (`RETIRED_WORDS`, `channels.py`): writing it is reported and the step is left out. A protocol that deliberately holds OC is indistinguishable, on disk, from one that never mentions electrical load at all — there is no way to say "OC, on purpose." |
 | T3 ✅ | **Ramping / continuously varying setpoints** | ISOS-T-1/2/3 ("RT to 65/85 °C"), ISOS-LT-1/2/3 ("linear ramping between X and 65 °C") | Already named above as the one thing §15.8's `repeat` cannot reach: a value that varies *within* one step, not across repeated iterations. |
-| T4 | **Relative humidity as an authored quantity** | ISOS-D-3, V-3, L-3, T-3, LC-3, LT-1/2/3 | Collides on purpose with §15.7: `%RH`/`RH` are in `_REJECTED_UNITS` and hard-refused. None of these rows' humidity figures (`85 %`, `~50 %`, `< 55 %`) can be transcribed as the table states them today. Needs a decision, not just code: keep absolute-ratio-only and expect the figure converted before authoring, or accept `%RH` as a spelling the parser converts using a sibling temperature step — the second reopens part of §15.7. *Settled in review: the second, but **only as a compound value carrying its own temperature** — `rh: {value: 85 %, at: 65 °C}` — converted to the absolute ratio in the parser, before the schema sees it. §15.7's schema decision is then untouched (`HoldWaterVaporFraction.setpoint` stays the plain fraction), and nothing reaches across sibling steps to resolve one value: the temperature stays explicit and local, which is exactly what §15.7 objected a bare `%RH` had not. It also matches the table, where every RH figure is already written beside its own temperature. Parser work (`units.py`, `channels.py`); not built.* |
+| T4 ✅ | **Relative humidity as an authored quantity** | ISOS-D-3, V-3, L-3, T-3, LC-3, LT-1/2/3 | Collides on purpose with §15.7: `%RH`/`RH` are in `_REJECTED_UNITS` and hard-refused. None of these rows' humidity figures (`85 %`, `~50 %`, `< 55 %`) can be transcribed as the table states them today. Needs a decision, not just code: keep absolute-ratio-only and expect the figure converted before authoring, or accept `%RH` as a spelling the parser converts using a sibling temperature step — the second reopens part of §15.7. *Settled in review: the second, but **only as a compound value carrying its own temperature** — written `water_vapor: {rh: 85 %, at: 65 °C}` — converted to the absolute ratio in the parser, before the schema sees it. §15.7's schema decision is then untouched (`HoldWaterVaporFraction.setpoint` stays the plain fraction), and nothing reaches across sibling steps to resolve one value: the temperature stays explicit and local, which is exactly what §15.7 objected a bare `%RH` had not. It also matches the table, where every RH figure is already written beside its own temperature. Built in §15.16 (`units.py`, `translate.py`).* |
 
 Smaller, and not worth a schema change on its own: ISOS-LT-2/3's "controlled at 50 % beyond
 40 °C" is a control law conditioned on another channel's value — even with T3 and T4 solved, that
@@ -1956,14 +1957,18 @@ scope (tooling, not the protocol).
 
 ### 15.10 The operating point, the ramp, and the ambient quantities
 
-Closes T1, T2 and T3 of §15.9. T4 (relative humidity) is settled in review but not built — its
-row in §15.9 carries the decision.
+Closes T1, T2 and T3 of §15.9. T4 (relative humidity) follows in §15.16, which is the decision
+its row records.
 
 **`OperatingPoint`** (`mpp_steps.py`, §15.11) is the electrical load's other axis: *where on the JV
 curve the load sits*, when the point is found by the instrument instead of written as a number.
 `point` is `MEnum('mpp', 'voc')` — maximum power point tracking, and the open-circuit condition.
 
-**One class with an enum, not `MaximumPowerPoint` + `OpenCircuit`.** A load sits at exactly one
+**One class with an enum, not `MaximumPowerPoint` + `OpenCircuit`.** *Superseded by §15.13:
+`MPPTracking` and `VOCTracking` are two classes, named for what they do. The argument below was
+right about the contradiction but wrong about what forces one class — an axis can be **declared**
+instead of derived from the class name, so two classes still overlap as one.* A load sits at
+exactly one
 point at a time, so the two are values on one axis, and R4 then reports "MPP and Voc at once" as
 the contradiction it is — which two separate classes could never catch, since R4 groups siblings
 *by class* (§15.4). It is also the one step that names **no number**: `setpoint` and
@@ -2099,8 +2104,172 @@ property types` — the collision saying out loud that the field already exists.
 usual cause is the pair written the wrong way round — which a latitude of `-104.99` catches and
 nothing else would.
 
-**Left out:** any check tying `geo_location` to `environment`, since an indoor lab has a place on
+**Left out of §15.12:** any check tying `geo_location` to `environment`, since an indoor lab has a place on
 Earth too; and any bound on `altitude`. Latitude and longitude have hard mathematical ones, so
 breaking them is always a mistake and worth reporting; an altitude's plausible range is a
 judgement about where experiments happen rather than a fact about the number, and a rule
 guessing *"that looks like feet"* is exactly the physics §15.1 keeps out of the schema.
+
+### 15.13 The load's found points, as two classes — and a declared axis
+
+**Status: settled in review, built.** Supersedes §15.10's single `OperatingPoint` with a `point`
+enum.
+
+**`MPPTracking` and `VOCTracking`** (`mpp_steps.py`), named for what they do. `OperatingPoint`
+asked a reader to know an enum before the class said anything at all: the class named a
+*category*, and the fact lived in a value. Two classes put the fact in the name, which is what
+every other step here does — `HoldTemperature` does not carry a `quantity: temperature`.
+
+**The axis is declared, not derived.** §15.10 argued that one class was *forced*, because R4
+groups by axis and the axis was the class name minus its kind prefix — so two classes would be
+two axes and "MPP and Voc at once" would go unreported. That was right about the contradiction
+and wrong about the remedy: a class can simply **say** what axis it is on.
+
+```python
+class MPPTracking(PlannedMonitorControlStep):
+    axis = 'OperatingPoint'
+```
+
+`_axis_of` now reads `getattr(cls, 'axis', <class name minus Hold/Ramp>)`. **Verified:** a plain
+class attribute survives NOMAD's metaclass, is *not* registered as a metainfo property, and is
+readable off the class — so `utils.py` still imports no schema module (§15.4), and the derived
+name stays the default for every step that needs no exception.
+
+**A constant external bias is `HoldVoltage`** — settled in review, and no class of its own here.
+Reverse bias included: `-1.2 V` is a number the protocol names, which is precisely what
+distinguishes it from the two points above, where the *cell* decides. *Known gap, unchanged from
+before:* `HoldVoltage` stays on the `Voltage` axis, so "hold 0.8 V while tracking MPP" is not
+reported. That is the same limit R4 already has between voltage, current and resistance — the
+cell ties them, and §15.1 keeps the cell's physics out of the schema.
+
+**The MPP parameters, and the plan/record split.** They come from `MPPTrackingProperties` in
+[nomad-baseclasses](https://github.com/nomad-hzb/nomad-baseclasses/blob/main/src/baseclasses/solar_energy/mpp_tracking.py),
+filtered by one question: *does an operator set this before the run, or does the run report it
+back?* Only the first kind is a protocol.
+
+| From the reference | Here | Why |
+|---|---|---|
+| `perturbation_voltage` (V) | kept | How far the tracker steps looking for the peak. |
+| `perturbation_delay` (s) | kept | How long it waits before reading back. |
+| `perturbation_frequency` (s) | **renamed** `perturbation_every` | It is a *period* in seconds despite the name, and this schema already spells that `sample_every` (D9). A field called a frequency and measured in seconds is the trap §6 exists to avoid. |
+| `start_voltage_manually` (bool) | kept, **plus `start_voltage` (V)** | The reference has the flag with nowhere to put the voltage it turns on, which is dead configuration; the companion field is the smallest thing that makes it mean something. |
+| `sampling`, `time` | left out | Every step already has `sample_every` / `sampling_rate` and `estimated_duration`. A second way to say either is a second thing to keep in step. |
+| `status`, `last_pce`, `last_vmpp` | left out | What the run reports back. A protocol cannot plan its own last PCE. |
+| `MPPTracking`'s arrays, `StabilityFiguresOfMerit`, `FitParameter` | left out | The measurement layer — measured series, and T80 / T95 / lifetime yield fitted from them. They belong with §4.5's `results.py`, over data that does not exist at authoring time. |
+
+**The authored words.** `TRACKED_POINTS` (`channels.py`) maps `mpp` to `MPPTracking`, and both
+`voc` and `open_circuit` to `VOCTracking` — ISOS Table 1 writes `OC` in every one of its eighteen
+rows, so the word it uses had to reach a step. **`open_circuit` therefore leaves
+`RETIRED_WORDS`**, which it entered in §15.2 for having no field to go to: it has a class now.
+Both spellings the old format allowed still read, `hold: open_circuit` and `open_circuit: true`
+(§13.1a), so no file that loaded before stops loading.
+
+Asking for a point **sets `control`**, exactly as a written setpoint does — the load is being
+regulated; there is simply no number to store beside it. Reported, never repaired: the word on
+another channel (per channel, never global, as `dark` is refused off irradiance, D8a); a
+setpoint written beside it; two points in one step; and `open_circuit: false`, which asks for
+nothing and is more likely a typo than an intention.
+
+One consequence worth recording, because it is not obvious: **the translator's setpoint path is
+now guarded by whether the chosen class declares a `setpoint` at all.** A bare archive naming
+`VOCTracking` in its `m_def` is read back through the very same code (§13.1a's round trip), and
+before the guard it asked a class with no `setpoint` for its unit. `BalanceGas` would have hit
+it next.
+
+### 15.14 The ramp, as an authored file writes it
+
+**Status: settled in review, built.** The schema half is §15.11; this is how a file reaches it.
+
+```yaml
+- {channel: temperature, ramp: {from: 25 °C, to: 85 °C, rate: 2 K/min}, duration: 1 h}
+```
+
+§8 wrote exactly this before §15 rebuilt the schema underneath it, so the form is kept rather
+than invented: `from` / `to` / `rate` become `start_point` / `end_point` / `ramp_rate`, each read
+in its own class's unit (§6). **`rate` is optional** — D16 gives a ramp a rate *or* a duration,
+and §15.11's `normalize()` derives whichever is missing, so a file writes the one it knows and
+the archive ends up with both.
+
+**`ramp:` is what chooses the kind.** `RAMP_STEPS` (`channels.py`) is `VARIABLE_STEPS` again, one
+entry per variable, pointing at the `Ramp…` class instead of the `Hold…` one. The variable is
+named exactly as it always was — a channel with a single variable, a `variable:`, or the key
+itself — so `temperature` names two classes and the presence of `ramp:` picks between them. That
+is the hold-or-ramp dispatch §15.11 predicted everything later would reuse.
+
+Asking for a ramp **sets `control`**, as a setpoint does. Reported, never repaired: `ramp:`
+beside a `hold:` or a variable's own value (two answers to one question); a ramp on a channel
+logged as a whole, where no one variable was named; and a key inside `ramp:` that is none of
+`from`, `to`, `rate`.
+
+**The round trip needs both tables.** A bare archive names `RampTemperature` in its `m_def` and
+writes `start_point` / `end_point` as plain fields, with no `ramp:` key anywhere — so
+`VARIABLE_KEYS` maps *both* kinds back to their variable, and the class the `m_def` names picks
+the ramp table on its own. Without that, storing a ramp and reading it back would quietly hand
+back a hold.
+
+### 15.15 The atmosphere's last two keys — `pressure` and `balance_gas`
+
+**Status: settled in review, built.** The classes are §15.10's; these are their authored words.
+
+`pressure` is an ordinary variable: it holds a number in a unit, so it joins `VARIABLE_STEPS`
+and `RAMP_STEPS` like every other, and `{channel: atmosphere, pressure: 1013.25 mbar}` reads.
+
+**`balance_gas` is the first variable whose value is not a number.** `BalanceGas` keeps a gas's
+name in `gas`, not in a `setpoint` it does not have (§15.10), so the translator learns that a
+class may put its value elsewhere:
+
+```python
+VALUE_FIELDS = {BalanceGas: 'gas'}   # channels.py; everything else means `setpoint`
+```
+
+`_value_field(cls)` answers `setpoint` unless the table says otherwise, and `_setpoint` and
+`_monitor_control` both ask it instead of naming `setpoint` outright. That is a smaller change
+than a third branch beside `hold` and `ramp`, and it leaves one path through the translator: a
+variable is named, its value is read, and it lands where the class keeps it.
+
+**A gas does not ramp.** `RAMP_STEPS` has no `balance_gas` entry — there is no `RampBalanceGas`,
+because a name does not move linearly between two ends. Writing `ramp:` on it is reported rather
+than crashing on a missing table entry, and the same guard covers any variable that gains a hold
+but no ramp later.
+
+**One judgement worth flagging:** `{channel: atmosphere, monitor: true}` now becomes **four**
+steps, not two — water, oxygen, pressure and the balance gas — because a channel logged as a
+whole expands to one step per variable (§15.2) and the channel now has four. Logging which gas
+is present is a slightly odd thing to ask for, but the alternative is a variable that cannot be
+written as its own key, since `_allowed` reads the same table; one list per channel is what
+keeps the authored words and the expansion from disagreeing.
+
+### 15.16 Relative humidity, with the temperature it was read at — T4 built
+
+**Status: settled in review, built.** This is §15.9's T4, and the decision its row records.
+
+```yaml
+- {channel: atmosphere, water_vapor: {rh: 85 %, at: 65 °C}}
+```
+
+**The schema does not change.** `HoldWaterVaporFraction.setpoint` is still the plain volume
+ratio it has been since §15.7 — `85 %RH at 65 °C` reaches the archive as `0.211`, and two
+protocols run at different temperatures still compare on the number they stored. What is new is
+only that an author may *write* the figure the way ISOS Table 1 prints it.
+
+**Why the temperature must be written beside it, and not looked up.** §15.7 refused a bare `%RH`
+because it says nothing on its own: the same reading is a different amount of water at every
+temperature. The obvious repair — read the sibling temperature step in the same block — was
+rejected on purpose. Which sibling, when a block holds several? What of a block whose
+temperature *ramps*, where there is no single value to read? A conversion that silently depends
+on a neighbour is one an author cannot check by looking at the line they wrote. A compound value
+carries its own answer, is local, and reads the same wherever it appears.
+
+**The conversion** is `volume_ratio_of_relative_humidity` (`units.py`), the Magnus form for the
+saturation vapour pressure — good to a few tenths of a percent from −40 °C to 100 °C, which
+covers every row of ISOS Table 1 — over a **standard atmosphere**. That last part is an
+assumption, and the honest name for it: the ratio depends on the total pressure, and a compound
+value carrying its own temperature does not carry a pressure. It is the right assumption for the
+ovens and chambers these protocols describe, and `pressure` is a variable of the same channel
+(§15.15) if a protocol ever needs to say otherwise. Flagged here rather than buried.
+
+**`humidity` stays a retired word** (§15.7), now pointing at this form instead of saying the
+figure cannot be translated at all. `%RH` as a *unit* stays refused by `_REJECTED_UNITS` — the
+message names the compound form — because `85 %RH` in a bare setpoint is still a number without
+its temperature. The compound is the one place the schema will read a relative humidity, which
+is what keeps "absolute on purpose" true of everything stored.

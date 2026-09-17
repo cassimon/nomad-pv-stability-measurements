@@ -30,10 +30,9 @@ def test_the_parser_reads_an_authored_file_into_an_entry():
     )
     normalize_all(archive)
 
-    # The example's `open_circuit` has no place in the schema, and says so (§15.2).
-    [call] = logger.error.call_args_list
-    assert call.kwargs == {'path': 'data.routine.commands[4].hold'}
-    assert 'open_circuit' in call.args[0]
+    # Every word the example writes now has a place in the schema, so the whole file
+    # goes through without a complaint (§15.13).
+    assert logger.error.call_args_list == []
     assert isinstance(archive.data, StabilityProtocol)
     held = archive.data.steps[ROUTINE].steps[3]
     assert isinstance(held, HoldVoltage)

@@ -40,3 +40,6 @@ data:
       estimated_duration: 86400.0
       setpoint: 0.8
       control: true
+    - m_def: nomad_pv_stability_measurements.schema_packages.mpp_steps.VOCTracking
+      estimated_duration: 3600.0
+      control: true

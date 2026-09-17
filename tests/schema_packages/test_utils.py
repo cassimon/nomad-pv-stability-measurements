@@ -14,6 +14,10 @@ from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     HoldTemperature,
     HoldVoltage,
 )
+from nomad_pv_stability_measurements.schema_packages.mpp_steps import (
+    MPPTracking,
+    VOCTracking,
+)
 from nomad_pv_stability_measurements.schema_packages.ramp_steps import RampTemperature
 from nomad_pv_stability_measurements.schema_packages.routine import (
     PlannedSubroutineStep,
@@ -99,6 +103,17 @@ def test_a_hold_and_a_ramp_on_one_quantity_overlap(log):
 
     [error] = log.errors
     assert '2 Temperature steps overlap in fork' in error
+
+
+def test_mpp_and_open_circuit_cannot_both_be_asked_for(log):
+    # Two classes that declare one axis, so R4 sees the contradiction a `point` enum
+    # used to make visible (§15.13).
+    steps = [step(MPPTracking), step(VOCTracking)]
+
+    report_overlapping_steps(steps, 'parallel', 'fork', log)
+
+    [error] = log.errors
+    assert '2 OperatingPoint steps overlap in fork' in error
 
 
 def test_blocks_are_not_a_quantity_and_never_overlap(log):

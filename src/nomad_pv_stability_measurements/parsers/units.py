@@ -1,3 +1,4 @@
+import math
 import re
 
 from nomad.units import ureg
@@ -16,8 +17,8 @@ _CHARACTER_FIXES = {
 # both silently. Days are worse: this registry defines no `day`, `week` or `year`
 # at all (verified), and `ureg.define()` is forbidden — the registry is shared with
 # every other plugin — so a day is written as the hours it is, and a sun as the
-# irradiance it is. Only a unit that is exactly one of these is aliased, so `ms` and
-# `Hz` pass through untouched.
+# irradiance it is. Each `/`-separated part of a unit is matched on its own (`_alias`),
+# so `ms` and `Hz` still pass through untouched.
 _UNIT_ALIASES = {
     'h': (1, 'hour'),
     'hr': (1, 'hour'),
@@ -39,7 +40,15 @@ _UNIT_ALIASES = {
 
 _NOT_OF_THE_ATMOSPHERE = 'relative humidity depends on the temperature'
 _NOT_BY_VOLUME = 'a mass ratio is not a volume ratio, and is not converted into one'
-_WRITE_A_VOLUME_RATIO = 'write the volume ratio itself, e.g. `500 ppm` or `2 %`'
+_WRITE_A_VOLUME_RATIO = (
+    'write the volume ratio itself, e.g. `500 ppm` or `2 %` — or, for a relative '
+    'humidity, the temperature it was read at beside it, as '
+    '`{rh: 85 %, at: 65 °C}` (§15.16)'
+)
+
+#: The pressure a relative humidity is read against, for want of one written down.
+#: Standard atmosphere; see §15.16 for why this is an assumption and not a lookup.
+_STANDARD_PRESSURE = 101325.0
 
 # §15.7 — spellings this schema refuses rather than reads, each with what to write
 # instead. Matched in lower case, since `%RH` is how it is usually written.
@@ -80,14 +89,48 @@ def split_match_convert(text: str) -> tuple[float, str]:
             f'{text!r} is not a volume ratio: {refused}; {_WRITE_A_VOLUME_RATIO}'
         )
 
-    factor, unit = _UNIT_ALIASES.get(unit, (1, unit))
+    factor, unit = _alias(unit)
     return float(match.group('number')) * factor, unit
+
+
+def _alias(unit: str) -> tuple[float, str]:
+    """`unit` with every part this registry reads wrongly written as one it reads.
+
+    A rate is the first compound unit the schema takes (`2 K/min`, §15.14), and pint
+    reads `min` inside one as milli-inch exactly as it does alone — so each part is
+    aliased on its own, not only a unit standing by itself. A part's factor **divides**
+    where the part does: `2 K/d` is two kelvin per twenty-four hours.
+    """
+    factor = 1.0
+    written = []
+    for index, part in enumerate(unit.split('/')):
+        each, name = _UNIT_ALIASES.get(part.strip(), (1, part.strip()))
+        factor = factor / each if index else factor * each
+        written.append(name)
+    return factor, '/'.join(written)
 
 
 def parse(text: str, expected) -> ureg.Quantity:
     """`text` as a quantity in `expected`'s unit; a wrong dimension raises (§6 step 5)."""
     number, unit = split_match_convert(text)
     return ureg.Quantity(number, unit).to(expected)
+
+
+def volume_ratio_of_relative_humidity(relative: float, kelvin: float) -> float:
+    """A relative humidity, at the temperature it was read at, as a volume ratio.
+
+    `relative` is the fraction itself (0.85 for 85 %RH) and `kelvin` the temperature it
+    was measured at. Relative humidity is the water vapour pressure over the saturation
+    pressure at that temperature, so the volume ratio is the same fraction of the
+    saturation pressure over the total — which is where §15.7's objection to `%RH` comes
+    from, and what writing the temperature beside it answers (§15.16).
+
+    The saturation pressure is the Magnus form, good to a few tenths of a percent from
+    −40 °C to 100 °C, which is the whole range ISOS Table 1 asks for.
+    """
+    celsius = kelvin - 273.15
+    saturation = 611.2 * math.exp(17.62 * celsius / (243.12 + celsius))
+    return relative * saturation / _STANDARD_PRESSURE
 
 
 def parse_duration(text: str) -> ureg.Quantity:
