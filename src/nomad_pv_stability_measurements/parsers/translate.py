@@ -15,7 +15,8 @@ import pint
 
 from nomad_pv_stability_measurements.parsers.channels import (
     CHANNEL_VARIABLES,
-    NAMED_SETPOINTS,
+    HOLD_BELOW_STEPS,
+    NAMED_VALUES,
     OLD_CHANNEL_CLASSES,
     RAMP_STEPS,
     RETIRED_WORDS,
@@ -26,6 +27,7 @@ from nomad_pv_stability_measurements.parsers.channels import (
 )
 from nomad_pv_stability_measurements.parsers.units import (
     parse,
+    parse_difference,
     volume_ratio_of_relative_humidity,
 )
 from nomad_pv_stability_measurements.schema_packages.general import PlannedProcessStep
@@ -41,6 +43,8 @@ AUTHORING_WORDS = (
     'channel',
     'variable',
     'hold',
+    'hold_tolerance',
+    'hold_below',
     'ramp',
     'duration',
     'commands',
@@ -53,12 +57,21 @@ RENAMED = {
     'duration': 'estimated_duration',
     'commands': 'steps',
     'mode': 'execution_mode',
+    # A field renamed in the schema itself: every bare archive written before §17.4 still
+    # spells it `setpoint`, and still loads (§13.1a).
+    'setpoint': 'set_point',
 }
 
 #: Both kinds back to their variable. A bare archive names either in its `m_def`, so a
 #: stored ramp has to read back as a ramp and not as a hold (§15.14).
 RAMP_KEYS = {cls: key for key, cls in RAMP_STEPS.items()}
-VARIABLE_KEYS = {cls: key for key, cls in VARIABLE_STEPS.items()} | RAMP_KEYS
+HOLD_BELOW_KEYS = {cls: key for key, cls in HOLD_BELOW_STEPS.items()}
+VARIABLE_KEYS = (
+    {cls: key for key, cls in VARIABLE_STEPS.items()} | RAMP_KEYS | HOLD_BELOW_KEYS
+)
+
+#: The fields a named value such as `dark` or `RT` may be written into (D8a, §17.3).
+NAMED_FIELDS = ('set_point', 'start_point', 'end_point', 'upper_bound')
 
 #: What a `ramp:` writes, and the field each becomes (§15.14).
 RAMP_FIELDS = {'from': 'start_point', 'to': 'end_point', 'rate': 'ramp_rate'}
@@ -204,7 +217,7 @@ def _commands(entries, path: str, problems: list) -> list:
 
 def _step(entry, path: str, problems: list) -> list[dict]:
     """One authored entry as the steps it becomes: usually one, none when it cannot be
-    read, one per variable for a channel logged without a setpoint (§15.2)."""
+    read, one per variable for a channel logged without a set point (§15.2)."""
     if not isinstance(entry, dict):
         problems.append(Problem(path, f'expected a step, got {entry!r}.'))
         return []
@@ -254,6 +267,10 @@ class _Words:
     tracked: list
     #: `ramp: {from: …, to: …, rate: …}`, which picks the ramping kind (§15.14)
     ramp: object
+    #: `hold_tolerance: 2 K`; `None` when not written (§17.4)
+    tolerance: object = None
+    #: `hold_below: 55 %`, which picks the bounded kind (§17.5); `None` when not written
+    below: object = None
 
     @classmethod
     def take(cls, authored: dict, path: str) -> '_Words':
@@ -261,6 +278,8 @@ class _Words:
         if isinstance(hold, str) and not hold.strip():
             hold = None  # blank text asks nothing, like never writing the key (D8)
         ramp = authored.pop('ramp', None)
+        tolerance = authored.pop('hold_tolerance', None)
+        below = authored.pop('hold_below', None)
         retired = [(_at(path, key), key) for key in authored if key in RETIRED_WORDS]
         for _, key in retired:
             authored.pop(key)
@@ -292,13 +311,15 @@ class _Words:
             retired=retired,
             tracked=tracked,
             ramp=ramp,
+            tolerance=tolerance,
+            below=below,
         )
 
 
 def _monitor_control(authored: dict, cls: type | None, path: str, problems: list):
     """A monitor/control entry as the steps the schema stores (§15.2): the class its
     `m_def`, `channel` or variable names, and `hold` or the variable's key as the
-    `setpoint`, which also sets `control`."""
+    `set_point`, which also sets `control`."""
     authored = dict(authored)
     words = _Words.take(authored, path)
     for where, word in words.retired:
@@ -317,22 +338,34 @@ def _monitor_control(authored: dict, cls: type | None, path: str, problems: list
     if not classes:
         return []
     bare = _fields(authored, classes[0], path, problems)
-    if words.ramp is not None:
-        ramped = _ramp_fields(words, classes, path, problems)
-        if ramped is None:
+    if words.ramp is not None or words.below is not None:
+        read = (_ramp_fields if words.ramp is not None else _bound_fields)(
+            words, classes, path, problems
+        )
+        if read is None:
             return []
-        bare.update(ramped)
+        bare.update(read)
         bare.setdefault('control', True)
-    # A class naming a point or a gas has no `setpoint` to fill, and reaches here when a
+    # A class naming a point or a gas has no `set_point` to fill, and reaches here when a
     # bare archive names it in `m_def` and is read back (§13.1a, §15.13).
     elif (
         len(classes) == 1
         and _value_field(classes[0]) in classes[0].m_def.all_quantities
     ):
-        written = _setpoint(words, classes[0], path, problems)
+        written = _set_point(words, classes[0], path, problems)
         if written is not None:
             bare[_value_field(classes[0])] = written
             bare.setdefault('control', True)
+        tolerance = _tolerance(words, classes[0], path, problems)
+        if tolerance is not None:
+            bare['set_point_tolerance'] = tolerance
+    elif words.tolerance is not None:
+        problems.append(
+            Problem(
+                _at(path, 'hold_tolerance'),
+                'a tolerance belongs to one held value: say which variable it is for.',
+            )
+        )
     return [{'m_def': m_def(each), **bare} for each in classes]
 
 
@@ -342,7 +375,7 @@ def _tracked_steps(
     """A step naming a point the cell decides, not a value to hold (§15.13).
 
     Asking for one is asking the load to be regulated, so it sets `control` exactly as a
-    written setpoint does — there is simply no number to store beside it.
+    written set point does — there is simply no number to store beside it.
     """
     if len(words.tracked) > 1:
         written = ', '.join(word for _, word, _ in words.tracked)
@@ -371,8 +404,17 @@ def _tracked_steps(
         problems.append(
             Problem(
                 path,
-                f'`{word}` is where the cell decides, so it takes no setpoint, but this '
+                f'`{word}` is where the cell decides, so it takes no set point, but this '
                 f'step also writes {", ".join(words.keys)}.',
+            )
+        )
+        return []
+    if words.tolerance is not None:
+        problems.append(
+            Problem(
+                _at(path, 'hold_tolerance'),
+                f'`{word}` is where the cell decides, so there is no value to be a '
+                f'tolerance of.',
             )
         )
         return []
@@ -390,14 +432,14 @@ def _ramp_fields(
     `None` where the step cannot be read at all, so the caller leaves it out.
     """
     where = _at(path, 'ramp')
-    if words.hold is not None or words.keys:
+    if (
+        words.hold is not None
+        or words.tolerance is not None
+        or words.below is not None
+        or words.keys
+    ):
         problems.append(
             Problem(where, 'a step ramps or holds, not both; write one of them.')
-        )
-        return None
-    if len(classes) != 1:
-        problems.append(
-            Problem(where, 'say which variable ramps: a whole channel cannot.')
         )
         return None
     if not isinstance(words.ramp, dict):
@@ -452,30 +494,72 @@ def _step_classes(words: _Words, cls, path: str, problems: list) -> list[type]:
             )
         )
         return []
-    # `ramp:` picks the ramping kind of the same variable — and so does a `Ramp…` class
-    # the file named itself, which arrives with no `ramp:` at all (§15.14).
-    table = RAMP_STEPS if words.ramp is not None or cls in RAMP_KEYS else VARIABLE_STEPS
+    table, word = _kind(words, cls)
     if chosen or len(allowed) == 1:
         key = (chosen or allowed)[0]
         if key not in table:
-            problems.append(
-                Problem(
-                    _at(path, 'ramp'),
-                    f'`{key}` does not ramp: it holds one value and nothing else.',
-                )
-            )
+            problems.append(Problem(_at(path, word), _no_such_kind(key, word)))
         return [table[key]] if key in table else []
-    if words.hold is not None:
-        problems.append(
-            Problem(
-                _at(path, 'hold'),
-                f'could not place `hold` {words.hold!r}: say which variable it sets, '
-                f'as `variable:` or as the key itself — {", ".join(allowed)}.',
-            )
-        )
+    # A ramp or a bound names one variable, never a channel's worth — decided here, not
+    # by how many classes the kind's table happens to have (§17.5).
+    if words.hold is not None or word != 'hold':
+        problems.append(Problem(_at(path, word), _unplaced(words, word, allowed)))
         return []
     # Nothing set: a channel logged as a whole, one step per variable (§15.2).
     return [table[key] for key in allowed if key in table]
+
+
+def _kind(words: _Words, cls) -> tuple[dict, str]:
+    """Which kind of step an entry is, as the table naming its classes and the word that
+    chose it. `ramp:` and `hold_below:` choose their kinds — and so does a `Ramp…` or
+    `HoldBelow…` class a bare archive names, which arrives without either word
+    (§15.14, §17.5)."""
+    if words.ramp is not None or cls in RAMP_KEYS:
+        return RAMP_STEPS, 'ramp'
+    if words.below is not None or cls in HOLD_BELOW_KEYS:
+        return HOLD_BELOW_STEPS, 'hold_below'
+    return VARIABLE_STEPS, 'hold'
+
+
+def _unplaced(words: _Words, word: str, allowed: tuple) -> str:
+    """Why a value written on a channel of several variables could not be placed."""
+    if word == 'ramp':
+        return 'say which variable ramps: a whole channel cannot.'
+    if word == 'hold_below':
+        return 'say which variable is bounded: a whole channel cannot be.'
+    return (
+        f'could not place `hold` {words.hold!r}: say which variable it sets, '
+        f'as `variable:` or as the key itself — {", ".join(allowed)}.'
+    )
+
+
+def _no_such_kind(key: str, word: str) -> str:
+    if word == 'ramp':
+        return f'`{key}` does not ramp: it holds one value and nothing else.'
+    return f'`{key}` takes no `{word}`: no standard bounds it yet (§17.5).'
+
+
+def _bound_fields(
+    words: _Words, classes: list, path: str, problems: list
+) -> dict | None:
+    """`hold_below: 55 %` as the field the schema stores (§17.5).
+
+    `None` where the step cannot be read at all, so the caller leaves it out.
+    """
+    where = _at(path, 'hold_below')
+    if words.hold is not None or words.tolerance is not None or words.keys:
+        problems.append(
+            Problem(
+                where,
+                'a step holds a value or keeps under a bound, not both; write one of them.',
+            )
+        )
+        return None
+    if isinstance(words.below, dict):
+        bound = _relative_humidity(words.below, classes[0], where, problems)
+    else:
+        bound = _value(words.below, classes[0], 'upper_bound', where, problems)
+    return {} if bound is None else {'upper_bound': bound}
 
 
 def _allowed(words: _Words, cls, path: str, problems: list) -> tuple | None:
@@ -504,14 +588,14 @@ def _allowed(words: _Words, cls, path: str, problems: list) -> tuple | None:
 
 
 def _value_field(cls: type) -> str:
-    """Where a written value lands: `setpoint`, unless the class keeps it elsewhere."""
-    return VALUE_FIELDS.get(cls, 'setpoint')
+    """Where a written value lands: `set_point`, unless the class keeps it elsewhere."""
+    return VALUE_FIELDS.get(cls, 'set_point')
 
 
-def _setpoint(words: _Words, cls: type, path: str, problems: list):
+def _set_point(words: _Words, cls: type, path: str, problems: list):
     """The value as written: under the variable's own key, or as `hold`.
 
-    Usually it lands in `setpoint`; a class whose value is no number says where instead
+    Usually it lands in `set_point`; a class whose value is no number says where instead
     (`BalanceGas` keeps a gas's name in `gas`, §15.15).
     """
     field_name = _value_field(cls)
@@ -554,11 +638,18 @@ def _relative_humidity(written: dict, cls: type, where: str, problems: list):
             )
         )
         return None
-    relative = _value(written['rh'], cls, 'setpoint', _at(where, 'rh'), problems)
+    # Read through the water vapour's own hold: a bound has no `set_point` to ask.
+    relative = _value(
+        written['rh'],
+        VARIABLE_STEPS['water_vapor'],
+        'set_point',
+        _at(where, 'rh'),
+        problems,
+    )
     kelvin = _value(
         written['at'],
         VARIABLE_STEPS['temperature'],
-        'setpoint',
+        'set_point',
         _at(where, 'at'),
         problems,
     )
@@ -570,7 +661,7 @@ def _relative_humidity(written: dict, cls: type, where: str, problems: list):
 def _value(value, cls: type, key: str, where: str, problems: list):
     """`value` as the schema stores it: a unit-ful quantity takes a number in its
     declared unit, read from text that writes its own (§6), or from a word the parser
-    knows for that setpoint (D8a). Complaints name the key the file wrote, the last part
+    knows for that set point (D8a). Complaints name the key the file wrote, the last part
     of `where`."""
     label = where.rpartition('.')[2]
     unit = cls.m_def.all_quantities[key].unit
@@ -586,14 +677,45 @@ def _value(value, cls: type, key: str, where: str, problems: list):
     text = value.strip()
     if not text:
         return None  # blank text asks nothing, like never writing the key (D8)
-    named = NAMED_SETPOINTS.get(cls, {}) if key == 'setpoint' else {}
+    standard = _standard_value(text, cls) if key in NAMED_FIELDS else None
+    read = parse_difference if key.endswith('_tolerance') else parse
     try:
-        number = named.get(text)
-        return float(number if number is not None else parse(text, unit).m)
+        number = standard().value.to(unit) if standard else read(text, unit)
+        return float(number.m)
     except (ValueError, pint.errors.PintError) as error:
         # The complaint quotes what the file wrote, not what a name resolved to.
         problems.append(Problem(where, f'could not read `{label}` {text!r}: {error}'))
         return None
+
+
+def _standard_value(text, cls: type):
+    """The `StandardValue` a word names for this class's variable, if it names one."""
+    if not isinstance(text, str):
+        return None
+    return NAMED_VALUES.get(VARIABLE_KEYS.get(cls), {}).get(text.strip())
+
+
+def _tolerance(words: _Words, cls: type, path: str, problems: list):
+    """`hold_tolerance`, or else the tolerance a named value brings with it (§17.4).
+
+    Written explicitly, it wins: a lab stating a tighter tolerance than the standard's is
+    stating a fact about its own run, not contradicting anything.
+    """
+    where = _at(path, 'hold_tolerance')
+    if 'set_point_tolerance' not in cls.m_def.all_quantities:
+        if words.tolerance is not None:
+            problems.append(
+                Problem(where, f'{cls.__name__} holds no value to be a tolerance of.')
+            )
+        return None
+    if words.tolerance is not None:
+        return _value(words.tolerance, cls, 'set_point_tolerance', where, problems)
+    key = VARIABLE_KEYS.get(cls)
+    standard = _standard_value(words.keys.get(key, words.hold), cls)
+    if standard is None or standard().tolerance is None:
+        return None
+    unit = cls.m_def.all_quantities['set_point_tolerance'].unit
+    return float(standard().tolerance.to(unit).magnitude)
 
 
 def _unknown(key: str, cls: type) -> str:

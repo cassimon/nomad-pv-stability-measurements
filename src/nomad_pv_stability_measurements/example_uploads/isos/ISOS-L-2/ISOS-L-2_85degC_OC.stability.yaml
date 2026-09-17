@@ -1,0 +1,17 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-L-2 (85 °C, OC)
+  standard: ISOS-L-2
+  standard_variant: 85 °C, OC
+  environment: indoor
+  notes: Light soaking under a solar simulator, at elevated temperature.
+  channel_settings:
+    irradiation:
+      control: true
+    temperature:
+      hold: 85 °C
+    atmosphere:
+      variable: water_vapor
+      control: false
+    electrical_load:
+      hold: open_circuit

@@ -39,12 +39,12 @@ def test_each_hold_class_is_one_quantity():
 
 def test_every_step_has_a_monitor_and_a_control_tag_and_a_setpoint():
     for cls in HOLDS:
-        assert {'monitor', 'control', 'setpoint'} <= set(cls.m_def.all_quantities)
+        assert {'monitor', 'control', 'set_point'} <= set(cls.m_def.all_quantities)
 
 
 def test_each_setpoint_uses_nomads_unit_system():
     units = {
-        cls.__name__: str(cls.m_def.all_quantities['setpoint'].unit) for cls in HOLDS
+        cls.__name__: str(cls.m_def.all_quantities['set_point'].unit) for cls in HOLDS
     }
 
     assert units == {
@@ -60,22 +60,22 @@ def test_each_setpoint_uses_nomads_unit_system():
         'HoldOxygenFraction': 'dimensionless',
         'HoldPressure': 'pascal',
     }
-    # The kind names no quantity, so its own setpoint has no unit (verified, §15.1).
-    assert HoldStep.m_def.all_quantities['setpoint'].unit is None
+    # The kind names no quantity, so its own set point has no unit (verified, §15.1).
+    assert HoldStep.m_def.all_quantities['set_point'].unit is None
 
 
 def test_a_setpoint_reloads_in_its_unit():
-    data = {'control': True, 'setpoint': 338.15, 'estimated_duration': 3600.0}
+    data = {'control': True, 'set_point': 338.15, 'estimated_duration': 3600.0}
     step = HoldTemperature.m_from_dict(data)
 
-    assert step.setpoint.to(ureg.degC).magnitude == pytest.approx(65)
+    assert step.set_point.to(ureg.degC).magnitude == pytest.approx(65)
     assert step.m_to_dict() == data
 
 
 def test_monitor_and_control_are_independent_tags():
     logged = HoldTemperature(monitor=True)
 
-    assert (logged.monitor, logged.control, logged.setpoint) == (True, None, None)
+    assert (logged.monitor, logged.control, logged.set_point) == (True, None, None)
 
 
 def test_a_physical_property_is_a_plain_field_of_its_step():
@@ -97,15 +97,15 @@ def test_the_schema_holds_no_physics():
 def test_a_glovebox_and_the_open_air_land_on_one_axis():
     # ppm and % are both dimensionless here, so one field takes either and stores one
     # number — no kinds, no conversion table.
-    glovebox = HoldOxygenFraction(setpoint=0.1 * ureg.ppm)
-    air = HoldOxygenFraction(setpoint=21 * ureg.percent)
+    glovebox = HoldOxygenFraction(set_point=0.1 * ureg.ppm)
+    air = HoldOxygenFraction(set_point=21 * ureg.percent)
 
-    assert glovebox.setpoint.magnitude == pytest.approx(1e-7)
-    assert air.setpoint.magnitude == pytest.approx(0.21)
+    assert glovebox.set_point.magnitude == pytest.approx(1e-7)
+    assert air.set_point.magnitude == pytest.approx(0.21)
 
 
 def test_an_atmosphere_step_round_trips_as_the_fraction():
-    data = {'monitor': True, 'control': True, 'setpoint': 5e-4}
+    data = {'monitor': True, 'control': True, 'set_point': 5e-4}
 
     assert HoldWaterVaporFraction.m_from_dict(data).m_to_dict() == data
 
@@ -115,27 +115,42 @@ def test_no_atmosphere_step_knows_relative_humidity():
     # field of either step; a `normalize()` can derive it once something needs it.
     for cls in [HoldWaterVaporFraction, HoldOxygenFraction]:
         assert 'humidity' not in set(cls.m_def.all_properties)
-        assert str(cls.m_def.all_quantities['setpoint'].unit) == 'dimensionless'
+        assert str(cls.m_def.all_quantities['set_point'].unit) == 'dimensionless'
 
 
 # The steps that hold no number, and the ambient quantities (§15.10, §15.11).
 
 
 def test_a_step_that_holds_no_number_takes_no_setpoint():
-    # With `setpoint` on `HoldStep` rather than on the base, these two inherit no
+    # With `set_point` on `HoldStep` rather than on the base, these two inherit no
     # numeric field they would never fill (§15.11).
     for cls in NUMBERLESS:
         assert not issubclass(cls, HoldStep)
-        assert 'setpoint' not in cls.m_def.all_quantities
+        assert 'set_point' not in cls.m_def.all_quantities
         assert {'monitor', 'control'} <= set(cls.m_def.all_quantities)
 
 
 def test_pressure_is_the_atmosphere_as_a_whole():
-    ambient = HoldPressure(setpoint=1013.25 * ureg.mbar)
+    ambient = HoldPressure(set_point=1013.25 * ureg.mbar)
 
-    assert ambient.setpoint.to(ureg.pascal).magnitude == pytest.approx(101325)
+    assert ambient.set_point.to(ureg.pascal).magnitude == pytest.approx(101325)
 
 
 def test_the_balance_gas_is_a_name_not_a_number():
     assert BalanceGas(gas='N2').gas == 'N2'
     assert 'gas' not in HoldPressure.m_def.all_quantities
+
+
+def test_every_hold_declares_its_tolerance_in_the_unit_of_its_set_point():
+    # `set_point ± set_point_tolerance`, so the two must be comparable (§17.4).
+    for cls in HOLDS:
+        quantities = cls.m_def.all_quantities
+        assert quantities['set_point_tolerance'].unit == quantities['set_point'].unit
+
+
+def test_a_temperature_tolerance_is_a_difference_in_kelvin():
+    step = HoldTemperature(
+        set_point=ureg.Quantity(65, ureg.degC), set_point_tolerance=2 * ureg.kelvin
+    )
+
+    assert step.set_point_tolerance.to(ureg.kelvin).magnitude == pytest.approx(2)

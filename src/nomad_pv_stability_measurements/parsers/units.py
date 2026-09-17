@@ -116,6 +116,21 @@ def parse(text: str, expected) -> ureg.Quantity:
     return ureg.Quantity(number, unit).to(expected)
 
 
+def parse_difference(text: str, expected) -> ureg.Quantity:
+    """`text` as a *difference* in `expected`'s unit, such as a tolerance (§17.4).
+
+    An offset unit is refused: `4 °C` converts to 277.15 K, which is a temperature and
+    not a spread of four degrees. Converting zero is what shows the offset.
+    """
+    number, unit = split_match_convert(text)
+    if ureg.Quantity(0.0, unit).to(expected).magnitude != 0:
+        raise ValueError(
+            f'`{unit}` has an offset, so `{number:g} {unit}` is a temperature, not a '
+            f'difference; write the difference in kelvin, e.g. `{number:g} K`.'
+        )
+    return ureg.Quantity(number, unit).to(expected)
+
+
 def volume_ratio_of_relative_humidity(relative: float, kelvin: float) -> float:
     """A relative humidity, at the temperature it was read at, as a volume ratio.
 

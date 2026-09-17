@@ -60,7 +60,7 @@ def test_only_monitor_control_steps_carry_tags():
     assert tags <= set(PlannedMonitorControlStep.m_def.all_quantities)
     assert tags.isdisjoint(BLOCK.m_def.all_quantities)
     # What a step holds or moves sits on its kind, not on the base (§15.11).
-    assert {'setpoint', 'start_point'}.isdisjoint(
+    assert {'set_point', 'start_point'}.isdisjoint(
         PlannedMonitorControlStep.m_def.all_quantities
     )
 
@@ -80,7 +80,7 @@ def test_two_steps_on_one_quantity_are_not_merged(normalized, log):
             {
                 'name': 'hot phase',
                 'steps': [
-                    entry(HoldTemperature, control=True, setpoint=358.15),
+                    entry(HoldTemperature, control=True, set_point=358.15),
                     entry(HoldTemperature, monitor=True),
                 ],
             }
@@ -163,7 +163,7 @@ def test_a_step_without_an_estimated_duration_takes_no_turn(normalized, log):
             {
                 'estimated_duration': 1800000,
                 'steps': [
-                    entry(HoldTemperature, name='warm', control=True, setpoint=358.15),
+                    entry(HoldTemperature, name='warm', control=True, set_point=358.15),
                     entry(BLOCK, name='phase', estimated_duration=1800000),
                 ],
             }
@@ -319,9 +319,9 @@ def test_entry_loads_the_bare_archive_file():
     temperature, irradiance, voltage = settings[:3]
     assert temperature.estimated_duration is None
     assert (temperature.control, temperature.monitor) == (True, True)
-    assert temperature.setpoint.to(ureg.degC).magnitude == pytest.approx(65)
+    assert temperature.set_point.to(ureg.degC).magnitude == pytest.approx(65)
     assert irradiance.spectrum == 'AM1.5G'
-    assert (voltage.control, voltage.setpoint, voltage.monitor) == (None, None, True)
+    assert (voltage.control, voltage.set_point, voltage.monitor) == (None, None, True)
 
     assert isinstance(soak, BLOCK)
     assert [type(step) for step in soak.steps] == [

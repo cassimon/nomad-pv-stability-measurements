@@ -1,9 +1,12 @@
 """The words an authored file uses for steps (Design.md §15.2).
 
 None of them reaches the archive: a `channel:` and a variable's key choose the step's
-class, `hold` becomes its `setpoint`, and a named word becomes the value it stands for.
+class, `hold` becomes its `set_point`, and a named word becomes the value it stands for.
 """
 
+from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
+    HoldBelowWaterVaporFraction,
+)
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     BalanceGas,
     HoldBendRadius,
@@ -33,6 +36,10 @@ from nomad_pv_stability_measurements.schema_packages.ramp_steps import (
     RampVoltage,
     RampWaterVaporFraction,
 )
+from nomad_pv_stability_measurements.schema_packages.standard_values import (
+    Dark,
+    RoomTemperature,
+)
 
 #: The step class each variable key names when the step holds one value (§15.11).
 VARIABLE_STEPS = {
@@ -49,7 +56,7 @@ VARIABLE_STEPS = {
     'balance_gas': BalanceGas,
 }
 
-#: Where a written value lands for a class that does not keep it in `setpoint`. The
+#: Where a written value lands for a class that does not keep it in `set_point`. The
 #: balance is a gas's name, not a number, so it has a field of its own (§15.15).
 VALUE_FIELDS = {BalanceGas: 'gas'}
 
@@ -68,6 +75,12 @@ RAMP_STEPS = {
     'pressure': RampPressure,
 }
 
+#: The same variables when the step keeps under a bound instead, chosen by an authored
+#: `hold_below:` (§17.5). Only what a standard bounds; the rest are reported.
+HOLD_BELOW_STEPS = {
+    'water_vapor': HoldBelowWaterVaporFraction,
+}
+
 #: The variables an authored `channel:` groups, in the order an author reads them.
 CHANNEL_VARIABLES = {
     'temperature': ('temperature',),
@@ -77,9 +90,12 @@ CHANNEL_VARIABLES = {
     'atmosphere': ('water_vapor', 'oxygen', 'pressure', 'balance_gas'),
 }
 
-#: Words a setpoint reads as a value, per step class. Never global: `dark` is an
+#: Words a set point reads as a value, per step class. Never global: `dark` is an
 #: irradiance and means nothing on the temperature axis, or in a duration (D8a).
-NAMED_SETPOINTS = {HoldIrradiance: {'dark': 0.0}}
+NAMED_VALUES = {
+    'irradiance': {'dark': Dark},
+    'temperature': {'RT': RoomTemperature},
+}
 
 #: Words that name a step outright, with no value to hold: the load is driven to a point
 #: the cell decides, not to a number the protocol writes (§15.13). `open_circuit` is what

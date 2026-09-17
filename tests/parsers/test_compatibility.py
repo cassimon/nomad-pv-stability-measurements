@@ -93,27 +93,31 @@ def test_the_channels_file(load_file, log):
     assert temperature.estimated_duration is None
     assert isinstance(temperature, HoldTemperature)
     assert (temperature.control, temperature.monitor) == (True, True)
-    assert magnitude(temperature.setpoint, ureg.degC) == pytest.approx(65)
+    assert magnitude(temperature.set_point, ureg.degC) == pytest.approx(65)
     assert magnitude(temperature.sample_every, ureg.s) == pytest.approx(60)
-    assert magnitude(irradiance.setpoint, IRRADIANCE) == pytest.approx(1000)
+    assert magnitude(irradiance.set_point, IRRADIANCE) == pytest.approx(1000)
     assert irradiance.spectrum == 'AM1.5G'
     assert [type(step) for step in load] == [HoldVoltage, HoldCurrent, HoldResistance]
     for step in load:
-        assert (step.monitor, step.control, step.setpoint) == (True, None, None)
+        assert (step.monitor, step.control, step.set_point) == (True, None, None)
         assert magnitude(step.sampling_rate, ureg.Hz) == pytest.approx(1)
 
     # The routine: a block after the settings, overriding them for its span.
     assert soak.name == 'soak'
     hot, drift, dark, held, opened = soak.steps
-    assert magnitude(hot.setpoint, ureg.degC) == pytest.approx(85)
+    assert magnitude(hot.set_point, ureg.degC) == pytest.approx(85)
     # `500 h` is hours, not Planck's constant (§6 step 2).
     assert magnitude(hot.estimated_duration, ureg.hour) == pytest.approx(500)
     assert magnitude(hot.sampling_rate, ureg.Hz) == pytest.approx(10)
-    assert (type(drift), drift.control, drift.setpoint) == (HoldTemperature, None, None)
+    assert (type(drift), drift.control, drift.set_point) == (
+        HoldTemperature,
+        None,
+        None,
+    )
     # Deliberately dark is a value, not a missing one (D8a).
-    assert magnitude(dark.setpoint, IRRADIANCE) == pytest.approx(0)
+    assert magnitude(dark.set_point, IRRADIANCE) == pytest.approx(0)
     assert isinstance(held, HoldVoltage)
-    assert magnitude(held.setpoint, ureg.V) == pytest.approx(0.8)
+    assert magnitude(held.set_point, ureg.V) == pytest.approx(0.8)
     # The load left at open circuit: a step of its own, asking for no number (§15.13).
     assert (type(opened), opened.control) == (VOCTracking, True)
     # The routine wrote no duration of its own: it lasts as long as its episodes
@@ -158,7 +162,7 @@ def test_an_explicit_m_def_and_plain_numbers_still_load(load, log):
 
     assert log.errors == []
     assert isinstance(step, HoldTemperature)
-    assert magnitude(step.setpoint, ureg.degC) == pytest.approx(85)
+    assert magnitude(step.set_point, ureg.degC) == pytest.approx(85)
     assert magnitude(step.estimated_duration, ureg.hour) == pytest.approx(1)
 
 
@@ -170,7 +174,7 @@ def test_a_setpoint_is_written_either_as_the_variable_or_as_hold(load, log):
         [step] = load(authored)
 
         assert isinstance(step, HoldStrain)
-        assert step.setpoint.magnitude == pytest.approx(0.02)
+        assert step.set_point.magnitude == pytest.approx(0.02)
     assert log.errors == []
 
 
@@ -178,7 +182,7 @@ def test_a_single_variable_needs_no_variable_named(load, log):
     [step] = load({'channel': 'mechanical', 'bend_radius': '5 mm'})
 
     assert isinstance(step, HoldBendRadius)
-    assert magnitude(step.setpoint, ureg.mm) == pytest.approx(5)
+    assert magnitude(step.set_point, ureg.mm) == pytest.approx(5)
     assert log.errors == []
 
 
@@ -194,7 +198,7 @@ def test_the_isos_l_2_form(load, log):
 
     assert log.errors == []
     assert (type(step), step.control) == (HoldVoltage, True)
-    assert magnitude(step.setpoint, ureg.V) == pytest.approx(0.8)
+    assert magnitude(step.set_point, ureg.V) == pytest.approx(0.8)
     assert magnitude(step.sampling_rate, ureg.Hz) == pytest.approx(10)
     assert magnitude(step.sample_every, ureg.s) == pytest.approx(0.1)
 
@@ -236,7 +240,7 @@ def test_a_named_setpoint_becomes_the_value_it_stands_for(load):
     [step] = load({'channel': 'irradiation', 'hold': 'dark', 'spectrum': 'AM1.5G'})
 
     assert isinstance(step, HoldIrradiance)
-    assert magnitude(step.setpoint, IRRADIANCE) == pytest.approx(0)
+    assert magnitude(step.set_point, IRRADIANCE) == pytest.approx(0)
     assert step.spectrum == 'AM1.5G'
 
 
@@ -244,7 +248,7 @@ def test_blank_text_asks_nothing(load, log):
     for blank in ['', ' ', '\t', '\n']:
         [step] = load({'channel': 'temperature', 'hold': blank})
 
-        assert (type(step), step.control, step.setpoint) == (
+        assert (type(step), step.control, step.set_point) == (
             HoldTemperature,
             None,
             None,
@@ -272,7 +276,7 @@ def test_an_unreadable_value_is_reported(load, log):
     )
 
     assert step.estimated_duration is None
-    assert magnitude(step.setpoint, ureg.degC) == pytest.approx(85)
+    assert magnitude(step.set_point, ureg.degC) == pytest.approx(85)
     [error] = log.errors
     assert 'duration' in error
 
@@ -294,7 +298,7 @@ def test_a_wrong_dimension_is_reported(load, log):
 def test_a_named_setpoint_belongs_to_one_step(load, log):
     [step] = load({'channel': 'temperature', 'hold': 'dark'})
 
-    assert step.setpoint is None
+    assert step.set_point is None
     [error] = log.errors
     assert 'hold' in error
 
@@ -315,8 +319,8 @@ def test_a_hold_with_no_variable_to_go_to_is_reported(load, log):
 def test_a_variable_the_channel_does_not_have_is_reported(load, log):
     [step] = load({'channel': 'mechanical', 'variable': 'voltage', 'strain': '2 %'})
 
-    # Reported, never repaired: the setpoint stands as authored.
-    assert step.setpoint.magnitude == pytest.approx(0.02)
+    # Reported, never repaired: the set point stands as authored.
+    assert step.set_point.magnitude == pytest.approx(0.02)
     [error] = log.errors
     assert 'bend_radius, strain' in error
 
@@ -341,10 +345,10 @@ def test_the_atmosphere_takes_a_pressure_and_a_balance_gas(load, log):
     [pressure] = load({'channel': 'atmosphere', 'pressure': '1013.25 mbar'})
     [balance] = load({'channel': 'atmosphere', 'balance_gas': 'N2'})
 
-    assert magnitude(pressure.setpoint, ureg.pascal) == pytest.approx(101325)
-    # The gas is a name, so it lands in `gas` — there is no setpoint to put it in.
+    assert magnitude(pressure.set_point, ureg.pascal) == pytest.approx(101325)
+    # The gas is a name, so it lands in `gas` — there is no set point to put it in.
     assert balance.gas == 'N2'
-    assert 'setpoint' not in BalanceGas.m_def.all_quantities
+    assert 'set_point' not in BalanceGas.m_def.all_quantities
     assert log.errors == []
 
 
@@ -360,8 +364,8 @@ def test_a_glovebox_figure_and_a_volume_percent_share_one_axis(load, log):
     [ambient] = load({'channel': 'atmosphere', 'oxygen': '21 vol%'})
 
     assert (type(glovebox), glovebox.control) == (HoldOxygenFraction, True)
-    assert glovebox.setpoint.magnitude == pytest.approx(1e-7)
-    assert ambient.setpoint.magnitude == pytest.approx(0.21)
+    assert glovebox.set_point.magnitude == pytest.approx(1e-7)
+    assert ambient.set_point.magnitude == pytest.approx(0.21)
     assert log.errors == []
 
 
@@ -373,7 +377,7 @@ def test_water_vapour_is_written_either_as_the_variable_or_as_hold(load, log):
         [step] = load(authored)
 
         assert isinstance(step, HoldWaterVaporFraction)
-        assert step.setpoint.magnitude == pytest.approx(5e-4)
+        assert step.set_point.magnitude == pytest.approx(5e-4)
     assert log.errors == []
 
 
@@ -395,14 +399,14 @@ def test_a_relative_humidity_loads_as_the_ratio_it_is(load, log):
     )
 
     assert isinstance(step, HoldWaterVaporFraction)
-    assert step.setpoint.magnitude == pytest.approx(0.2109, rel=1e-3)
+    assert step.set_point.magnitude == pytest.approx(0.2109, rel=1e-3)
     assert log.errors == []
 
 
 def test_a_relative_humidity_value_on_the_water_axis_is_refused(load, log):
     [step] = load({'channel': 'atmosphere', 'water_vapor': '85 %RH'})
 
-    # Reported, never repaired: the step stays, without a setpoint nobody can read.
-    assert (isinstance(step, HoldWaterVaporFraction), step.setpoint) == (True, None)
+    # Reported, never repaired: the step stays, without a set point nobody can read.
+    assert (isinstance(step, HoldWaterVaporFraction), step.set_point) == (True, None)
     [error] = log.errors
     assert 'not a volume ratio' in error

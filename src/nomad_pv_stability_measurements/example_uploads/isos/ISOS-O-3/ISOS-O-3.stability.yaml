@@ -1,0 +1,16 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-O-3
+  standard: ISOS-O-3
+  environment: outdoor
+  notes: Outdoor exposure to sunlight.
+  channel_settings:
+    irradiation:
+      control: false
+    temperature:
+      control: false
+    atmosphere:
+      variable: water_vapor
+      control: false
+    electrical_load:
+      hold: mpp

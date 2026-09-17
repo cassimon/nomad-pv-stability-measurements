@@ -30,9 +30,9 @@ def test_a_ramp_names_both_ends_and_a_rate():
 
 
 def test_a_ramp_holds_nothing():
-    # `setpoint` sits on `HoldStep`, so a ramp does not carry one it never fills.
+    # `set_point` sits on `HoldStep`, so a ramp does not carry one it never fills.
     for cls in RAMPS:
-        assert 'setpoint' not in cls.m_def.all_quantities
+        assert 'set_point' not in cls.m_def.all_quantities
 
 
 def test_both_ends_of_a_ramp_share_one_unit():

@@ -4,6 +4,7 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.parsers.units import (
     parse,
+    parse_difference,
     parse_duration,
     parse_frequency,
     split_match_convert,
@@ -157,3 +158,24 @@ def test_saturation_at_boiling_is_about_the_whole_atmosphere():
     assert volume_ratio_of_relative_humidity(1.0, 373.15) == pytest.approx(
         1.0, rel=0.05
     )
+
+
+# A difference, such as a tolerance (§17.4).
+
+
+@pytest.mark.parametrize(('text', 'kelvin'), [('4 K', 4), ('500 mK', 0.5)])
+def test_parse_difference_reads_a_multiplicative_unit(text, kelvin):
+    assert parse_difference(text, ureg.kelvin).magnitude == pytest.approx(kelvin)
+
+
+@pytest.mark.parametrize('text', ['4 °C', '4 degC', '4 degF'])
+def test_parse_difference_refuses_an_offset_unit(text):
+    # Not 277.15 K: an offset unit writes a temperature, never a spread.
+    with pytest.raises(ValueError, match='write the difference in kelvin'):
+        parse_difference(text, ureg.kelvin)
+
+
+def test_parse_difference_is_no_different_where_nothing_has_an_offset():
+    irradiance = ureg.watt / ureg.meter**2
+
+    assert parse_difference('50 W/m^2', irradiance).magnitude == pytest.approx(50)

@@ -48,7 +48,7 @@ class MPPTracking(PlannedMonitorControlStep):
 class VOCTracking(PlannedMonitorControlStep):
     """The load at open circuit, where the voltage settles with no current drawn.
 
-    No parameters and no setpoint: open circuit is a state of the terminals, and the
+    No parameters and no set_point: open circuit is a state of the terminals, and the
     voltage there is the cell's answer. ISOS Table 1 writes it `OC`.
     """
 

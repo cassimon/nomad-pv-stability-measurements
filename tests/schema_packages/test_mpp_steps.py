@@ -27,14 +27,14 @@ def test_a_found_point_is_neither_held_nor_ramped():
     for cls in TRACKED:
         assert not issubclass(cls, HoldStep | RampStep)
         quantities = set(cls.m_def.all_quantities)
-        assert {'setpoint', 'start_point', 'end_point'}.isdisjoint(quantities)
+        assert {'set_point', 'start_point', 'end_point'}.isdisjoint(quantities)
         assert {'monitor', 'control'} <= quantities
 
 
 def test_a_constant_external_bias_is_a_held_voltage():
     # Including reverse bias: it is a number the protocol names, so it needs no class of
     # its own here (§15.13).
-    assert HoldVoltage(setpoint=-1.2 * ureg.volt).setpoint.magnitude == pytest.approx(
+    assert HoldVoltage(set_point=-1.2 * ureg.volt).set_point.magnitude == pytest.approx(
         -1.2
     )
 

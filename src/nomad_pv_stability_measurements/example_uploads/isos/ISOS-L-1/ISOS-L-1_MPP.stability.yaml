@@ -1,0 +1,17 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-L-1 (MPP)
+  standard: ISOS-L-1
+  standard_variant: MPP
+  environment: indoor
+  notes: Light soaking under a solar simulator.
+  channel_settings:
+    irradiation:
+      control: true
+    temperature:
+      hold: RT
+    atmosphere:
+      variable: water_vapor
+      control: false
+    electrical_load:
+      hold: mpp

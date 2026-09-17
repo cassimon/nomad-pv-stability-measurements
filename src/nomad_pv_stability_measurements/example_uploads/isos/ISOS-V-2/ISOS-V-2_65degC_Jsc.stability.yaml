@@ -1,0 +1,18 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-V-2 (65 °C, J_SC)
+  standard: ISOS-V-2
+  standard_variant: 65 °C, J_SC
+  environment: indoor
+  notes: In an oven in ambient air. Positive bias at J_SC.
+  channel_settings:
+    irradiation:
+      hold: dark
+    temperature:
+      hold: 65 °C
+    atmosphere:
+      variable: water_vapor
+      control: false
+    electrical_load:
+      variable: current
+      control: true

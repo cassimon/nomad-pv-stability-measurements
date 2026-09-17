@@ -114,14 +114,14 @@ def test_a_block_overrides_a_condition_for_its_span(log):
     protocol = StabilityProtocol.m_from_dict(
         {
             'steps': [
-                entry(HoldTemperature, control=True, setpoint=338.15),
+                entry(HoldTemperature, control=True, set_point=338.15),
                 entry(
                     BLOCK,
                     steps=[
                         entry(
                             HoldTemperature,
                             control=True,
-                            setpoint=358.15,
+                            set_point=358.15,
                             estimated_duration=3600,
                         )
                     ],
@@ -273,3 +273,14 @@ def test_coordinates_the_wrong_way_round_are_reported(normalized, log):
     [error] = log.errors
     assert '`latitude` is -104.99' in error
     assert 'wrong way round' in error
+
+
+def test_an_option_of_a_standard_is_a_protocol_of_its_own():
+    # One instance per option the standard offers, told apart by `standard_variant`, while
+    # `standard` stays the bare designation every variant is found by (§18.1).
+    low = StabilityProtocol(standard='ISOS-D-2', standard_variant='65 °C')
+    high = StabilityProtocol(standard='ISOS-D-2', standard_variant='85 °C')
+
+    assert (low.standard, low.standard_variant) == ('ISOS-D-2', '65 °C')
+    assert StabilityProtocol.m_from_dict(high.m_to_dict()).standard_variant == '85 °C'
+    assert StabilityProtocol().standard_variant is None

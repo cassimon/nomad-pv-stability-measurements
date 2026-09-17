@@ -36,7 +36,7 @@ def test_the_parser_reads_an_authored_file_into_an_entry():
     assert isinstance(archive.data, StabilityProtocol)
     held = archive.data.steps[ROUTINE].steps[3]
     assert isinstance(held, HoldVoltage)
-    assert held.setpoint.to(ureg.volt).magnitude == pytest.approx(0.8)
+    assert held.set_point.to(ureg.volt).magnitude == pytest.approx(0.8)
 
 
 def test_problems_are_logged_with_their_path(tmp_path):
@@ -63,4 +63,4 @@ def test_nomad_matches_an_authored_file_to_this_parser():
     assert isinstance(archive.data, StabilityProtocol)
     dark = archive.data.steps[ROUTINE].steps[2]
     assert isinstance(dark, HoldIrradiance)
-    assert dark.setpoint.magnitude == pytest.approx(0)
+    assert dark.set_point.magnitude == pytest.approx(0)

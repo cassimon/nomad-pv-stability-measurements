@@ -10,6 +10,9 @@ from nomad_pv_stability_measurements.parsers.translate import (
     translate,
     translate_section,
 )
+from nomad_pv_stability_measurements.schema_packages.hold_below_steps import (
+    HoldBelowWaterVaporFraction,
+)
 from nomad_pv_stability_measurements.schema_packages.hold_steps import (
     HoldBendRadius,
     HoldCurrent,
@@ -68,11 +71,11 @@ def test_a_channel_and_a_variable_name_the_step_class():
     assert translation.problems == []
     assert translation.archive == {
         'steps': [
-            entry(HoldVoltage, control=True, setpoint=0.8),
+            entry(HoldVoltage, control=True, set_point=0.8),
             entry(
                 BLOCK,
                 name='phase',
-                steps=[entry(HoldBendRadius, control=True, setpoint=2.0)],
+                steps=[entry(HoldBendRadius, control=True, set_point=2.0)],
             ),
         ]
     }
@@ -81,7 +84,7 @@ def test_a_channel_and_a_variable_name_the_step_class():
 def test_an_entry_that_carries_its_m_def_keeps_it():
     authored = {
         'steps': [
-            entry(HoldVoltage, control=True, setpoint=0.8, monitor=True),
+            entry(HoldVoltage, control=True, set_point=0.8, monitor=True),
             entry(BLOCK, name='phase'),
         ]
     }
@@ -129,7 +132,7 @@ def test_an_old_channel_class_is_read_as_its_channel():
             entry(
                 HoldTemperature,
                 control=True,
-                setpoint=358.15,
+                set_point=358.15,
                 estimated_duration=3600.0,
             )
         ]
@@ -179,7 +182,7 @@ def test_a_value_is_read_into_the_declared_unit():
             entry(
                 HoldCurrent,
                 control=True,
-                setpoint=pytest.approx(0.005),
+                set_point=pytest.approx(0.005),
                 estimated_duration=172800.0,
                 sampling_rate=10.0,
             )
@@ -231,7 +234,7 @@ def test_hold_on_a_single_variable_channel_sets_that_step():
 
     assert translation.problems == []
     assert translation.archive == {
-        'steps': [entry(HoldTemperature, control=True, setpoint=pytest.approx(338.15))]
+        'steps': [entry(HoldTemperature, control=True, set_point=pytest.approx(338.15))]
     }
 
 
@@ -242,7 +245,7 @@ def test_hold_beside_a_variable_sets_that_step():
 
     assert translation.problems == []
     assert translation.archive == {
-        'steps': [entry(HoldVoltage, control=True, setpoint=0.8)]
+        'steps': [entry(HoldVoltage, control=True, set_point=0.8)]
     }
 
 
@@ -251,7 +254,7 @@ def test_a_named_word_becomes_the_value_it_stands_for():
 
     assert translation.problems == []
     assert translation.archive == {
-        'steps': [entry(HoldIrradiance, control=True, setpoint=0.0)]
+        'steps': [entry(HoldIrradiance, control=True, set_point=0.0)]
     }
 
 
@@ -280,7 +283,7 @@ def test_a_variable_the_channel_does_not_have_is_a_problem():
     )
 
     assert translation.archive == {
-        'steps': [entry(HoldStrain, control=True, setpoint=pytest.approx(0.02))]
+        'steps': [entry(HoldStrain, control=True, set_point=pytest.approx(0.02))]
     }
     [problem] = translation.problems
     assert 'bend_radius, strain' in problem.message
@@ -297,7 +300,7 @@ def test_one_variable_set_twice_is_a_problem():
     )
 
     assert translation.archive == {
-        'steps': [entry(HoldVoltage, control=True, setpoint=pytest.approx(0.7))]
+        'steps': [entry(HoldVoltage, control=True, set_point=pytest.approx(0.7))]
     }
     assert 'both set voltage' in translation.problems[0].message
 
@@ -365,7 +368,7 @@ def test_a_point_takes_no_setpoint_beside_it():
     translation = steps({'channel': 'electrical_load', 'mpp': True, 'voltage': '0.8 V'})
 
     assert translation.archive == {'steps': []}
-    assert 'takes no setpoint' in translation.problems[0].message
+    assert 'takes no set point' in translation.problems[0].message
 
 
 # Ramps: `ramp:` picks the ramping kind of the variable (§15.14).
@@ -438,7 +441,7 @@ def test_spectrum_is_a_plain_field_of_the_irradiance_step():
             entry(
                 HoldIrradiance,
                 control=True,
-                setpoint=pytest.approx(1000),
+                set_point=pytest.approx(1000),
                 spectrum='AM1.5G',
             )
         ]
@@ -464,7 +467,7 @@ def test_a_relative_humidity_is_read_with_the_temperature_beside_it():
     [step] = translation.archive['steps']
     # The archive keeps the absolute ratio, exactly as §15.7 decided.
     assert step['m_def'] == m_def(HoldWaterVaporFraction)
-    assert step['setpoint'] == pytest.approx(0.2109, rel=1e-3)
+    assert step['set_point'] == pytest.approx(0.2109, rel=1e-3)
 
 
 def test_a_relative_humidity_needs_both_halves():
@@ -585,3 +588,215 @@ def test_a_bare_archive_translates_to_itself():
     again = translate(bare)
 
     assert (again.archive, again.problems) == (bare, [])
+
+
+def test_a_bare_archive_in_the_old_spelling_still_loads():
+    # §17.4 renamed `setpoint` to `set_point`. Every archive written before it spells the
+    # old name, and §13.1a promises it still loads — to exactly today's archive.
+    old = read('channels.setpoint.archive.yaml')
+    assert 'setpoint' in str(old) and 'set_point' not in str(old)
+
+    translation = translate(old)
+
+    assert (translation.archive, translation.problems) == (
+        read('channels.archive.yaml'),
+        [],
+    )
+
+
+def test_the_old_spelling_and_the_new_one_together_are_one_field():
+    translation = steps(entry(HoldTemperature, setpoint=300.0, set_point=300.0))
+
+    assert 'are one field' in translation.problems[0].message
+
+
+# Tolerances, and values a standard names (§17.3, §17.4).
+
+
+@pytest.mark.parametrize(
+    'authored',
+    [{'hold': 'RT'}, {'temperature': 'RT'}],
+)
+def test_room_temperature_writes_its_value_and_its_tolerance(authored):
+    translation = steps({'channel': 'temperature', **authored})
+
+    assert translation.problems == []
+    # 23 ± 4 °C, as ISOS Table 1 defines it — and no trace of the word (§17.3).
+    assert translation.archive == {
+        'steps': [
+            entry(
+                HoldTemperature,
+                set_point=pytest.approx(296.15),
+                control=True,
+                set_point_tolerance=pytest.approx(4.0),
+            )
+        ]
+    }
+
+
+def test_a_tolerance_is_written_beside_the_hold():
+    translation = steps(
+        {'channel': 'temperature', 'hold': '65 °C', 'hold_tolerance': '2 K'}
+    )
+
+    assert translation.problems == []
+    [step] = translation.archive['steps']
+    assert step['set_point_tolerance'] == pytest.approx(2)
+
+
+def test_a_written_tolerance_overrides_the_one_a_standard_value_brings():
+    # A lab whose oven holds tighter than the standard asks is stating a fact (§17.4).
+    translation = steps(
+        {'channel': 'temperature', 'hold': 'RT', 'hold_tolerance': '1 K'}
+    )
+
+    assert translation.problems == []
+    [step] = translation.archive['steps']
+    assert (step['set_point'], step['set_point_tolerance']) == (
+        pytest.approx(296.15),
+        pytest.approx(1),
+    )
+
+
+@pytest.mark.parametrize('written', ['4 °C', '4 degC', '7 degF'])
+def test_a_tolerance_in_an_offset_unit_is_refused(written):
+    # `4 °C` converts to 277.15 K, a temperature and not a spread of four degrees.
+    translation = steps(
+        {'channel': 'temperature', 'hold': '65 °C', 'hold_tolerance': written}
+    )
+
+    [step] = translation.archive['steps']
+    assert 'set_point_tolerance' not in step
+    [problem] = translation.problems
+    assert problem.path == 'steps[0].hold_tolerance'
+    assert 'in kelvin' in problem.message
+
+
+def test_a_named_value_is_read_at_either_end_of_a_ramp():
+    # `ramp: {from: RT}` is ISOS-T-1, and `from: dark` is what D8a always promised.
+    temperature = steps(
+        {'channel': 'temperature', 'ramp': {'from': 'RT', 'to': '65 °C'}}
+    )
+    light = steps({'channel': 'irradiation', 'ramp': {'from': 'dark', 'to': '1 sun'}})
+
+    assert (temperature.problems, light.problems) == ([], [])
+    [ramp] = temperature.archive['steps']
+    assert ramp['start_point'] == pytest.approx(296.15)
+    # A ramp end has no tolerance to hold the standard value's ± 4 K (§17.3).
+    assert 'set_point_tolerance' not in ramp
+    assert light.archive['steps'][0]['start_point'] == pytest.approx(0)
+
+
+def test_a_named_value_belongs_to_its_own_variable():
+    translation = steps({'channel': 'irradiation', 'hold': 'RT'})
+
+    assert translation.archive == {'steps': [entry(HoldIrradiance)]}
+    assert 'could not read `hold`' in translation.problems[0].message
+
+
+def test_dark_brings_no_tolerance():
+    translation = steps({'channel': 'irradiation', 'hold': 'dark'})
+
+    assert translation.archive == {
+        'steps': [entry(HoldIrradiance, control=True, set_point=0.0)]
+    }
+
+
+def test_a_relative_humidity_may_be_read_at_room_temperature():
+    translation = steps(
+        {'channel': 'atmosphere', 'water_vapor': {'rh': '50 %', 'at': 'RT'}}
+    )
+
+    assert translation.problems == []
+    assert translation.archive['steps'][0]['set_point'] == pytest.approx(
+        0.0138, rel=1e-2
+    )
+
+
+@pytest.mark.parametrize(
+    ('authored', 'message'),
+    [
+        ({'channel': 'electrical_load', 'hold': 'mpp'}, 'no value to be a tolerance'),
+        (
+            {'channel': 'temperature', 'ramp': {'from': 'RT', 'to': '65 °C'}},
+            'ramps or holds',
+        ),
+        ({'channel': 'electrical_load'}, 'say which variable'),
+        ({'channel': 'atmosphere', 'balance_gas': 'N2'}, 'no value to be a tolerance'),
+    ],
+)
+def test_a_tolerance_with_no_held_value_is_a_problem(authored, message):
+    translation = steps({**authored, 'hold_tolerance': '1 K'})
+
+    assert any(message in problem.message for problem in translation.problems)
+    assert not any(
+        'set_point_tolerance' in step for step in translation.archive['steps']
+    )
+
+
+# A bound: `hold_below:` picks the bounded kind (§17.5).
+
+
+def test_hold_below_names_the_bounded_kind_of_the_variable():
+    translation = steps(
+        {'channel': 'atmosphere', 'variable': 'water_vapor', 'hold_below': '55 %'}
+    )
+
+    assert translation.problems == []
+    assert translation.archive == {
+        'steps': [
+            entry(
+                HoldBelowWaterVaporFraction,
+                upper_bound=pytest.approx(0.55),
+                control=True,
+            )
+        ]
+    }
+
+
+def test_a_bound_may_be_a_relative_humidity_at_its_temperature():
+    translation = steps(
+        {
+            'channel': 'atmosphere',
+            'variable': 'water_vapor',
+            'hold_below': {'rh': '50 %', 'at': 'RT'},
+        }
+    )
+
+    assert translation.problems == []
+    [step] = translation.archive['steps']
+    assert step['upper_bound'] == pytest.approx(0.0138, rel=1e-2)
+
+
+@pytest.mark.parametrize(
+    ('authored', 'path', 'message'),
+    [
+        # No standard bounds a temperature yet, so it has no class (§17.5).
+        ({'channel': 'temperature'}, 'hold_below', 'takes no `hold_below`'),
+        (
+            {'channel': 'atmosphere', 'variable': 'water_vapor', 'hold': '1 %'},
+            'hold_below',
+            'not both',
+        ),
+        # Named nowhere: one boundable variable must not be picked for the author.
+        ({'channel': 'atmosphere'}, 'hold_below', 'say which variable is bounded'),
+    ],
+)
+def test_a_bound_that_cannot_be_placed_is_a_problem(authored, path, message):
+    translation = steps({**authored, 'hold_below': '55 %'})
+
+    assert translation.archive == {'steps': []}
+    [problem] = translation.problems
+    assert problem.path == f'steps[0].{path}'
+    assert message in problem.message
+
+
+def test_a_stored_bound_reads_back_as_a_bound():
+    # No `hold_below:` in a bare archive: the class alone must pick the kind (§17.5).
+    bare = {
+        'steps': [entry(HoldBelowWaterVaporFraction, upper_bound=0.5, control=True)]
+    }
+
+    translation = translate_section(bare, BLOCK)
+
+    assert (translation.archive, translation.problems) == (bare, [])

@@ -64,6 +64,13 @@ class StabilityProtocol(PlannedProcess, EntryData):
         description='Write here the name of the standard if this protocol is a standard one, e.g. `IEC 61215`. Free text for now.',
     )
 
+    standard_variant = Quantity(
+        type=str,
+        description='Which of the options the standard offers this protocol takes, e.g. '
+        '`65 °C` where the standard allows 65 °C or 85 °C. Each option is a protocol of '
+        'its own; leave empty where the standard offers none. Free text (Design.md §18.1).',
+    )
+
     environment = Quantity(
         type=MEnum('indoor', 'outdoor', 'other'),
         description='Where the test is run. `indoor` is a lab, `outdoor` is a field test, and `other` is anything else. Free text in `notes` can be used for additional details.',

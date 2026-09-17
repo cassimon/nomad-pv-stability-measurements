@@ -58,16 +58,37 @@ class PlannedMonitorControlStep(PlannedProcessStep):
             logger.error(
                 f'{self.name or "<unnamed>"} is a bare '
                 f'`{type(self).__name__}`, which names no quantity: use one of the '
-                f'step classes in `hold_steps.py` or `ramp_steps.py`.'
+                f'step classes in `hold_steps.py`, `ramp_steps.py` or '
+                f'`hold_below_steps.py`.'
             )
 
 
 class HoldStep(PlannedMonitorControlStep):
     """One value, held for as long as the step lasts (§15.11)."""
 
-    setpoint = Quantity(
+    set_point = Quantity(
         type=np.float64,
         description='The value to hold. Each step class declares it in its own unit.',
+    )
+    set_point_tolerance = Quantity(
+        type=np.float64,
+        description='How far either side of `set_point` still counts: `set_point ± '
+        'set_point_tolerance`. A difference, so a temperature tolerance is in kelvin — '
+        '`4 K`, never `4 °C` (§17.4). Each step class declares it in its own unit.',
+    )
+
+
+class HoldBelowStep(PlannedMonitorControlStep):
+    """One value, kept under a bound for as long as the step lasts (§17.5).
+
+    A sibling of `HoldStep`, not a subclass: a bound is not a value to hold, and sharing
+    `set_point` would give one field two meanings.
+    """
+
+    upper_bound = Quantity(
+        type=np.float64,
+        description='The most the value may be. Each step class declares it in its own '
+        'unit.',
     )
 
 
@@ -137,7 +158,7 @@ class RampStep(PlannedMonitorControlStep):
 
 
 #: The bases that name no quantity: writing one directly is an authoring mistake.
-ABSTRACT_STEPS = (PlannedMonitorControlStep, HoldStep, RampStep)
+ABSTRACT_STEPS = (PlannedMonitorControlStep, HoldStep, HoldBelowStep, RampStep)
 
 
 class PlannedSubroutineStep(PlannedProcessStep):

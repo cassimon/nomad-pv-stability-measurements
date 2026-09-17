@@ -1,0 +1,23 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-LT-1 (linear ramping, MPP)
+  standard: ISOS-LT-1
+  standard_variant: linear ramping, MPP
+  environment: indoor
+  notes: Solar-thermal cycling in a weathering chamber.
+  channel_settings:
+    irradiation:
+      control: true
+    atmosphere:
+      variable: water_vapor
+      monitor: true
+      control: false
+    electrical_load:
+      hold: mpp
+  routine:
+    commands:
+      - channel: temperature
+        ramp:
+          from: RT
+          to: 65 °C
+        end_of_ramp_behavior: triangle

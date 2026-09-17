@@ -1,0 +1,18 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: ISOS-L-3 (85 °C)
+  standard: ISOS-L-3
+  standard_variant: 85 °C
+  environment: indoor
+  notes: Light soaking under a solar simulator. Relative humidity about 50 %.
+  channel_settings:
+    irradiation:
+      control: true
+    temperature:
+      hold: 85 °C
+    atmosphere:
+      water_vapor:
+        rh: 50 %
+        at: 85 °C
+    electrical_load:
+      hold: mpp

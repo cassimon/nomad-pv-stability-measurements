@@ -2,20 +2,28 @@ from nomad.units import ureg
 
 
 def _is_monitor_control(step) -> bool:
-    # By `monitor`, not by `setpoint`: a ramp has none, and a block has neither (§15.11).
+    # By `monitor`, not by `set_point`: a ramp has none, and a block has neither (§15.11).
     return 'monitor' in step.m_def.all_quantities
+
+
+#: The kinds of step, as the prefixes of their class names — longest first, or
+#: `HoldBelow…` would lose only its `Hold` and land on a quantity of its own (§17.5).
+KIND_PREFIXES = ('HoldBelow', 'Hold', 'Ramp')
 
 
 def _quantity_of(step) -> str:
     """The quantity a step speaks to: its class name without its kind prefix, so
-    `HoldTemperature` and `RampTemperature` are two kinds of step on one quantity and
-    contradict each other exactly as two holds do (§15.11).
+    `HoldTemperature`, `RampTemperature` and `HoldBelowTemperature` are kinds of step on
+    one quantity and contradict each other exactly as two holds do (§15.11, §17.5).
 
     The name is the whole rule. This module imports no schema class, so it reads the
     class itself, never a type it would have to import (§15.4).
     """
-    cls = type(step)
-    return cls.__name__.removeprefix('Hold').removeprefix('Ramp')
+    name = type(step).__name__
+    for prefix in KIND_PREFIXES:
+        if name.startswith(prefix):
+            return name.removeprefix(prefix)
+    return name
 
 
 def report_overlapping_steps(steps, mode: str, where: str, logger) -> None:

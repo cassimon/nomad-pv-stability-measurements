@@ -1279,22 +1279,30 @@ src/nomad_pv_stability_measurements/
                       Process / ProcessStep with the plan/record split (was_executed,
                       the estimated_* fields), specific to no PV concept (§15.5)
     routine.py        PlannedMonitorControlStep (monitor, control, the sampling pair),
-                      its two kinds HoldStep (setpoint) and RampStep (start_point,
+                      its three kinds HoldStep (set_point, set_point_tolerance), HoldBelowStep
+                      (upper_bound, §17.5) and RampStep (start_point,
                       end_point, ramp_rate) (§15.11), and PlannedSubroutineStep
                       (execution_mode, steps, and repeat / repeat_n /
                       estimated_duration_one_iteration, §15.8); the checks that
                       hold for any archive (R4, R5, the sampling pair) (§15.1)
-    hold_steps.py     one HoldStep per quantity, each fixing the unit of its setpoint
+    hold_steps.py     one HoldStep per quantity, each fixing the unit of its set_point
+                      and set_point_tolerance (§17.4)
                       (HoldTemperature, HoldIrradiance, ..., the atmosphere pair and
                       HoldPressure), plus BalanceGas (a gas name), which holds no
                       number at all (§15.1, §15.7, §15.10, §15.11)
     ramp_steps.py     one RampStep per quantity, each fixing the unit of both ends and
                       of the rate (RampTemperature, ...) (§15.11)
+    hold_below_steps.py  one HoldBelowStep per quantity a standard bounds, fixing the
+                      unit of its upper_bound — HoldBelowWaterVaporFraction only (§17.5)
+    standard_values.py  StandardValue (name, value, tolerance) and the values a
+                      standard names: RoomTemperature (23 ± 4 °C), Dark. Never stored;
+                      the parser resolves `RT` / `dark` into a step's fields (§17.2)
     mpp_steps.py      the electrical load driven to a point it finds rather than to a
                       number: MPPTracking (with the perturbation settings an operator
                       sets) and VOCTracking; the file a JV sweep would go in
                       (D17, §15.10, §15.13)
-    utils.py          the checks a block and the protocol share: R4, R5, and R6, which
+    utils.py          the checks a block and the protocol share: R4 (grouping by class
+                      name minus KIND_PREFIXES, §17.5), R5, and R6, which
                       fits steps to their block's duration (§15.4); check_steps runs the
                       three over one iteration of a repeating block (§15.8)
     states.py         Ramp, Cycle, Tabulated, Sweep — superseded: the ramp is a step's
@@ -2418,7 +2426,8 @@ which is the part that has to be written out by hand for each row.
 
 ## 17. Standard values, tolerances, and bounds
 
-**Status: proposed, not built.** Asked for in review, to close two gaps §16.3 recorded: "RT to
+**Status: steps 1–5 built (§17.6); step 6, the ISOS files, waits on review.** Where the build
+departed from the proposal, the text below is marked *Amended while building*. Asked for in review, to close two gaps §16.3 recorded: "RT to
 65 °C" gives no number for room temperature, and "< 55 %" is a bound the schema can only store as
 an equality. A third thing falls out for free — `23 ± 4 °C` currently loses its `± 4`.
 
@@ -2455,7 +2464,9 @@ figure (§16.2, Rule 1). The `description` says so, and `name` is what carries i
 
 **Verify before building** (the `location` collision in §15.12 was found this way): that
 `ArchiveSection` declares no `name` of its own, and that a `default` on a unit-ful `Quantity`
-reads back in the declared unit.
+reads back in the declared unit. *Verified while building: `ArchiveSection` declares no
+properties at all, and the default reads back as `296.15 kelvin`. Defaults do not appear in
+`m_to_dict()` — harmless, since a standard value is never stored and the parser reads attributes.*
 
 **Why a section at all, when the parser inlines the numbers (§17.3)?** Because the alternative is
 a dict literal in `channels.py`, and this way the definition is *published*: it appears in the
@@ -2492,7 +2503,15 @@ beside a section branch. Separable from the rest of this section if it is not wa
 works — silently does not resolve. The gate becomes `key in ('set_point', 'start_point',
 'end_point')`. This is not polish: `ramp: {from: RT, to: 65 °C}` **is** ISOS-T-1 and ISOS-LT-1,
 so `RT` is needed at a ramp endpoint on day one. A tolerance has nowhere to go on a ramp
-endpoint, and is dropped there with a reported problem rather than silently.
+endpoint, and is dropped there with a reported problem rather than silently. *Amended while
+building: dropped **without** a problem. Reporting it would make `ramp: {from: RT, to: 65 °C}` —
+ISOS-T-1's own spelling, and the reason this paragraph exists — impossible to write cleanly, when
+every shipped file must translate with zero problems (§16.4). The value lands exactly; only the
+± 4 K has no field, and no standard here states a tolerance on a ramp's end.*
+
+*Also amended while building: `NAMED_VALUES` is keyed by **variable** (`'temperature'`), not by
+class, so one entry serves the hold, the ramp and the bound of that variable alike. The
+relative-humidity compound reads through the same path, so `{rh: 50 %, at: RT}` works too.*
 
 ### 17.4 `set_point` and `set_point_tolerance`
 
@@ -2513,7 +2532,10 @@ temperature: {hold: RT}                 # both fields, from the standard value
 - **A tolerance is a *difference*, so its unit is a difference unit.** `hold_tolerance: 4 °C`
   reads as 277.15 K through `parse()` — the O11 trap, and silent. The plan is to **refuse an
   offset unit on a tolerance** with a message naming `4 K`, which is a small, targeted check of
-  exactly the kind §6 exists for.
+  exactly the kind §6 exists for. *Built as `parse_difference` (`units.py`): converting **zero**
+  exposes an offset through pint's public API (0 °C → 273.15 K ≠ 0), and any field whose name ends
+  in `_tolerance` is read through it. A tolerance on a tracked point, a ramp, a gas or a whole
+  channel is reported — there is no single held value for it to belong to.*
 
 **Compatibility is the risk in this section, not the rename itself.** §13.1a promises that no
 file which loaded before stops loading, and `setpoint` appears in every bare archive ever written
@@ -2549,10 +2571,21 @@ plain hold — two steps commanding one quantity, unreported. The prefixes becom
 first:
 
 ```python
-for prefix in ('HoldBelow', 'HoldAbove', 'Hold', 'Ramp'):
+KIND_PREFIXES = ('HoldBelow', 'Hold', 'Ramp')   # utils.py; HoldAbove joins when it exists
 ```
 
 Asking for a bound **sets `control`**, as a setpoint and a ramp do (§15.13, §15.14).
+
+*Found while building — a hole the partial table opened.* `{channel: atmosphere, hold_below: 55 %}`
+with **no variable named** fell into the "channel logged as a whole" expansion (§15.2), which
+yields one step per variable *that has a class in the kind's table*. With water vapour the only
+boundable variable, that was exactly one class, so the bound **silently landed on the water
+vapour** without the author ever naming it. Ramps escaped only by luck: three atmosphere
+variables ramp, so the old `len(classes) != 1` check fired. The check now lives where the kind
+is chosen — **a ramp or a bound names one variable, never a channel's worth** — so it no longer
+depends on how many classes a table happens to hold, and the two `len(classes)` checks it
+replaced were unreachable and are gone. `hold_below` also takes the relative-humidity compound,
+read through the water vapour's own hold, since a bound has no `set_point` to read it by.
 
 ### 17.6 Order of work, each step reviewable on its own
 
@@ -2582,3 +2615,133 @@ Asking for a bound **sets `control`**, as a setpoint and a ramp do (§15.13, §1
 - **Still unreachable, and not addressed here:** ISOS-LT-2/3's "controlled at 50 % beyond 40 °C"
   is a bound *conditioned on another quantity* — `HoldBelow` is unconditional. Footnoted in
   `notes`, as §15.9 and §16.2 settled.
+
+---
+
+## 18. One protocol per option — `standard_variant`, and the transcription settled
+
+**Status: settled in review; D, V, L, O and LT built (48 files), T and LC blocked (§18.5).**
+
+### 18.1 An option is a protocol
+
+Where ISOS Table 1 offers options — "65, 85 °C", "MPP or OC", six biases — each combination is a
+**separate `StabilityProtocol` instance**: a different run is a different protocol, and in NOMAD
+a different entry. One file per combination, with the options in the file name, in the table's
+column order (light, temperature, humidity, load):
+
+```
+isos/ISOS-D-1/ISOS-D-1.stability.yaml                   no options: the designation alone
+isos/ISOS-D-2/ISOS-D-2_65degC.stability.yaml
+isos/ISOS-L-2/ISOS-L-2_85degC_MPP.stability.yaml
+isos/ISOS-V-2/ISOS-V-2_65degC_minus-Jmpp.stability.yaml
+```
+
+*Amended in review:* **one folder per standard**, named by its designation, so the variants of a
+row sit together instead of 48 files in one directory. The parser matches
+`.*\.stability\.ya?ml$` on the whole path, so nesting changes nothing for NOMAD.
+
+`StabilityProtocol.standard_variant` (str, free text) names the option taken — `65 °C, MPP` — and
+stays empty where the standard offers none. `standard` stays the bare designation, so every
+variant of ISOS-L-2 is still found by searching `ISOS-L-2`. `name` is both together,
+`ISOS-L-2 (85 °C, MPP)`, so two entries of one upload are told apart in the ELN.
+
+The merged cells of the workbook decide what an option applies to: **the biases span
+ISOS-V-1 to -3** (`G8:G10`), and **the light/dark cycle spans ISOS-LC-1 to -3** (`B24:B26`).
+
+### 18.2 The transcription, row by row
+
+| The table says | The file writes |
+|---|---|
+| Temperature "Ambient (23 ± 4 °C)" | `temperature: {hold: RT}` — a stated value with a stated tolerance (§17.2) |
+| Temperature or humidity "Ambient" | `{control: false}` — stated only as *not regulated* |
+| Light "None" | `irradiation: {hold: dark}` |
+| Light "Solar simulator" | `irradiation: {control: true}` — regulated, at no stated irradiance |
+| Light "Sunlight" | `irradiation: {control: false}`, with `environment: outdoor` |
+| "65, 85 °C" | one file each, `temperature: {hold: 65 °C}` |
+| Humidity "85%", "~ 50%" at a held temperature | `water_vapor: {rh: 85 %, at: 65 °C}` |
+| Humidity "Monitored, uncontrolled" | `{monitor: true, control: false}` |
+| Humidity "Monitored, controlled at 50% beyond 40 °C" | `{monitor: true}` — the conditional control stays in `notes` (§15.9) |
+| Load "OC" / "MPP" | `hold: open_circuit` / `hold: mpp` |
+| Bias V_MPP, V_oc, −V_oc | `{variable: voltage, control: true}` — no set point, since each is measured on the device. E_g/q is no option (§18.6) |
+| Bias J_SC, −J_MPP | `{variable: current, control: true}` |
+| "Linear ramping between 5 °C and 65 °C" | `routine` with `ramp: {from: 5 °C, to: 65 °C}`, `end_of_ramp_behavior: triangle` |
+
+The distinction in the first two rows is the table's own: "Ambient (23 ± 4 °C)" states a figure
+and a tolerance, bare "Ambient" states none.
+
+**No `geo_location` for ISOS-O.** The standard names no site. **No sign on a bias**: `−V_oc` and
+`V_oc` are the same step without a set point, and the sign lives in `notes` and the file name.
+
+### 18.3 `notes` say what the standard says — nothing about the schema
+
+Very short, and only the standard's content: the set-up column, and what a bias is determined
+from. How a row became fields is a design decision and lives here, never in an upload:
+
+```yaml
+notes: Dark storage in an oven in ambient air.
+notes: Dark. Bias at −J_MPP, from a light J–V curve of the fresh device, in ambient air.
+```
+
+### 18.4 The tests compare whole archives
+
+`tests/example_uploads/test_isos_protocols.py` holds one expected archive per file, built from
+the figures in SI units, and compares it to the **whole** `m_to_dict()` of the loaded,
+normalized protocol. Equality of the whole dict is what "every individual field" means: a field
+written wrongly fails, and so does a field written that should not be there (a sampling interval,
+a duration, a set point on a bias). The set of files and the set of expectations must be equal,
+so no file ships untested. `notes` are checked to be present and short, not word for word.
+
+### 18.5 Blocked: two things the current schema cannot say without inventing
+
+**A — a cycle that repeats for as long as the test runs (all of ISOS-LC, 48 files).** The table
+states the cycle — period 2, 8 or 24 h, light:dark 1:1 or 1:2 — but not how many cycles or how
+long the test runs. A block without a written `estimated_duration` derives one from its steps
+(§15.4), so a light/dark block **lasts exactly one period**, and the protocol with it: the file
+would claim a 2 h test. `repeat: n_times` needs a `repeat_n` the table does not give. What is
+missing is a repeat that is *indefinite* — e.g. `n_times` with `repeat_n` optional, meaning
+"until the test ends", with the block's duration then not derived.
+
+**B — a cycle between two temperatures whose shape the table does not state (ISOS-T, 6 files;
+the "step ramping" option of ISOS-LT-1, 2 files).** "RT to 65 °C" says the endpoints, not linear
+ramps (`triangle`), a jump (`sawtooth`), or dwells at each end — and a dwell needs a duration the
+table does not give. ISOS-LT is buildable only because it says **"linear"**. What is missing is a
+cycle between two values with the shape left unstated, or a decision that "thermal cycling"
+means linear ramps.
+
+Also found: ISOS-T-3's "< 55 %" is a *relative* humidity bound during a temperature cycle, so it
+has no single temperature to be converted at — `hold_below: {rh: 55 %, at: …}` has nothing to put
+after `at`. It would go into `notes` with the conditional control of LT-2/3.
+
+### 18.6 Every option checked against the text, not the table's punctuation
+
+Asked for in review. Table 1 writes "or" in some cells ("MPP or OC", "Linear or step") and only
+commas or semicolons in others ("65, 85 °C", the bias list), which on their own could as well
+mean *both*. Each was checked against the consensus statement's text (Khenkin et al., *Nature
+Energy* 5, 35–49, 2020, CC BY):
+
+| Option | Verdict | The text |
+|---|---|---|
+| 65 / 85 °C | option | "controlled elevated temperatures of 65 **or** 85 °C" (D-2); "(65 **or** 85 °C)" (D-3); "a fixed set point temperature of 65 **or** 85 °C" (LC-2) |
+| MPP / OC, levels 1–2 | option | "For lower levels of sophistication, we give options of exposure under open-circuit condition or using a fixed voltage bias near the MPP" |
+| **OC at ISOS-LT-3** | **no option** — removed | "we indicate MPP tracking as **mandatory** only at the third, most advanced level". The table's "MPP or OC" for LT-3 contradicts it; L-3, O-3 and LC-3 already say MPP alone. |
+| V_MPP / V_oc | option | "applying a voltage equal to VMPP **or** VOC … as a positive bias condition" |
+| J_SC | option | "constant-current stress … such stability tests might also be useful" |
+| **E_g/q** | **no option** — removed | "we recommend voltages **below** the bandgap energy divided by the charge of the electron": an upper limit on the two voltages above, and so written into their `notes` |
+| −V_oc / −J_MPP | option, and the sign is the text's | "a constant negative bias applied (for example, −VOC) … and with the current enforced up to **−JMPP**". The table omits the minus on J_MPP; the text has it. |
+| 2 / 8 / 24 h; 1:1 / 1:2 (LC) | option, **light:dark** | "cycle periods of 2, 8, **or** 24 h and duty cycles (light:dark) of 1:1 **or** 1:2" |
+| Linear / step (LT-1) | option | explicit "or" in the cell |
+
+**Removed: 6 files** (five E_g/q variants and ISOS-LT-3's OC), leaving 48.
+
+Four further findings, recorded and not acted on:
+
+- **A load option the table does not list.** The same sentence offers "a fixed voltage bias near
+  the MPP (instead of active MPP tracking)" at levels 1–2. The table writes only "MPP or OC", and
+  gives no voltage, so no file is written for it.
+- **ISOS-LC-3's humidity disagrees with itself**: the table says "< 50%", the text "RH is held at
+  50%". To settle before LC is built.
+- **"−VOC" is "for example"** in the text, where the table lists it as the negative voltage. It is
+  kept as the table's value.
+- **The cycle shape is the author's to report, not the standard's to fix.** The reporting
+  checklist (Table 3) asks for "Cycling procedure: Dwell and period times" — confirming §18.5 B:
+  ISOS-T states no shape, so a file cannot either.
