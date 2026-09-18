@@ -1,0 +1,26 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.measurement_plan.StabilityProtocolMeasurementPlan
+  name: Light–dark cycling at 65 °C
+  standard: ISOS-LC-2
+  standard_variant: 65 °C, MPP, 2 h, 1:1
+  environment: indoor
+  location: Lab A
+  notes: One variant of ISOS-LC-2, written out as a plan for a measurement.
+  channel_settings:
+    temperature:
+      hold: 65 °C
+      monitor: true
+      sample_every: 2 min
+    atmosphere:
+      variable: relative_humidity
+      control: false
+      monitor: true
+    electrical_load:
+      hold: mpp
+      monitor: true
+      sample_every: 1 min
+  routine:
+    repeat: indefinitely
+    instructions:
+      - {channel: irradiation, hold: 1 sun, control: true, monitor: true, duration: 1 h}
+      - {channel: irradiation, hold: dark, control: true, monitor: true, duration: 1 h}

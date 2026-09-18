@@ -1,0 +1,9 @@
+# A simulated run of the plan beside it: no cell was measured. The data is made up by
+# `parsers/simulation_parser.py`, from what the plan sets and a cell that degrades.
+simulation:
+  protocol: light-dark-cycling.stability.yaml
+  name: Cell A, light–dark cycling
+  start: 2026-03-02T09:00:00Z
+  duration: 24 h
+  sample_every: 5 min
+  seed: 1
