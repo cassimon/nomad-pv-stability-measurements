@@ -211,69 +211,100 @@ def measured_quantity(instruction) -> str | None:
     return re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
 
 
-def time_series_figure(title: str, series_by_quantity: dict) -> dict:
+def time_series_figure(title: str, series_by_quantity: dict, steps=()) -> dict:
     """One row per quantity, shared time axis in hours: what was measured as a line,
     what it was set to dashed. The series of one quantity are joined across
-    steps.
+    steps. With `steps`, a last row shows which step runs when, by its index.
 
     Plotly's JSON written directly: a measurement has a figure per step, and building
     each through plotly's objects takes longer than the rest of normalizing.
     """
-    rows = len(series_by_quantity)
+    rows = [
+        _quantity_row(quantity, series)
+        for quantity, series in series_by_quantity.items()
+    ]
+    if steps:
+        rows.append(_step_row(steps))
     gap = 0.04
-    height = (1 - gap * (rows - 1)) / rows
-    data, layout = (
-        [],
-        {
-            'title': {'text': title},
-            'height': max(300, 220 * rows),
-            'xaxis': {'title': {'text': 'time [h]'}, 'anchor': f'y{rows}'},
-        },
-    )
-    for row, (quantity, series) in enumerate(series_by_quantity.items(), start=1):
+    height = (1 - gap * (len(rows) - 1)) / len(rows)
+    data = []
+    layout = {
+        'title': {'text': title},
+        'height': max(300, 220 * len(rows)),
+        'xaxis': {'title': {'text': 'time [h]'}, 'anchor': f'y{len(rows)}'},
+    }
+    for row, (traces, axis_layout) in enumerate(rows, start=1):
         axis = '' if row == 1 else str(row)
-        unit = None
-        for field, dash in (('value', 'solid'), ('set_value', 'dash')):
-            x, y, until = [], [], None
-            for each in series:
-                values = getattr(each, field)
-                if values is None or each.time is None:
-                    continue
-                values, unit = _shown(values)
-                step = each.m_parent
-                start = step.elapsed_at_start.to('hour').magnitude
-                if until is not None and start > until + 1e-9:
-                    x, y = [*x, None], [*y, None]  # no data in between: a gap
-                until = start + step.duration.to('hour').magnitude
-                x += list(each.time.to('hour').magnitude)
-                y += values
-            if x:
-                data.append(
-                    {
-                        'type': 'scatter',
-                        'mode': 'lines',
-                        'x': x,
-                        'y': y,
-                        'xaxis': 'x',
-                        'yaxis': f'y{axis}',
-                        # A set value holds until the next: a staircase.
-                        'line': {
-                            'dash': dash,
-                            'width': 1.5,
-                            'shape': 'hv' if field == 'set_value' else 'linear',
-                        },
-                        'name': f'{quantity.replace("_", " ")} '
-                        f'({field.replace("_", " ")})',
-                    }
-                )
-        label = quantity.replace('_', ' ')
+        data += [{**trace, 'xaxis': 'x', 'yaxis': f'y{axis}'} for trace in traces]
         top = 1 - (row - 1) * (height + gap)
         layout[f'yaxis{axis}'] = {
-            'title': {'text': f'{label} [{unit}]' if unit else label},
+            **axis_layout,
             'domain': [max(0.0, top - height), top],
             'anchor': 'x',
         }
     return {'data': data, 'layout': layout}
+
+
+def _quantity_row(quantity: str, series: list) -> tuple[list, dict]:
+    """The traces of one quantity, and its axis."""
+    traces, unit = [], None
+    for field, dash in (('value', 'solid'), ('set_value', 'dash')):
+        x, y, until = [], [], None
+        for each in series:
+            values = getattr(each, field)
+            if values is None or each.time is None:
+                continue
+            values, unit = _shown(values)
+            step = each.m_parent
+            start = step.elapsed_at_start.to('hour').magnitude
+            if until is not None and start > until + 1e-9:
+                x, y = [*x, None], [*y, None]  # no data in between: a gap
+            until = start + step.duration.to('hour').magnitude
+            x += list(each.time.to('hour').magnitude)
+            y += values
+        if x:
+            traces.append(
+                {
+                    'type': 'scatter',
+                    'mode': 'lines',
+                    'x': x,
+                    'y': y,
+                    # A set value holds until the next: a staircase.
+                    'line': {
+                        'dash': dash,
+                        'width': 1.5,
+                        'shape': 'hv' if field == 'set_value' else 'linear',
+                    },
+                    'name': f'{quantity.replace("_", " ")} ({field.replace("_", " ")})',
+                }
+            )
+    label = quantity.replace('_', ' ')
+    return traces, {'title': {'text': f'{label} [{unit}]' if unit else label}}
+
+
+def _step_row(steps) -> tuple[list, dict]:
+    """Which step runs when: its index in `steps`, from its start to its end, and its
+    name on hover."""
+    x, y, names = [], [], []
+    for index, step in enumerate(steps):
+        x.append(step.elapsed_at_start.to('hour').magnitude)
+        y.append(index)
+        names.append(step.name)
+    last = steps[-1]
+    x.append((last.elapsed_at_start + last.duration).to('hour').magnitude)
+    y.append(len(steps) - 1)
+    names.append(last.name)
+    trace = {
+        'type': 'scatter',
+        'mode': 'lines',
+        'x': x,
+        'y': y,
+        'line': {'shape': 'hv', 'width': 1.5, 'color': 'grey'},
+        'text': names,
+        'hovertemplate': 'step %{y}: %{text}<extra></extra>',
+        'name': 'step',
+    }
+    return [trace], {'title': {'text': 'step'}, 'rangemode': 'tozero'}
 
 
 def _shown(values) -> tuple[list, str]:
@@ -578,7 +609,9 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
                     index=0,
                     open=True,
                     figure=time_series_figure(
-                        self.name or 'Stability measurement', series_by_quantity
+                        self.name or 'Stability measurement',
+                        series_by_quantity,
+                        steps=self.steps,
                     ),
                 )
             ]

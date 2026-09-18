@@ -72,7 +72,11 @@ def test_nomad_simulates_a_run_of_the_example_plan():
     assert [row['name'] for row in measurement.figures[0].figure['data']] == [
         'temperature (set value)',
         'irradiance (set value)',
+        # Which step runs when, by its index: 24 steps, the last to the run's end.
+        'step',
     ]
+    [*_, steps] = measurement.figures[0].figure['data']
+    assert (steps['y'][0], steps['y'][-1], steps['x'][-1]) == (0, 23, 24)
 
 
 def test_a_plan_with_options_needs_a_variant(tmp_path):
