@@ -63,6 +63,22 @@ def measured(normalized, instructions, hours, **plan_fields):
                 (4, 1, 'hot'),
             ],
         ),
+        # Nested repetitions are unrolled: 5 × 10 × two steps is 100 steps.
+        (
+            [
+                CountingRepeatingBlock(
+                    repeat_n=5,
+                    sub_instructions=[
+                        CountingRepeatingBlock(
+                            repeat_n=10, sub_instructions=[light(1), dark(1)]
+                        )
+                    ],
+                )
+            ],
+            200,
+            {},
+            [(hour, 1, 'light' if hour % 2 == 0 else 'dark') for hour in range(100)],
+        ),
         # A timed block stops its instructions wherever they are.
         (
             [

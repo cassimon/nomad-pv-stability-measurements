@@ -214,41 +214,66 @@ def measured_quantity(instruction) -> str | None:
 def time_series_figure(title: str, series_by_quantity: dict) -> dict:
     """One row per quantity, shared time axis in hours: what was measured as a line,
     what it was set to dashed. The series of one quantity are joined across
-    steps."""
-    from plotly.subplots import make_subplots
+    steps.
 
+    Plotly's JSON written directly: a measurement has a figure per step, and building
+    each through plotly's objects takes longer than the rest of normalizing.
+    """
     rows = len(series_by_quantity)
-    figure = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.04)
+    gap = 0.04
+    height = (1 - gap * (rows - 1)) / rows
+    data, layout = (
+        [],
+        {
+            'title': {'text': title},
+            'height': max(300, 220 * rows),
+            'xaxis': {'title': {'text': 'time [h]'}, 'anchor': f'y{rows}'},
+        },
+    )
     for row, (quantity, series) in enumerate(series_by_quantity.items(), start=1):
+        axis = '' if row == 1 else str(row)
         unit = None
         for field, dash in (('value', 'solid'), ('set_value', 'dash')):
-            x, y = [], []
+            x, y, until = [], [], None
             for each in series:
                 values = getattr(each, field)
                 if values is None or each.time is None:
                     continue
                 values, unit = _shown(values)
+                step = each.m_parent
+                start = step.elapsed_at_start.to('hour').magnitude
+                if until is not None and start > until + 1e-9:
+                    x, y = [*x, None], [*y, None]  # no data in between: a gap
+                until = start + step.duration.to('hour').magnitude
                 x += list(each.time.to('hour').magnitude)
                 y += values
             if x:
-                figure.add_scatter(
-                    x=x,
-                    y=y,
-                    row=row,
-                    col=1,
-                    mode='lines',
-                    line=dict(dash=dash, width=1.5),
-                    name=f'{quantity.replace("_", " ")} ({field.replace("_", " ")})',
+                data.append(
+                    {
+                        'type': 'scatter',
+                        'mode': 'lines',
+                        'x': x,
+                        'y': y,
+                        'xaxis': 'x',
+                        'yaxis': f'y{axis}',
+                        # A set value holds until the next: a staircase.
+                        'line': {
+                            'dash': dash,
+                            'width': 1.5,
+                            'shape': 'hv' if field == 'set_value' else 'linear',
+                        },
+                        'name': f'{quantity.replace("_", " ")} '
+                        f'({field.replace("_", " ")})',
+                    }
                 )
         label = quantity.replace('_', ' ')
-        figure.update_yaxes(
-            title_text=f'{label} [{unit}]' if unit else label, row=row, col=1
-        )
-    figure.update_xaxes(title_text='time [h]', row=rows, col=1)
-    figure.update_layout(
-        title_text=title, height=max(300, 220 * rows), template='plotly_white'
-    )
-    return figure.to_plotly_json()
+        top = 1 - (row - 1) * (height + gap)
+        layout[f'yaxis{axis}'] = {
+            'title': {'text': f'{label} [{unit}]' if unit else label},
+            'domain': [max(0.0, top - height), top],
+            'anchor': 'x',
+        }
+    return {'data': data, 'layout': layout}
 
 
 def _shown(values) -> tuple[list, str]:
@@ -303,15 +328,18 @@ class StabilityMeasurementStep(PlotSection, ActivityStep):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        series = self.series()
+        # A quantity without data, planned but not recorded, is left out of the plot.
+        series = {
+            name: [each]
+            for name, each in self.series().items()
+            if each.time is not None
+        }
         if series:
             self.figures = [
                 PlotlyFigure(
                     label='Time series',
                     index=0,
-                    figure=time_series_figure(
-                        self.name, {name: [each] for name, each in series.items()}
-                    ),
+                    figure=time_series_figure(self.name, series),
                 )
             ]
 
@@ -540,6 +568,8 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         series_by_quantity: dict = {}
         for step in self.steps:
             for quantity, each in step.series().items():
+                if each.time is None:
+                    continue  # planned, but not recorded
                 series_by_quantity.setdefault(quantity, []).append(each)
         if series_by_quantity:
             self.figures = [

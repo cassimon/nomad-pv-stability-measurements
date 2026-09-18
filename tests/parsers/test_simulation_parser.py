@@ -4,15 +4,28 @@ import os
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 from nomad.client import normalize_all, parse
 from nomad.datamodel import EntryArchive, EntryMetadata
+from nomad.units import ureg
 
 from nomad_pv_stability_measurements.parsers.simulation_parser import (
-    NOISE,
     StabilitySimulationParser,
+    set_value,
+)
+from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
+    HoldBetweenIrradiance,
+)
+from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
+    HoldTemperature,
+    HoldVoltage,
 )
 from nomad_pv_stability_measurements.schema_packages.measurement_plan import (
     StabilityMeasurement,
+)
+from nomad_pv_stability_measurements.schema_packages.mpp_instructions import MPPTracking
+from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
+    RampTemperature,
 )
 
 EXAMPLE = os.path.join(
@@ -42,18 +55,24 @@ def test_nomad_simulates_a_run_of_the_example_plan():
         1000,
         0,
     }
-    # Whatever is monitored is measured, whatever is controlled is set, when sampled.
+    # Only what can be known without a model of the cell or its surroundings: the set
+    # values the plan states. Nothing is measured, and a tracker's value is the cell's.
+    assert {
+        name: each.set_value is not None
+        for name, each in measurement.steps[0].series().items()
+    } == {
+        'temperature': True,
+        'irradiance': True,
+        'power': False,
+        'relative_humidity': False,
+    }
     for each in series:
-        assert (each.value is not None) == each.monitored
-        assert (each.set_value is not None) == (
-            each.controlled and each.m_def.name != 'PowerSeries'
-        )
-        for values in (each.value, each.set_value):
-            assert values is None or len(values) == len(each.time)
-    # The cell delivers no power in the dark: what is measured is only noise.
-    dark = measurement.steps[1].power.value.to('W').magnitude
-    assert np.abs(dark).max() < 5 * NOISE['power']
-    assert [figure.label for figure in measurement.figures] == ['Time series']
+        assert each.value is None
+        assert each.set_value is None or len(each.set_value) == len(each.time)
+    assert [row['name'] for row in measurement.figures[0].figure['data']] == [
+        'temperature (set value)',
+        'irradiance (set value)',
+    ]
 
 
 def test_a_plan_with_options_needs_a_variant(tmp_path):
@@ -79,3 +98,45 @@ def test_a_plan_with_options_needs_a_variant(tmp_path):
     assert 'name one as `variant`' in message
     assert 'P (65 °C)' in message
     assert archive.data is None
+
+
+K_PER_S = ureg.kelvin / ureg.second
+
+
+@pytest.mark.parametrize(
+    ('instruction', 'expected'),
+    [
+        (HoldTemperature(set_point=338.15), [338.15, 338.15, 338.15]),
+        # 300 K → 310 K at 1 K/s, then back at the same rate.
+        (
+            RampTemperature(
+                start_point=300,
+                end_point=310,
+                ramp_rate=1 * K_PER_S,
+                end_of_ramp_behavior='triangle',
+            ),
+            [300, 310, 305],
+        ),
+        # Not stated by the plan: a point on the cell's characteristic, what a tracker
+        # finds, a bound, and a cycle by an unstated path.
+        (HoldVoltage(reference_point='near V_MPP'), None),
+        (MPPTracking(), None),
+        (HoldBetweenIrradiance(lower_bound=800, upper_bound=1000), None),
+        (
+            RampTemperature(
+                start_point=300,
+                end_point=310,
+                ramp_rate=1 * K_PER_S,
+                end_of_ramp_behavior='cycle',
+            ),
+            None,
+        ),
+    ],
+)
+def test_only_a_value_the_plan_states_is_set(instruction, expected):
+    value = set_value(instruction, np.array([0.0, 10.0, 15.0]))
+
+    if expected is None:
+        assert value is None
+    else:
+        assert value.to('K').magnitude == pytest.approx(expected)
