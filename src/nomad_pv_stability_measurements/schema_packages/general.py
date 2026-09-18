@@ -1,9 +1,9 @@
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import numpy as np
-from nomad.datamodel.data import ArchiveSection, EntryData
-from nomad.datamodel.metainfo.basesections.v2 import Activity, ActivityStep
+from nomad.datamodel.data import ArchiveSection
+from nomad.datamodel.metainfo.basesections.v2 import Activity, BaseSection
 from nomad.metainfo import (
     Datetime,
     MEnum,
@@ -53,7 +53,7 @@ def words(class_name: str) -> str:
 
 
 class Instruction(ArchiveSection):
-    """Something to be done, which is completed after its `estimated_duration`.
+    """Something to be done, which is completed after its `duration`.
 
     Instructions are consistent on their own: a block's duration is always derived from
     what it contains. Only a `Plan` stops its instructions early.
@@ -73,25 +73,27 @@ class Instruction(ArchiveSection):
         type=str, description='Anything else worth saying about this instruction.'
     )
 
-    estimated_duration = Quantity(
+    duration = Quantity(
         type=np.float64,
         unit='s',
         description='How long the whole instruction is going to take, including any '
-        'sub-instructions. Must be positive. Empty means it never finishes.',
+        'sub-instructions. Must be positive. Empty means the end is indefinite.',
     )
 
     sub_instructions = SubSection(
         section_def=SectionProxy('Instruction'),
         repeats=True,
-        description='The instructions this one is made of.',
+        description='An Instruction can contain others. The idea is that a specialized '
+        'instruction can be a block of more general instructions (length of sub_instructions greater 1) or a single Instruction.'
+        '(This field is None and the specialized class describes instruction behavior)',
     )
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        if self.estimated_duration is not None and self.estimated_duration <= 0:
+        if self.duration is not None and self.duration <= 0:
             logger.error(
-                f'{self.name or "<unnamed>"} writes an `estimated_duration` of '
-                f'{self.estimated_duration.to("s").magnitude:g} s: it must be positive.'
+                f'{self.name or "<unnamed>"} writes a `duration` of '
+                f'{self.duration.to("s").magnitude:g} s: it must be positive.'
             )
         self.label = self.name or self.describe()
 
@@ -116,7 +118,7 @@ class SingleInstruction(Instruction):
 class InstructionBlock(Instruction):
     """Instructions run one after another or simultaneously — once.
 
-    The parent of the blocks that repeat. Its `estimated_duration` is always derived
+    The parent of the blocks that repeat. Its `duration` is always derived
     from its sub-instructions, and empty if any of them never finishes.
     """
 
@@ -133,7 +135,7 @@ class InstructionBlock(Instruction):
             logger.error(
                 f'{self.name or "<unnamed>"} is a block, but has no sub-instructions.'
             )
-        self.estimated_duration = self.derive_duration()
+        self.duration = self.derive_duration()
 
     def describe(self) -> str:
         count = len(self.sub_instructions)
@@ -151,7 +153,7 @@ class InstructionBlock(Instruction):
     def one_iteration(self):
         """How long the sub-instructions take once; `None` if they never finish."""
         return combined_duration(
-            [each.estimated_duration for each in self.sub_instructions],
+            [each.duration for each in self.sub_instructions],
             self.sub_instruction_execution_mode,
         )
 
@@ -164,7 +166,7 @@ class RepeatingBlock(InstructionBlock):
 
     Its kind says which: a timed block always finishes, an indefinite one never does, and
     a counting one should. On its own it is not known to finish, so its
-    `estimated_duration` is empty.
+    `duration` is empty.
     """
 
     def describe_repetition(self) -> str:
@@ -178,7 +180,7 @@ class TimedRepeatingBlock(RepeatingBlock):
     """Instructions repeated for `repeat_duration`, then stopped — wherever they are.
 
     It always finishes: `repeat_duration` is what ends it, and so its
-    `estimated_duration`, whether or not its sub-instructions ever finish.
+    `duration`, whether or not its sub-instructions ever finish.
     """
 
     repeat_duration = Quantity(
@@ -208,16 +210,16 @@ class TimedRepeatingBlock(RepeatingBlock):
 IndefiniteRepeatingBlock = RepeatingBlock
 """Instructions repeated until something outside stops them — it never finishes.
 
-Its `estimated_duration` is always empty; only the plan it belongs to ends it.
+Its `duration` is always empty; only the plan it belongs to ends it.
 """
 
 
 class CountingRepeatingBlock(RepeatingBlock):
     """Instructions repeated `repeat_n` times — it should finish.
 
-    Its `estimated_duration` is one iteration times `repeat_n`. Without a count, or with a
+    Its `duration` is one iteration times `repeat_n`. Without a count, or with a
     sub-instruction that never finishes, it does not finish after all: that is warned
-    about, and its `estimated_duration` is empty.
+    about, and its `duration` is empty.
     """
 
     repeat_n = Quantity(
@@ -259,29 +261,11 @@ class CountingRepeatingBlock(RepeatingBlock):
         return self.repeat_n * one
 
 
-class Plan(EntryData):
-    """What is planned to be done, as instructions.
-
-    A plan is not an activity: `execute()` makes one out of it. Its `estimated_duration`
-    is the one place instructions can be stopped before they finish.
+class Plan(BaseSection):
+    """What is planned to be done, as instructions. A specialized class describes
+    how to turn the instructions into a (specialized) activity with concrete steps, by
+    overriding `create_activity()`.
     """
-
-    #: How a plan runs its `instructions`. A subclass sets its own convention.
-    instruction_execution_mode = 'sequential'
-
-    name = Quantity(type=str, description='A short name for this plan.')
-
-    description = Quantity(
-        type=str, description='Anything else worth saying about this plan.'
-    )
-
-    estimated_duration = Quantity(
-        type=np.float64,
-        unit='s',
-        description='How long this plan lasts. Can be used to stop its instructions before they finish. '
-        'Empty means the plan has the potential to be executed indefinitely (end defined elsewhere'
-        ').',
-    )
 
     instructions = SubSection(
         section_def=Instruction,
@@ -289,39 +273,54 @@ class Plan(EntryData):
         description='The instructions that make up this plan.',
     )
 
-    def execute(  # noqa: PLR0913 — everything the activity is, given by the caller
-        self,
-        *,
-        name: str,
-        description: str,
-        datetime: datetime,
-        datetime_end: datetime,
-        method: str,
-        location: str,
-        steps: list[ActivityStep],
-    ) -> Activity:
-        """The activity running this plan would be. Overwrite it to say how the
-        instructions become `steps`."""
-        return Activity(
-            name=name,
-            description=description,
-            datetime=datetime,
-            datetime_end=datetime_end,
-            method=method,
-            location=location,
-            steps=steps,
+    def create_activity(self, **fields) -> Activity:
+        """The activity running this plan: made from `fields`, what the caller says
+        happened, which are whatever the activity takes.
+
+        Override it: a specialized plan makes its own activity, with its own return
+        type, and fills in from the plan what the caller left out. A plain plan knows
+        nothing to fill in, so its activity is the caller's alone.
+        """
+        return Activity(**fields)
+
+
+class TimePlan(Plan):
+    """A plan that knows how long it lasts: written, or derived from its instructions."""
+
+    duration = Quantity(
+        type=np.float64,
+        unit='s',
+        description='How long this plan lasts (assuming everything goes as expected). '
+        'Can be used to stop its instructions before they finish. '
+        'Empty means the plan has the potential to be executed indefinitely (end '
+        'defined elsewhere).',
+    )
+
+    #: How a plan runs its `instructions`. A subclass can overwrite the default.
+    instruction_execution_mode = Quantity(
+        type=MEnum('sequential', 'parallel'),
+        default='sequential',
+        description='How the instructions are supposed to be executed: `sequential` '
+        'means one after another, `parallel` means they all start at once, but may '
+        'finish at different times.',
+    )
+
+    def combine_instruction_durations(self):
+        """How long the instructions last together, run as `instruction_execution_mode`
+        says; `None` if one of them never finishes. Override it for any other rule."""
+        return combined_duration(
+            [instruction.duration for instruction in self.instructions],
+            self.instruction_execution_mode,
         )
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        if self.estimated_duration is None:
-            self.estimated_duration = combined_duration(
-                [each.estimated_duration for each in self.instructions],
-                self.instruction_execution_mode,
-            )
+        # The instructions are normalized before the plan, so their durations are derived.
+        if self.duration is None:
+            self.duration = self.combine_instruction_durations()
 
 
-class ScheduledPlan(Plan):
+class ScheduledPlan(TimePlan):
     """A plan that has a scheduled time to run, but has not yet."""
 
     scheduled_datetime = Quantity(
@@ -336,9 +335,9 @@ class ScheduledPlan(Plan):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        if self.scheduled_datetime is not None and self.estimated_duration is not None:
+        if self.scheduled_datetime is not None and self.duration is not None:
             self.scheduled_end_time = self.scheduled_datetime + timedelta(
-                seconds=self.estimated_duration.to('s').magnitude
+                seconds=self.duration.to('s').magnitude
             )
 
 

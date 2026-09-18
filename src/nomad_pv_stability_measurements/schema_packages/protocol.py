@@ -2,6 +2,7 @@ import re
 
 import numpy as np
 from nomad.datamodel.data import ArchiveSection
+from nomad.datamodel.metainfo.basesections.v2 import ActivityStep, Measurement
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
 
 # The protocol's instructions name these classes; importing them registers them with NOMAD.
@@ -11,7 +12,7 @@ from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
     mpp_instructions,
     ramp_instructions,
 )
-from nomad_pv_stability_measurements.schema_packages.general import Plan
+from nomad_pv_stability_measurements.schema_packages.general import TimePlan
 
 m_package = SchemaPackage()
 
@@ -56,13 +57,19 @@ class GeoLocation(ArchiveSection):
                 )
 
 
-class StabilityProtocol(Plan):
+class StabilityProtocol(TimePlan):
     """A PV stability test protocol: the instructions a test runs.
 
     All of the protocol's own instructions run in parallel.
     """
 
-    instruction_execution_mode = 'parallel'
+    instruction_execution_mode = Quantity(
+        type=MEnum('sequential', 'parallel'),
+        default='parallel',
+        description='How the instructions are executed. `parallel` by default: the '
+        'settings, which never finish, and the routine all start together (Design.md '
+        '§23.2).',
+    )
 
     standard = Quantity(
         type=str,
@@ -111,6 +118,50 @@ class StabilityProtocol(Plan):
         designation = _ISOS_DESIGNATION.match(self.standard or '')
         if designation is not None and self.standard_level is None:
             self.standard_level = int(designation.group('level'))
+
+    def create_activity(self, **fields) -> 'StabilityActivity':
+        """The stability test running this protocol.
+
+        What happened comes from the caller, and nothing that is only planned is
+        claimed: no end is derived from `duration`. Where the caller says nothing, the
+        protocol fills in what it already states: the standard as the `method`, its
+        `location`, and one step per instruction, all starting when the test starts.
+        """
+        activity = StabilityActivity(**fields)
+        activity.method = activity.method or self.standard
+        activity.location = activity.location or self.location
+        if not activity.steps:
+            activity.steps = self.steps_starting(activity.datetime)
+        activity.protocol = self
+        return activity
+
+    def steps_starting(self, start) -> list[ActivityStep]:
+        """One step per instruction. They all start at `start` when run in parallel; one
+        after another, only the first start is known, since an instruction may never
+        finish."""
+        parallel = self.instruction_execution_mode == 'parallel'
+        return [
+            ActivityStep(
+                name=instruction.label or instruction.name,
+                description=instruction.description,
+                start_time=start if parallel or index == 0 else None,
+            )
+            for index, instruction in enumerate(self.instructions)
+        ]
+
+
+class StabilityActivity(Measurement):
+    """A PV stability test as it ran: a `StabilityProtocol` executed on samples.
+
+    A measurement rather than a process: a stability test is run to learn how the
+    samples degrade, and the change it causes them is what is studied, not what it is
+    for.
+    """
+
+    protocol = Quantity(
+        type=StabilityProtocol,
+        description='The protocol this test ran.',
+    )
 
 
 m_package.__init_metainfo__()

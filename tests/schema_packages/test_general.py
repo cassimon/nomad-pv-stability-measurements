@@ -1,6 +1,6 @@
 """Instructions, blocks and plans (Design.md §23, §27).
 
-An instruction is completed after its `estimated_duration`; empty means it never
+An instruction is completed after its `duration`; empty means it never
 finishes. A block's duration is always derived from what it contains. A repeating block's
 kind says whether it finishes: a timed one always, an indefinite one never, a counting one
 should. Only a plan, or a timed block, stops instructions early.
@@ -9,6 +9,7 @@ should. Only a plan, or a timed block, stops instructions early.
 from datetime import datetime, timezone
 
 import pytest
+from nomad.datamodel.metainfo.basesections.v2 import Activity
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
@@ -19,6 +20,7 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     ScheduledPlan,
     SingleInstruction,
     TimedRepeatingBlock,
+    TimePlan,
 )
 
 
@@ -26,11 +28,11 @@ def single(seconds=None) -> SingleInstruction:
     """An instruction lasting `seconds`; without them, one that never finishes."""
     if seconds is None:
         return SingleInstruction()
-    return SingleInstruction(estimated_duration=seconds * ureg.second)
+    return SingleInstruction(duration=seconds * ureg.second)
 
 
 def seconds(section):
-    duration = section.estimated_duration
+    duration = section.duration
     return None if duration is None else duration.to('s').magnitude
 
 
@@ -82,7 +84,7 @@ def test_a_timed_block_lasts_its_repeat_duration_whatever_it_contains(normalized
 def test_what_never_finishes_makes_everything_around_it_never_finish(normalized):
     inner = IndefiniteRepeatingBlock(sub_instructions=[single(60)])
     plan = normalized(
-        Plan(instructions=[InstructionBlock(sub_instructions=[inner, single(60)])])
+        TimePlan(instructions=[InstructionBlock(sub_instructions=[inner, single(60)])])
     )
 
     assert seconds(plan.instructions[0]) is None
@@ -90,9 +92,7 @@ def test_what_never_finishes_makes_everything_around_it_never_finish(normalized)
 
 
 def test_a_blocks_written_duration_is_replaced_by_the_derived_one(normalized):
-    block = InstructionBlock(
-        estimated_duration=10 * ureg.second, sub_instructions=[single(60)]
-    )
+    block = InstructionBlock(duration=10 * ureg.second, sub_instructions=[single(60)])
 
     assert seconds(normalized(block)) == pytest.approx(60)
 
@@ -105,9 +105,9 @@ def test_a_blocks_written_duration_is_replaced_by_the_derived_one(normalized):
     ],
 )
 def test_a_plans_duration_is_written_or_derived(normalized, written, expected):
-    plan = Plan(instructions=[single(30), single(60)])
+    plan = TimePlan(instructions=[single(30), single(60)])
     if written is not None:
-        plan.estimated_duration = written * ureg.second
+        plan.duration = written * ureg.second
 
     assert seconds(normalized(plan)) == pytest.approx(expected)
 
@@ -130,19 +130,14 @@ def test_a_scheduled_plan_ends_its_duration_after_it_starts(
     assert normalized(plan).scheduled_end_time == end
 
 
-def test_execute_builds_the_activity_from_its_arguments_not_from_the_plan():
+def test_a_plain_plan_makes_the_activity_from_what_the_caller_says_alone():
     plan = Plan(name='plan', description='what is planned')
 
-    activity = plan.execute(
-        name='run 1',
-        description='the first run',
-        datetime=None,
-        datetime_end=None,
-        method='soak',
-        location='lab',
-        steps=[],
+    activity = plan.create_activity(
+        name='run 1', description='the first run', method='soak', location='lab'
     )
 
+    assert type(activity) is Activity
     assert (activity.name, activity.description) == ('run 1', 'the first run')
     assert (activity.method, activity.location) == ('soak', 'lab')
 
@@ -150,7 +145,7 @@ def test_execute_builds_the_activity_from_its_arguments_not_from_the_plan():
 @pytest.mark.parametrize(
     ('section', 'reported'),
     [
-        (SingleInstruction(estimated_duration=0 * ureg.second), 'must be positive'),
+        (SingleInstruction(duration=0 * ureg.second), 'must be positive'),
         (
             SingleInstruction(sub_instructions=[single(60)]),
             'cannot have sub-instructions',

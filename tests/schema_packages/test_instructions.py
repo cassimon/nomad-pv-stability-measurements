@@ -131,8 +131,8 @@ def test_a_base_that_names_no_quantity_is_reported(normalized, log, cls):
 @pytest.mark.parametrize(
     ('written', 'field', 'expected'),
     [
-        ({'estimated_duration': 3600 * ureg.second}, 'ramp_rate', 60 / 3600),
-        ({'ramp_rate': 60 * K / ureg.hour}, 'estimated_duration', 3600),
+        ({'duration': 3600 * ureg.second}, 'ramp_rate', 60 / 3600),
+        ({'ramp_rate': 60 * K / ureg.hour}, 'duration', 3600),
     ],
 )
 def test_a_ramp_derives_its_rate_or_its_duration(
@@ -153,11 +153,11 @@ def test_a_rate_that_contradicts_the_duration_is_reported_not_repaired(normalize
             start_point=298.15 * K,
             end_point=358.15 * K,
             ramp_rate=60 * K / ureg.hour,
-            estimated_duration=7200 * ureg.second,
+            duration=7200 * ureg.second,
         )
     )
 
-    assert ramp.estimated_duration.magnitude == pytest.approx(7200)
+    assert ramp.duration.magnitude == pytest.approx(7200)
     [error] = log.errors
     assert '`ramp_rate`' in error
 
@@ -172,7 +172,7 @@ def test_a_cycle_states_no_path_so_it_takes_no_rate(normalized, log):
         )
     )
 
-    assert ramp.estimated_duration is None
+    assert ramp.duration is None
     [error] = log.errors
     assert 'does not state' in error
 
@@ -231,9 +231,7 @@ def test_dark_is_exactly_no_light():
             'Monitor relative humidity',
         ),
         (
-            HoldIrradiance(
-                set_point=0 * ureg('W/m^2'), estimated_duration=4800 * ureg.s
-            ),
+            HoldIrradiance(set_point=0 * ureg('W/m^2'), duration=4800 * ureg.s),
             'Hold irradiance 0 W/m² for 80 min',
         ),
         (HoldVoltage(reference_point='near V_MPP'), 'Hold voltage at near V_MPP'),

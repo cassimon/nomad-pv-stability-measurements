@@ -86,9 +86,7 @@ def only(translation) -> dict:
         ),
         (
             {'channel': 'mechanical', 'bend_radius': '2 m', 'duration': '1 h'},
-            entry(
-                HoldBendRadius, control=True, set_point=2.0, estimated_duration=3600.0
-            ),
+            entry(HoldBendRadius, control=True, set_point=2.0, duration=3600.0),
         ),
         (
             {'channel': 'temperature', 'monitor': True, 'control': False},
@@ -323,7 +321,7 @@ def test_settings_come_first_then_the_routine():
 
     assert translation.problems == []
     assert data['m_def'] == m_def(StabilityProtocol)
-    assert data['estimated_duration'] == approx(3600000)
+    assert data['duration'] == approx(3600000)
     assert [each['m_def'] for each in data['instructions']] == [
         m_def(HoldTemperature),
         m_def(IndefiniteRepeatingBlock),

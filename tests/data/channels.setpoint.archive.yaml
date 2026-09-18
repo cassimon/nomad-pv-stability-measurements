@@ -27,20 +27,20 @@ data:
     repeat_n: 1
     sub_instructions:
     - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldTemperature
-      estimated_duration: 1800000.0
+      duration: 1800000.0
       sampling_rate: 10.0
       setpoint: 358.15
       control: true
     - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldTemperature
-      estimated_duration: 360000.0
+      duration: 360000.0
     - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldIrradiance
-      estimated_duration: 360000.0
+      duration: 360000.0
       setpoint: 0.0
       control: true
     - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldVoltage
-      estimated_duration: 86400.0
+      duration: 86400.0
       setpoint: 0.8
       control: true
     - m_def: nomad_pv_stability_measurements.schema_packages.mpp_instructions.VOCTracking
-      estimated_duration: 3600.0
+      duration: 3600.0
       control: true

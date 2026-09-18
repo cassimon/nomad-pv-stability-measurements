@@ -190,8 +190,8 @@ def light_dark(light: float, dark: float, lit: dict) -> dict:
     return instruction(
         IndefiniteRepeatingBlock,
         sub_instructions=[
-            {**lit, 'estimated_duration': pytest.approx(light)},
-            {**DARK, 'estimated_duration': pytest.approx(dark)},
+            {**lit, 'duration': pytest.approx(light)},
+            {**DARK, 'duration': pytest.approx(dark)},
         ],
     )
 

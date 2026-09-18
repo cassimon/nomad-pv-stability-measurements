@@ -69,7 +69,6 @@ PROTOCOL_WORDS = ('channel_settings', 'routine', 'duration')
 #: Keys an instruction or a plan may be written with for a field of another name
 #: (§15.1, §15.6).
 RENAMED = {
-    'duration': 'estimated_duration',
     'mode': 'sub_instruction_execution_mode',
     'repeat_for': 'repeat_duration',
     # A field renamed in the schema itself: every bare archive written before §17.4 still

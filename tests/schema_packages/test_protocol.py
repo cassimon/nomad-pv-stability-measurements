@@ -2,9 +2,11 @@
 and what it records about the standard and the place (§15.12, §18.1, §20.7)."""
 
 import os
+from datetime import datetime, timezone
 
 import pytest
 from nomad.client import normalize_all, parse
+from nomad.datamodel.metainfo.basesections.v2 import ActivityStep
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import Plan
@@ -14,8 +16,16 @@ from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import (
     GeoLocation,
+    StabilityActivity,
     StabilityProtocol,
 )
+
+START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def executed(protocol, **given):
+    return protocol.create_activity(name='run 1', datetime=START, **given)
+
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 
@@ -24,14 +34,14 @@ def test_a_protocol_is_a_plan_whose_instructions_all_start_together(normalized):
     protocol = normalized(
         StabilityProtocol(
             instructions=[
-                HoldTemperature(estimated_duration=1800 * ureg.second),
-                HoldIrradiance(estimated_duration=3600 * ureg.second),
+                HoldTemperature(duration=1800 * ureg.second),
+                HoldIrradiance(duration=3600 * ureg.second),
             ]
         )
     )
 
     assert isinstance(protocol, Plan)
-    assert protocol.estimated_duration.to('s').magnitude == pytest.approx(3600)
+    assert protocol.duration.to('s').magnitude == pytest.approx(3600)
 
 
 def test_settings_that_never_finish_give_the_protocol_no_end(normalized):
@@ -39,12 +49,12 @@ def test_settings_that_never_finish_give_the_protocol_no_end(normalized):
         StabilityProtocol(
             instructions=[
                 HoldIrradiance(monitor=True),
-                HoldTemperature(estimated_duration=1800 * ureg.second),
+                HoldTemperature(duration=1800 * ureg.second),
             ]
         )
     )
 
-    assert protocol.estimated_duration is None
+    assert protocol.duration is None
 
 
 @pytest.mark.parametrize(
@@ -74,6 +84,50 @@ def test_coordinates_the_wrong_way_round_are_reported(normalized, log):
 
     [error] = log.errors
     assert 'wrong way round' in error
+
+
+def test_executed_it_is_the_test_that_ran_it_as_the_caller_says():
+    protocol = StabilityProtocol(
+        name='protocol', description='planned', standard='ISOS-L-2', location='Lab A'
+    )
+
+    activity = executed(
+        protocol,
+        description='the first run',
+        method='soak',
+        location='Lab B',
+        steps=[ActivityStep(name='light on')],
+    )
+
+    assert isinstance(activity, StabilityActivity)
+    assert activity.protocol is protocol
+    assert (activity.name, activity.description) == ('run 1', 'the first run')
+    assert (activity.method, activity.location) == ('soak', 'Lab B')
+    assert [step.name for step in activity.steps] == ['light on']
+    # Only planned, so not claimed: the end is the caller's to say.
+    assert activity.datetime_end is None
+
+
+def test_executed_it_fills_in_what_the_caller_leaves_out(normalized):
+    protocol = normalized(
+        StabilityProtocol(
+            standard='ISOS-L-2',
+            location='Lab A',
+            instructions=[
+                HoldTemperature(name='hot'),
+                HoldIrradiance(duration=3600 * ureg.second),
+            ],
+        )
+    )
+
+    activity = executed(protocol)
+
+    assert (activity.method, activity.location) == ('ISOS-L-2', 'Lab A')
+    # One step per instruction, all starting with the test: they run in parallel.
+    assert [(step.name, step.start_time) for step in activity.steps] == [
+        ('hot', START),
+        ('Hold irradiance for 1 h', START),
+    ]
 
 
 def test_a_bare_archive_file_loads_through_nomad():

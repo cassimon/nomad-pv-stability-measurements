@@ -175,7 +175,7 @@ class RampInstruction(MonitorControlInstruction):
     ramp_rate = Quantity(
         type=np.float64,
         description='How fast the value moves, as a positive magnitude — the direction '
-        'is `start_point` to `end_point`. Write this or `estimated_duration`; the '
+        'is `start_point` to `end_point`. Write this or `duration`; the '
         'other is derived from it (D16).',
     )
     end_of_ramp_behavior = Quantity(
@@ -219,32 +219,32 @@ class RampInstruction(MonitorControlInstruction):
         span = abs(self.end_point - self.start_point)
         # The rate and the duration say one thing, so whichever was written, both are
         # stored (D16, as the sampling pair is).
-        if self.ramp_rate is None and self.estimated_duration is not None:
-            self.ramp_rate = span / self.estimated_duration
-        elif self.ramp_rate is not None and self.estimated_duration is None:
-            self.estimated_duration = span / self.ramp_rate
+        if self.ramp_rate is None and self.duration is not None:
+            self.ramp_rate = span / self.duration
+        elif self.ramp_rate is not None and self.duration is None:
+            self.duration = span / self.ramp_rate
         elif self.ramp_rate is not None:
             self.report_a_rate_that_contradicts_the_duration(span, where, logger)
 
     def report_a_rate_that_contradicts_the_duration(self, span, where, logger):
         """Reported, never repaired: both stand as authored (D13a)."""
-        derived = span / self.estimated_duration
+        derived = span / self.duration
         written = self.ramp_rate.to(derived.units)
         if isclose(written.magnitude, derived.magnitude, rel_tol=1e-9):
             return
         logger.error(
             f'{where} writes a `ramp_rate` of {written.magnitude:g} {derived.units}, '
-            f'but its ends over an `estimated_duration` of '
-            f'{self.estimated_duration.to("s").magnitude:g} s make it '
+            f'but its ends over an `duration` of '
+            f'{self.duration.to("s").magnitude:g} s make it '
             f'{derived.magnitude:g}.'
         )
 
 
 def held_for(instruction) -> str:
     """` for 12 h`, where a hold writes its duration; a hold never derives one."""
-    if instruction.estimated_duration is None:
+    if instruction.duration is None:
         return ''
-    return f' for {shown(instruction.estimated_duration)}'
+    return f' for {shown(instruction.duration)}'
 
 
 #: The bases that name no quantity: writing one directly is an authoring mistake.
