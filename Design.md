@@ -3395,3 +3395,44 @@ normalize gives the same label. The ISOS table ignores labels; `test_general` an
 `IndefiniteRepeatingBlock` is now an alias of `RepeatingBlock` (edited in `general.py`): the
 translator writes `m_def: …general.RepeatingBlock` for an indefinite block, compares the class
 exactly when a count is written, and `tests/data/tree.archive.yaml` follows.
+
+## 29. The protocol draws its timeline
+
+A `StabilityProtocol` shows a reader of the standard what it asks for over time. It is a picture
+of the plan, not a simulated run: no start date, no device, no environment. Simulating a run, or
+reading measured data, is a separate design, started once there is real data.
+
+**Where.** Each instruction draws itself: `Instruction.to_time_plot_series(start)` returns a
+`TimePlotSeries` — plain data, no Plotly: times, values or text per quantity, and the axis breaks.
+A single instruction gives its own points, from `set_value_at(elapsed)` — `None` where the
+protocol states no value — or `annotation()` for the text instead (`MonitorControlInstruction`,
+`routine.py`). A block combines its sub-instructions' series one after another or side by side,
+up to 3 iterations, and adds its break. `plan_timeline.py` only turns the series into Plotly
+figures; `StabilityProtocol` becomes a `PlotSection` and adds them in `normalize`. No parser
+change, no new entry.
+
+**What.** One row per quantity, on one time axis in hours since the start:
+
+| Instruction | Drawn as |
+|---|---|
+| Hold with `set_point` (dark: 0 W/m²) | line at the value |
+| Ramp with a stated path (`hold`, `sawtooth`, `triangle`) | line through its corners, exact |
+| `HoldBetween` / `HoldBelow` | shaded band, with the bounds as text |
+| Reference point, MPP, open circuit, `cycle` | bar with text: `MPP`, `near V_MPP` |
+| Monitor only | thin bar: `monitored` |
+| Option left open (light, no value) | bar: `irradiance not specified` |
+
+**Time stays accurate.** A repeating block is drawn for at most 3 iterations, then the axis breaks
+(`//`) to the block's end, labelled below: `n=300 repetitions`, `until t+300 h`, or `indefinitely`.
+An instruction that never finishes runs to the right edge. Every tick shows true time; a break is
+made of axis segments side by side, never of dates.
+
+**Figures.** An overview (open), and one per repeating block showing a single iteration.
+
+**Tests.** A hold is drawn at its value for its duration; a device-dependent instruction is text,
+not a value; a block of 300 repetitions draws 3 and a break labelled `n=300 repetitions`; all ISOS
+examples normalize within a time budget.
+
+**Steps.** 1 `TimePlotSeries` + `set_value_at`/`annotation` on single instructions ·
+2 `to_time_plot_series` on blocks (repeats, breaks) · 3 overview figure · 4 block figures ·
+5 all-ISOS check.

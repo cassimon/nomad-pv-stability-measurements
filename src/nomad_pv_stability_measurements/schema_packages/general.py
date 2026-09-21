@@ -344,7 +344,7 @@ class Planned(ArchiveSection):
         """Override it to state if the objectives were achieved. By default, yes"""
         return True
 
-    def check_consistency_with_plan(self) -> bool:
+    def is_consistent_with_plan(self) -> bool:
         """Override it to check the activity against its `plan`. By default, it is
         consistent."""
         return True
