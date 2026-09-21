@@ -152,6 +152,13 @@ class HoldBelowInstruction(MonitorControlInstruction):
             return super().annotation_for_plotting()
         return f'below {shown(self.upper_bound)}'
 
+    def bounds_for_plotting(self):
+        """From zero: every quantity kept below a bound here is one that cannot be
+        negative — a humidity, a fraction."""
+        if self.upper_bound is None:
+            return None
+        return 0 * self.upper_bound.units, self.upper_bound
+
 
 class HoldBetweenInstruction(HoldBelowInstruction):
     """One value, kept between two bounds for as long as the instruction lasts."""
@@ -176,6 +183,11 @@ class HoldBetweenInstruction(HoldBelowInstruction):
         if self.lower_bound is None or self.upper_bound is None:
             return super().annotation_for_plotting()
         return f'{shown(self.lower_bound)}–{shown(self.upper_bound)}'
+
+    def bounds_for_plotting(self):
+        if self.lower_bound is None or self.upper_bound is None:
+            return super().bounds_for_plotting()
+        return self.lower_bound, self.upper_bound
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)

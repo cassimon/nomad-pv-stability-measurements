@@ -41,6 +41,8 @@ class PlotPiece:
     times: np.ndarray | None = None
     values: object = None
     text: str | None = None
+    #: `(lower, upper)` of a band the value is kept in, in the quantity's unit.
+    bounds: tuple | None = None
     #: It never finishes: drawn up to where the drawing stops.
     endless: bool = False
 
@@ -61,6 +63,8 @@ class TimePlotSeries:
 
     pieces: list[PlotPiece] = field(default_factory=list)
     breaks: list[AxisBreak] = field(default_factory=list)
+    #: Where the drawing ends, in seconds; set by whoever draws it as a whole.
+    end: float | None = None
 
     def extend(self, other: 'TimePlotSeries') -> None:
         self.pieces += other.pieces

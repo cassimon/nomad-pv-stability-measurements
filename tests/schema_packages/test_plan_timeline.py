@@ -8,6 +8,9 @@ from nomad.units import ureg
 from nomad_pv_stability_measurements.schema_packages.general import (
     IndefiniteRepeatingBlock,
 )
+from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
+    HoldBetweenIrradiance,
+)
 from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldIrradiance,
 )
@@ -47,7 +50,7 @@ def test_a_protocol_shows_its_timeline(normalized):
         )
     )
 
-    [timeline] = protocol.figures
+    timeline, iteration = protocol.figures
     layout = timeline.figure['layout']
     texts = [note['text'] for note in layout['annotations']]
 
@@ -58,3 +61,25 @@ def test_a_protocol_shows_its_timeline(normalized):
         y for trace in timeline.figure['data'] for y in trace['y'] if y is not None
     ]
     assert max(values) == SUN
+    # The routine's own figure: one light–dark cycle.
+    assert iteration.figure['layout']['xaxis']['range'] == [0, 2]
+
+
+def test_bounds_are_a_band_and_a_protocol_without_end_goes_on(normalized):
+    protocol = normalized(
+        StabilityProtocol(
+            instructions=[
+                HoldBetweenIrradiance(
+                    lower_bound=800 * ureg('W/m^2'), upper_bound=SUN * ureg('W/m^2')
+                )
+            ]
+        )
+    )
+
+    [timeline] = protocol.figures
+    fill, lower, upper = (t for t in timeline.figure['data'] if t['y'][0] is not None)
+    texts = [note['text'] for note in timeline.figure['layout']['annotations']]
+
+    assert (lower['y'], upper['y']) == ([800, 800], [SUN, SUN])
+    assert (fill['fill'], min(fill['y']), max(fill['y'])) == ('toself', 800, SUN)
+    assert '<b>…</b>' in texts

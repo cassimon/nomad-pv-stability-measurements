@@ -12,6 +12,7 @@ named after its `standard`, and each variant after its file and its choices (§2
 """
 
 import itertools
+import time
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,9 @@ SCHEMA_WORDS = ('`', 'schema', 'set_point', 'hold:', 'file')
 ZERO_CELSIUS = 273.15
 HOUR = 3600
 MINUTE = 60
+#: s: every shipped variant's timeline together, about 0.5 s today. The simulation this
+#: replaces took minutes (Design.md §29); ten times today's cost still catches that.
+TIMELINES_WITHIN = 5.0
 
 
 def instruction(cls, **fields) -> dict:
@@ -398,3 +402,14 @@ def test_a_shipped_protocol_is_exactly_its_row_of_the_table(key, protocol_file):
     # Short, and only what the standard says — never how it was transcribed (§18.3).
     assert 0 < len(notes) <= NOTES_AT_MOST
     assert not any(word in notes for word in SCHEMA_WORDS)
+
+
+def test_every_shipped_protocol_draws_its_timeline_quickly(protocol_file):
+    protocols = [protocol_file(key) for key in sorted(SHIPPED)]
+
+    started = time.perf_counter()
+    figures = [protocol.figures_for_plotting() for protocol in protocols]
+    took = time.perf_counter() - started
+
+    assert all(figures)  # every one has something to show
+    assert took < TIMELINES_WITHIN

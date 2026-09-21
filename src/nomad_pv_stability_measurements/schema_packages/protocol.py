@@ -13,11 +13,14 @@ from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
     mpp_instructions,
     ramp_instructions,
 )
-from nomad_pv_stability_measurements.schema_packages.general import Planned, TimePlan
+from nomad_pv_stability_measurements.schema_packages.general import (
+    Planned,
+    RepeatingBlock,
+    TimePlan,
+)
 from nomad_pv_stability_measurements.schema_packages.plan_timeline import (
     figure_for_plotting,
 )
-from nomad_pv_stability_measurements.schema_packages.utils import drawing_end
 
 m_package = SchemaPackage()
 
@@ -124,16 +127,39 @@ class StabilityProtocol(PlotSection, TimePlan):
         designation = _ISOS_DESIGNATION.match(self.standard or '')
         if designation is not None and self.standard_level is None:
             self.standard_level = int(designation.group('level'))
-        series = self.time_series_for_plotting()
-        if not series.pieces:
-            return
-        self.figures = [
-            PlotlyFigure(
-                label='Timeline',
-                index=0,
-                open=True,
-                figure=figure_for_plotting(series, drawing_end(series), self.name),
+        self.figures = self.figures_for_plotting()
+
+    def figures_for_plotting(self) -> list[PlotlyFigure]:
+        """The timeline of the whole protocol, open, then one iteration of each
+        repeating block on its own; nothing where there is nothing to draw."""
+        drawn = [
+            (
+                'Timeline',
+                self.name,
+                self.time_series_for_plotting(),
+                self.duration is None,
             )
+        ]
+        for block in self.m_all_contents():
+            if isinstance(block, RepeatingBlock):
+                label = block.label or block.describe()
+                drawn.append(
+                    (
+                        f'One iteration: {label}',
+                        f'One iteration of {label}',
+                        block.one_iteration_for_plotting(),
+                        block.one_iteration() is None,
+                    )
+                )
+        return [
+            PlotlyFigure(
+                label=label,
+                index=index,
+                open=index == 0,
+                figure=figure_for_plotting(series, title, continues),
+            )
+            for index, (label, title, series, continues) in enumerate(drawn)
+            if series.pieces
         ]
 
 

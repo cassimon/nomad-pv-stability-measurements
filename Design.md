@@ -3417,17 +3417,19 @@ change, no new entry.
 |---|---|
 | Hold with `set_point` (dark: 0 W/m²) | line at the value |
 | Ramp with a stated path (`hold`, `sawtooth`, `triangle`) | line through its corners, exact |
-| `HoldBetween` / `HoldBelow` | shaded band, with the bounds as text |
+| `HoldBetween` / `HoldBelow` (from 0) | translucent band, two sharp edges, bounds as text |
 | Reference point, MPP, open circuit, `cycle` | bar with text: `MPP`, `near V_MPP` |
 | Monitor only | thin bar: `monitored` |
 | Option left open (light, no value) | bar: `irradiance not specified` |
 
 **Time stays accurate.** A repeating block is drawn for at most 3 iterations, then the axis breaks
 (`//`) to the block's end, labelled below: `n=300 repetitions`, `until t+300 h`, or `indefinitely`.
-An instruction that never finishes runs to the right edge. Every tick shows true time; a break is
-made of axis segments side by side, never of dates.
+An instruction that never finishes runs to the right edge; where the whole plan never ends, the
+axis closes with `…`. Every tick shows true time; a break is made of axis segments side by side,
+never of dates.
 
-**Figures.** An overview (open), and one per repeating block showing a single iteration.
+**Figures.** An overview (open), and one per repeating block showing a single iteration
+(`one_iteration_for_plotting`). Plotting-only methods end in `_for_plotting`.
 
 **Tests.** A hold is drawn at its value for its duration; a device-dependent instruction is text,
 not a value; a block of 300 repetitions draws 3 and a break labelled `n=300 repetitions`; all ISOS

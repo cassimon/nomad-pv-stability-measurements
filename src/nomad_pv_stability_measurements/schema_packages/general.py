@@ -117,6 +117,7 @@ class SingleInstruction(Instruction):
         corners = None
         if end < inf:
             corners = self.set_values_for_plotting((end - start) * ureg.second)
+        piece.bounds = self.bounds_for_plotting()
         if corners is None:
             piece.text = self.annotation_for_plotting()
         else:
@@ -131,6 +132,10 @@ class SingleInstruction(Instruction):
     def set_values_for_plotting(self, length):
         """The corners `(times, values)` of what it sets over `length`; `None`: nothing
         the plan states as a value. See `MonitorControlInstruction`."""
+        return None
+
+    def bounds_for_plotting(self):
+        """`(lower, upper)` of a band the value is kept in; `None`: no band."""
         return None
 
     def annotation_for_plotting(self) -> str:
@@ -204,6 +209,16 @@ class InstructionBlock(Instruction):
         # At `stop` too: the drawing may end exactly where the block breaks off.
         if time < end and time <= stop:
             series.breaks.append(AxisBreak(time, end, self.break_label_for_plotting()))
+        return series
+
+    def one_iteration_for_plotting(self) -> TimePlotSeries:
+        """One pass of the sub-instructions on its own, from 0, as the block's own
+        figure shows it; drawn like a plan that never ends where the pass never does."""
+        stop = seconds_or_inf(self.one_iteration())
+        if stop == inf:
+            stop = drawing_end(self.iteration_for_plotting(0.0, inf))
+        series = self.iteration_for_plotting(0.0, stop)
+        series.end = stop
         return series
 
     def iteration_for_plotting(self, start: float, stop: float) -> TimePlotSeries:
@@ -482,7 +497,9 @@ class TimePlan(Plan):
         stop = seconds_or_inf(self.duration)
         if stop == inf:
             stop = drawing_end(self.instructions_for_plotting(inf))
-        return self.instructions_for_plotting(stop)
+        series = self.instructions_for_plotting(stop)
+        series.end = stop
+        return series
 
     def instructions_for_plotting(self, stop: float) -> TimePlotSeries:
         return instructions_for_plotting(
