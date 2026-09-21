@@ -1,4 +1,5 @@
 from datetime import timedelta
+from math import inf
 
 import numpy as np
 from nomad.datamodel.data import ArchiveSection
@@ -15,6 +16,7 @@ from nomad.metainfo.metainfo import Reference, SectionProxy
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.utils import (
+    AxisBreak,
     PlotPiece,
     TimePlotSeries,
     shown,
@@ -22,6 +24,14 @@ from nomad_pv_stability_measurements.schema_packages.utils import (
 )
 
 m_package = SchemaPackage()
+
+#: A repeating block draws this many iterations at most; the rest is an axis break.
+ITERATIONS_FOR_PLOTTING = 3
+
+
+def seconds_or_inf(duration) -> float:
+    """A duration in seconds; `inf` for one that never ends."""
+    return inf if duration is None else duration.to('s').magnitude
 
 
 def combined_duration(durations, mode: str):
@@ -182,6 +192,42 @@ class InstructionBlock(Instruction):
     def derive_duration(self):
         return self.one_iteration()
 
+    def repetitions(self) -> float:
+        """How many times the sub-instructions run: once; `inf` where no count ends
+        the block."""
+        return 1
+
+    def time_series_for_plotting(self, start: float, stop: float) -> TimePlotSeries:
+        """Its first iterations, at most `ITERATIONS_FOR_PLOTTING`, then an axis break
+        up to where the block ends, labelled with how it goes on. Times are accurate:
+        what the break hides is not drawn, never moved."""
+        series = TimePlotSeries()
+        one = seconds_or_inf(self.one_iteration())
+        end = start + seconds_or_inf(self.derive_duration())
+        time = start
+        for _ in range(min(self.repetitions(), ITERATIONS_FOR_PLOTTING)):
+            if time >= min(stop, end):
+                break
+            series.extend(self.iteration_for_plotting(time, min(stop, end)))
+            time += one
+        if time < min(stop, end):
+            series.breaks.append(AxisBreak(time, end, self.break_label_for_plotting()))
+        return series
+
+    def iteration_for_plotting(self, start: float, stop: float) -> TimePlotSeries:
+        """One pass of the sub-instructions: one after another, or all from `start`."""
+        series = TimePlotSeries()
+        time = start
+        for each in self.sub_instructions:
+            series.extend(each.time_series_for_plotting(time, stop))
+            if self.sub_instruction_execution_mode == 'sequential':
+                time += seconds_or_inf(each.duration)
+        return series
+
+    def break_label_for_plotting(self) -> str:
+        """What the axis break after the drawn iterations stands for."""
+        return ''
+
 
 class RepeatingBlock(InstructionBlock):
     """Instructions repeated — a block that may or may not finish.
@@ -196,6 +242,12 @@ class RepeatingBlock(InstructionBlock):
 
     def derive_duration(self):
         return None
+
+    def repetitions(self) -> float:
+        return inf
+
+    def break_label_for_plotting(self) -> str:
+        return 'indefinitely'
 
 
 class TimedRepeatingBlock(RepeatingBlock):
@@ -227,6 +279,9 @@ class TimedRepeatingBlock(RepeatingBlock):
 
     def derive_duration(self):
         return self.repeat_duration
+
+    def break_label_for_plotting(self) -> str:
+        return f'until t+{shown(self.repeat_duration)}'
 
 
 IndefiniteRepeatingBlock = RepeatingBlock
@@ -281,6 +336,14 @@ class CountingRepeatingBlock(RepeatingBlock):
         if one is None or self.repeat_n is None or self.repeat_n < 1:
             return None
         return self.repeat_n * one
+
+    def repetitions(self) -> float:
+        return inf if self.repeat_n is None else self.repeat_n
+
+    def break_label_for_plotting(self) -> str:
+        if self.repeat_n is None:
+            return super().break_label_for_plotting()
+        return f'n={self.repeat_n} repetitions'
 
 
 class Objective(ArchiveSection):

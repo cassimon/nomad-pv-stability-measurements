@@ -44,7 +44,22 @@ class PlotPiece:
 
 
 @dataclass
+class AxisBreak:
+    """Where the time axis is cut, from `start` to `end` (`inf`: it never ends), and
+    what happens there, written under the cut: `n=300 repetitions`."""
+
+    start: float
+    end: float
+    label: str
+
+
+@dataclass
 class TimePlotSeries:
     """What a plan, or part of it, draws: plain data, no Plotly."""
 
     pieces: list[PlotPiece] = field(default_factory=list)
+    breaks: list[AxisBreak] = field(default_factory=list)
+
+    def extend(self, other: 'TimePlotSeries') -> None:
+        self.pieces += other.pieces
+        self.breaks += other.breaks

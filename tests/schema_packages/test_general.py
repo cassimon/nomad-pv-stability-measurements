@@ -7,6 +7,7 @@ should. Only a plan, or a timed block, stops instructions early.
 """
 
 from datetime import datetime, timezone
+from math import inf
 
 import pytest
 from nomad.datamodel.metainfo.basesections.v2 import Activity
@@ -192,3 +193,50 @@ def test_an_objective_in_words_cannot_be_told_achieved():
     objective = Objective(description='T80 under 1 sun at 65 °C')
 
     assert objective.is_achieved(Activity()) is None
+
+
+HOUR = 3600
+FAR = 10**7  # s: where the drawing stops, beyond any block here
+
+
+@pytest.mark.parametrize(
+    ('mode', 'starts'), [('sequential', [0, HOUR]), ('parallel', [0, 0])]
+)
+def test_a_block_draws_its_instructions_one_after_another_or_together(
+    normalized, mode, starts
+):
+    block = normalized(
+        InstructionBlock(
+            sub_instruction_execution_mode=mode,
+            sub_instructions=[single(HOUR), single(HOUR / 2)],
+        )
+    )
+
+    series = block.time_series_for_plotting(0, FAR)
+
+    assert [piece.start for piece in series.pieces] == starts
+    assert series.breaks == []
+
+
+@pytest.mark.parametrize(
+    ('block', 'drawn', 'cut'),
+    [
+        (CountingRepeatingBlock(repeat_n=2), 2, None),
+        (CountingRepeatingBlock(repeat_n=300), 3, (300 * HOUR, 'n=300 repetitions')),
+        (
+            TimedRepeatingBlock(repeat_duration=300 * ureg.hour),
+            3,
+            (300 * HOUR, 'until t+300 h'),
+        ),
+        (IndefiniteRepeatingBlock(), 3, (inf, 'indefinitely')),
+    ],
+)
+def test_a_repeating_block_draws_three_iterations_then_breaks_the_axis_to_its_end(
+    normalized, block, drawn, cut
+):
+    block.sub_instructions = [single(HOUR)]
+    series = normalized(block).time_series_for_plotting(0, FAR)
+
+    assert [piece.start for piece in series.pieces] == [n * HOUR for n in range(drawn)]
+    breaks = [(each.start, each.end, each.label) for each in series.breaks]
+    assert breaks == ([] if cut is None else [(drawn * HOUR, *cut)])
