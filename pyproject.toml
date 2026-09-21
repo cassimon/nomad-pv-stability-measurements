@@ -25,7 +25,9 @@ maintainers = [
 ]
 license = { file = "LICENSE" }
 dependencies = [
-    "nomad-lab>=1.4.3"
+    # A development build from the MPCDF index (`extra-index-url` below): the v2 base
+    # sections need `Activity.datetime_end` and no `datetime` set by `BaseSection`.
+    "nomad-lab>=1.4.4.dev144",
 ]
 
 [project.urls]
