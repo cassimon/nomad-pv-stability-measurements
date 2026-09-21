@@ -371,13 +371,17 @@ def protocol_file(normalized, log):
     return run
 
 
-def without_labels(value):
-    """An archive without the instructions' `label`s: they are derived for display, from
-    what the rows below already compare, and are not part of the standard."""
+#: What is derived for display, from what the rows below already compare: the
+#: instructions' `label`s and the protocol's timeline. Neither is part of the standard.
+DISPLAY = {'label', 'figures'}
+
+
+def without_display(value):
+    """An archive without what is derived for display (`DISPLAY`)."""
     if isinstance(value, dict):
-        return {k: without_labels(v) for k, v in value.items() if k != 'label'}
+        return {k: without_display(v) for k, v in value.items() if k not in DISPLAY}
     if isinstance(value, list):
-        return [without_labels(each) for each in value]
+        return [without_display(each) for each in value]
     return value
 
 
@@ -387,7 +391,7 @@ def test_every_variant_has_an_expectation_and_every_expectation_a_variant():
 
 @pytest.mark.parametrize('key', sorted(EXPECTED))
 def test_a_shipped_protocol_is_exactly_its_row_of_the_table(key, protocol_file):
-    archive = without_labels(protocol_file(key).m_to_dict())
+    archive = without_display(protocol_file(key).m_to_dict())
     notes = archive.pop('notes')
 
     assert archive == EXPECTED[key]

@@ -3,6 +3,7 @@ import re
 import numpy as np
 from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.basesections.v2 import ActivityStep, Measurement
+from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
 from nomad.metainfo import MEnum, Quantity, Reference, SchemaPackage, SubSection
 
 # The protocol's instructions name these classes; importing them registers them with NOMAD.
@@ -13,6 +14,10 @@ from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
     ramp_instructions,
 )
 from nomad_pv_stability_measurements.schema_packages.general import Planned, TimePlan
+from nomad_pv_stability_measurements.schema_packages.plan_timeline import (
+    figure_for_plotting,
+)
+from nomad_pv_stability_measurements.schema_packages.utils import drawing_end
 
 m_package = SchemaPackage()
 
@@ -57,10 +62,11 @@ class GeoLocation(ArchiveSection):
                 )
 
 
-class StabilityProtocol(TimePlan):
+class StabilityProtocol(PlotSection, TimePlan):
     """A PV stability test protocol: the instructions a test runs.
 
-    All of the protocol's own instructions run in parallel.
+    All of the protocol's own instructions run in parallel. It shows its timeline: what
+    it asks for over time, for a reader of the standard (Design.md §29).
     """
 
     instruction_execution_mode = Quantity(
@@ -118,6 +124,17 @@ class StabilityProtocol(TimePlan):
         designation = _ISOS_DESIGNATION.match(self.standard or '')
         if designation is not None and self.standard_level is None:
             self.standard_level = int(designation.group('level'))
+        series = self.time_series_for_plotting()
+        if not series.pieces:
+            return
+        self.figures = [
+            PlotlyFigure(
+                label='Timeline',
+                index=0,
+                open=True,
+                figure=figure_for_plotting(series, drawing_end(series), self.name),
+            )
+        ]
 
 
 class StabilityActivity(Measurement, Planned):

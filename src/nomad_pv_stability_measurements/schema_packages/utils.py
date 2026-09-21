@@ -1,7 +1,9 @@
 import re
 from dataclasses import dataclass, field
+from math import inf
 
 import numpy as np
+from nomad.units import ureg
 
 
 def shown(quantity) -> str:
@@ -63,3 +65,40 @@ class TimePlotSeries:
     def extend(self, other: 'TimePlotSeries') -> None:
         self.pieces += other.pieces
         self.breaks += other.breaks
+
+
+def combined_duration(durations, mode: str):
+    """How long instructions with these `durations` last together: one after another
+    (`sequential`) or all at once (`parallel`). `None` if any of them never finishes."""
+    if any(duration is None for duration in durations):
+        return None
+    seconds = [duration.to('s').magnitude for duration in durations]
+    if not seconds:
+        return 0 * ureg.second
+    return (max(seconds) if mode == 'parallel' else sum(seconds)) * ureg.second
+
+
+def seconds_or_inf(duration) -> float:
+    """A duration in seconds; `inf` for one that never ends."""
+    return inf if duration is None else duration.to('s').magnitude
+
+
+def instructions_for_plotting(instructions, mode: str, start: float, stop: float):
+    """`instructions` drawn one after another (`sequential`) or all from `start`."""
+    series = TimePlotSeries()
+    time = start
+    for each in instructions:
+        series.extend(each.time_series_for_plotting(time, stop))
+        if mode == 'sequential':
+            time += seconds_or_inf(each.duration)
+    return series
+
+
+def drawing_end(series: TimePlotSeries) -> float:
+    """Where a drawing of `series` ends: after the last thing that starts, finishes or
+    breaks off; at least an hour, so a plan of settings alone still shows."""
+    times = [piece.start for piece in series.pieces]
+    times += [piece.end for piece in series.pieces if piece.end < inf]
+    times += [cut.start for cut in series.breaks]
+    times += [cut.end for cut in series.breaks if cut.end < inf]
+    return max(times, default=0) or 3600.0
