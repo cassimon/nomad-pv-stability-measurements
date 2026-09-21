@@ -3480,3 +3480,7 @@ a reader of the timeline (§29) could use. ISOS-L 22 → 11, ISOS-LC 108 → 54,
   `path and rate not specified: drawn linear at 100 K/h`. Endless, it is drawn for three
   cycles. Quantities with no plausible pace keep the band between their ends (§29). The
   assumption is only for the plot; the stored ramp stays as the standard states it.
+- **Light and dark mode:** nothing is drawn in black or white. The time axis and its marks are
+  a mid grey (`AXIS_COLOR`). The page shows through (`paper_bgcolor` transparent), and the rows
+  sit on a translucent grey with a translucent grid. The role colours are of middle lightness.
+  Text colour is left to the GUI's theme.

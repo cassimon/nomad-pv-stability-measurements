@@ -46,18 +46,24 @@ TEXT_SIZES = (11, 18)
 #: How wide a character is, of the font size.
 CHARACTER_WIDTH = 0.55
 
-#: One colour per role, whatever the quantity (`role_for_plotting`).
+#: One colour per role, whatever the quantity (`role_for_plotting`). Of middle
+#: lightness, so they read on a light and on a dark page alike.
 ROLE_COLORS = {
-    'controlled': '#1f77b4',
-    'specified': '#9467bd',
-    'monitored': '#2ca02c',
-    'unspecified': '#7f7f7f',
+    'controlled': '#3b8fe0',
+    'specified': '#a77ee0',
+    'monitored': '#35b06a',
+    'unspecified': '#9a9a9a',
 }
 BAR_OPACITY = 0.25
 BAND_OPACITY = 0.3
 TOLERANCE_OPACITY = 0.2
 #: What the drawing assumes and the protocol does not state.
-ASSUMPTION_COLOR = '#d62728'
+ASSUMPTION_COLOR = '#e5534b'
+#: The time axis and its marks: a grey that stands out on a light and a dark page.
+AXIS_COLOR = '#8c8c8c'
+#: The rows' background and grid: grey, translucent, over whichever page is behind.
+ROW_BACKGROUND = 'rgba(128, 128, 128, 0.1)'
+GRID_COLOR = 'rgba(128, 128, 128, 0.3)'
 #: Of a row's values: the room above and below them, so a line at the edge is whole.
 VALUE_MARGIN = 0.06
 
@@ -152,19 +158,22 @@ def figure_for_plotting(
         'height': ROW_HEIGHT * len(rows) + FRAME_HEIGHT,
         'showlegend': False,
         'margin': {'l': LABEL_MARGIN, 'r': 95, 't': 80, 'b': 95},
+        # The page shows through, light or dark; the text takes the page's colour.
+        'paper_bgcolor': 'rgba(0, 0, 0, 0)',
+        'plot_bgcolor': ROW_BACKGROUND,
     }
     for k, ((a, b), domain) in enumerate(zip(sections, x_domains)):
         layout[_axis('xaxis', k)] = {
             'domain': domain,
             'range': [a / HOUR, b / HOUR],
-            # Below the rows, on its own: a black line with ticks.
+            # Below the rows, on its own: a thick line with ticks.
             'anchor': 'free',
             'position': 0,
             'showline': True,
-            'linecolor': 'black',
+            'linecolor': AXIS_COLOR,
             'linewidth': 3,
             'ticks': 'outside',
-            'tickcolor': 'black',
+            'tickcolor': AXIS_COLOR,
             'tickwidth': 2,
             'ticklen': 8,
             'tickfont': {'size': AXIS_FONT_SIZE},
@@ -181,6 +190,7 @@ def figure_for_plotting(
             'domain': domain,
             'anchor': 'x',
             'showticklabels': bool(unit),
+            'gridcolor': GRID_COLOR,
             'zeroline': False,
         }
         layout[_axis('yaxis', i)]['range'] = drawing.value_range() if unit else [0, 1]
@@ -419,6 +429,7 @@ def _on_axis(text: str, x: float, anchor: str, xshift: int = 0) -> dict:
     """A mark centred on the time axis's line, as `//` and `⋯`."""
     mark = _note(text, x, 0, anchor=anchor, xshift=xshift, size=AXIS_FONT_SIZE)
     mark['yanchor'] = 'middle'
+    mark['font']['color'] = AXIS_COLOR
     return mark
 
 
