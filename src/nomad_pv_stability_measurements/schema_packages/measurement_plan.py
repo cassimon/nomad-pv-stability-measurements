@@ -43,6 +43,10 @@ m_package = SchemaPackage()
 #: written out.
 MAX_STEPS = 10_000
 
+#: A measurement with more steps than this gets no figure per step, only its overview:
+#: a thousand small figures cost more to make and store than they show.
+MAX_STEPS_WITH_FIGURES = 100
+
 
 class TimeSeries(ArchiveSection):
     """One quantity over one step: what was measured and what it was set to.
@@ -359,6 +363,9 @@ class StabilityMeasurementStep(PlotSection, ActivityStep):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
+        if len(getattr(self.m_parent, 'steps', ())) > MAX_STEPS_WITH_FIGURES:
+            self.figures = []
+            return
         # A quantity without data, planned but not recorded, is left out of the plot.
         series = {
             name: [each]

@@ -99,7 +99,11 @@ class StabilityYamlSimulatingParser(StabilityYamlParser):
                 logger.error('no simulation was made.', variant=key)
                 continue
             simulation.metadata.entry_name = simulation_key(mainfile, key)
-            simulation.data = simulated_run(protocol, logger.bind(variant=key))
+            try:
+                simulation.data = simulated_run(protocol, logger.bind(variant=key))
+            except ValueError as error:
+                # One run that cannot be laid out must not cost the file its protocols.
+                logger.error(f'no simulation was made: {error}', variant=key)
 
 
 def simulated_run(protocol: 'EntryArchive', logger):

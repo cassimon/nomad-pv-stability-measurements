@@ -106,9 +106,13 @@ def simulate(measurement: StabilityMeasurement, sample_every: float) -> None:
 
 
 def times(step: StabilityMeasurementStep, series, sample_every: float) -> np.ndarray:
-    """When the series is sampled, from the start of the measurement."""
+    """When the series is sampled, from the start of the measurement. A value that
+    cannot change within the step, a hold's, only at its start and end: sampling it
+    finer would repeat the same number."""
     start = step.elapsed_at_start.to('s').magnitude
     length = step.duration.to('s').magnitude
+    if not isinstance(series.instruction, RampInstruction):
+        return np.array([start, start + length])
     if series.sample_every is not None:
         sample_every = series.sample_every.to('s').magnitude
     return np.arange(start, start + length, max(sample_every, length / MAX_POINTS))

@@ -92,3 +92,27 @@ def test_the_simulated_run_references_the_protocol_entry_and_lasts_1000_h(tmp_pa
     assert datetime.now(timezone.utc) - measurement.datetime < timedelta(minutes=1)
     # It never ends on its own, so it runs for the whole horizon: 1 h light, 1 h dark.
     assert len(measurement.steps) == RUN_LENGTH / timedelta(hours=1)
+
+
+def test_a_run_that_cannot_be_laid_out_is_reported_and_the_protocol_still_loads(
+    tmp_path,
+):
+    mainfile = tmp_path / 'P.stability.yaml'
+    # 1 min light, 1 min dark for 1000 h: 60 000 steps, more than a run may have.
+    mainfile.write_text(
+        'data:\n  name: P\n  standard: ISOS-LC-1\n'
+        + LIGHT_SOAK.replace('duration: 1 h', 'duration: 1 min')
+    )
+    protocol = EntryArchive(metadata=EntryMetadata())
+    run = EntryArchive(metadata=EntryMetadata())
+    logger = MagicMock()
+
+    StabilityYamlSimulatingParser().parse(
+        str(mainfile), protocol, logger, {'P (simulated)': run}
+    )
+
+    assert protocol.data.name == 'P'
+    assert run.data is None
+    [(message,), _] = logger.error.call_args
+    assert 'no simulation was made' in message
+    assert 'steps' in message

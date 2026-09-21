@@ -66,6 +66,9 @@ def test_nomad_simulates_a_run_of_the_example_plan():
         'power': False,
         'relative_humidity': False,
     }
+    # A hold cannot change within its step: set at the step's start and end only.
+    first = measurement.steps[0].temperature
+    assert list(first.time.to('hour').magnitude) == [0, 1]
     for each in series:
         assert each.value is None
         assert each.set_value is None or len(each.set_value) == len(each.time)
