@@ -34,6 +34,27 @@ def seconds_or_inf(duration) -> float:
     return inf if duration is None else duration.to('s').magnitude
 
 
+def instructions_for_plotting(instructions, mode: str, start: float, stop: float):
+    """`instructions` drawn one after another (`sequential`) or all from `start`."""
+    series = TimePlotSeries()
+    time = start
+    for each in instructions:
+        series.extend(each.time_series_for_plotting(time, stop))
+        if mode == 'sequential':
+            time += seconds_or_inf(each.duration)
+    return series
+
+
+def drawing_end(series: TimePlotSeries) -> float:
+    """Where a drawing of `series` ends: after the last thing that starts, finishes or
+    breaks off; at least an hour, so a plan of settings alone still shows."""
+    times = [piece.start for piece in series.pieces]
+    times += [piece.end for piece in series.pieces if piece.end < inf]
+    times += [cut.start for cut in series.breaks]
+    times += [cut.end for cut in series.breaks if cut.end < inf]
+    return max(times, default=0) or 3600.0
+
+
 def combined_duration(durations, mode: str):
     """How long instructions with these `durations` last together: one after another
     (`sequential`) or all at once (`parallel`). `None` if any of them never finishes."""
@@ -125,7 +146,10 @@ class SingleInstruction(Instruction):
             end=end,
             endless=endless,
         )
-        corners = self.set_values_for_plotting((end - start) * ureg.second)
+        # Where nothing stops the drawing, only the extent is needed: see `TimePlan`.
+        corners = None
+        if end < inf:
+            corners = self.set_values_for_plotting((end - start) * ureg.second)
         if corners is None:
             piece.text = self.annotation_for_plotting()
         else:
@@ -210,19 +234,16 @@ class InstructionBlock(Instruction):
                 break
             series.extend(self.iteration_for_plotting(time, min(stop, end)))
             time += one
-        if time < min(stop, end):
+        # At `stop` too: the drawing may end exactly where the block breaks off.
+        if time < end and time <= stop:
             series.breaks.append(AxisBreak(time, end, self.break_label_for_plotting()))
         return series
 
     def iteration_for_plotting(self, start: float, stop: float) -> TimePlotSeries:
-        """One pass of the sub-instructions: one after another, or all from `start`."""
-        series = TimePlotSeries()
-        time = start
-        for each in self.sub_instructions:
-            series.extend(each.time_series_for_plotting(time, stop))
-            if self.sub_instruction_execution_mode == 'sequential':
-                time += seconds_or_inf(each.duration)
-        return series
+        """One pass of the sub-instructions."""
+        return instructions_for_plotting(
+            self.sub_instructions, self.sub_instruction_execution_mode, start, stop
+        )
 
     def break_label_for_plotting(self) -> str:
         """What the axis break after the drawn iterations stands for."""
@@ -486,6 +507,20 @@ class TimePlan(Plan):
         # The instructions are normalized before the plan, so their durations are derived.
         if self.duration is None:
             self.duration = self.combine_instruction_durations()
+
+    def time_series_for_plotting(self) -> TimePlotSeries:
+        """The plan drawn from its start until its `duration`. A plan that never ends is
+        drawn until the last thing in it starts, finishes or breaks off: found by a first
+        pass that nothing stops, then drawn again up to there."""
+        stop = seconds_or_inf(self.duration)
+        if stop == inf:
+            stop = drawing_end(self.instructions_for_plotting(inf))
+        return self.instructions_for_plotting(stop)
+
+    def instructions_for_plotting(self, stop: float) -> TimePlotSeries:
+        return instructions_for_plotting(
+            self.instructions, self.instruction_execution_mode, 0.0, stop
+        )
 
 
 class ScheduledPlan(TimePlan):

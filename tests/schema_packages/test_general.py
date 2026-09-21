@@ -240,3 +240,32 @@ def test_a_repeating_block_draws_three_iterations_then_breaks_the_axis_to_its_en
     assert [piece.start for piece in series.pieces] == [n * HOUR for n in range(drawn)]
     breaks = [(each.start, each.end, each.label) for each in series.breaks]
     assert breaks == ([] if cut is None else [(drawn * HOUR, *cut)])
+
+
+def test_a_plan_that_never_ends_is_drawn_until_its_routine_breaks_off(normalized):
+    setting = single()
+    routine = IndefiniteRepeatingBlock(sub_instructions=[single(HOUR)])
+    plan = normalized(
+        TimePlan(instruction_execution_mode='parallel', instructions=[setting, routine])
+    )
+
+    series = plan.time_series_for_plotting()
+
+    [cut] = series.breaks
+    assert (cut.start, cut.label) == (3 * HOUR, 'indefinitely')
+    assert series.pieces[0].end == 3 * HOUR  # the setting runs to the edge
+
+
+def test_a_plan_is_drawn_until_its_duration(normalized):
+    plan = normalized(
+        TimePlan(
+            duration=90 * ureg.minute, instructions=[single(HOUR) for _ in range(3)]
+        )
+    )
+
+    pieces = plan.time_series_for_plotting().pieces
+
+    assert [(piece.start, piece.end) for piece in pieces] == [
+        (0, HOUR),
+        (HOUR, 1.5 * HOUR),
+    ]
