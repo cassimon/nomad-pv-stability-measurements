@@ -34,6 +34,9 @@ from nomad_pv_stability_measurements.parsers.units import (
     parse_difference,
     volume_ratio_of_relative_humidity,
 )
+from nomad_pv_stability_measurements.schema_packages.base_instructions import (
+    MonitorControlInstruction,
+)
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
     IndefiniteRepeatingBlock,
@@ -44,9 +47,6 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     TimedRepeatingBlock,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
-from nomad_pv_stability_measurements.schema_packages.routine import (
-    MonitorControlInstruction,
-)
 
 #: Keys an instruction may be written with that are no field of the schema. They are
 #: read here and never reach the archive.

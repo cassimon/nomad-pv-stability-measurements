@@ -1,7 +1,7 @@
 import numpy as np
 from nomad.metainfo import Quantity, SchemaPackage
 
-from nomad_pv_stability_measurements.schema_packages.routine import (
+from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     HoldBelowInstruction,
     HoldBetweenInstruction,
 )

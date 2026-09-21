@@ -4,6 +4,13 @@ standard names (Design.md §15.11, §17, §20.3, §22)."""
 import pytest
 from nomad.units import ureg
 
+from nomad_pv_stability_measurements.schema_packages.base_instructions import (
+    HoldBelowInstruction,
+    HoldBetweenInstruction,
+    HoldInstruction,
+    MonitorControlInstruction,
+    RampInstruction,
+)
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBelowRelativeHumidity,
     HoldBetweenIrradiance,
@@ -25,13 +32,6 @@ from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
 )
 from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
     RampTemperature,
-)
-from nomad_pv_stability_measurements.schema_packages.routine import (
-    HoldBelowInstruction,
-    HoldBetweenInstruction,
-    HoldInstruction,
-    MonitorControlInstruction,
-    RampInstruction,
 )
 from nomad_pv_stability_measurements.schema_packages.standard_values import (
     Dark,

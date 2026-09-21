@@ -3193,7 +3193,7 @@ for what an activity records (`ActivityStep`) and nowhere else: everything a pla
 ```
 Instruction                     name, description, estimated_duration, sub_instructions
 ├── SingleInstruction           no sub-instructions
-│   └── MonitorControlInstruction (routine.py) → Hold…, HoldBelow…, HoldBetween…, Ramp…, MPP/VOC
+│   └── MonitorControlInstruction (base_instructions.py) → Hold…, HoldBelow…, HoldBetween…, Ramp…, MPP/VOC
 └── InstructionBlock            sub_instruction_execution_mode — runs once
     ├── CountingRepeatingBlock  repeat_n
     └── TimedRepeatingBlock     repeat_duration
@@ -3406,7 +3406,7 @@ reading measured data, is a separate design, started once there is real data.
 `TimePlotSeries` — plain data, no Plotly: times, values or text per quantity, and the axis breaks.
 A single instruction gives its own points, from `set_values_for_plotting(length)` — the corners, `None` where the
 protocol states no value — or `annotation_for_plotting()` for the text instead (`MonitorControlInstruction`,
-`routine.py`). A block combines its sub-instructions' series one after another or side by side,
+`base_instructions.py`). A block combines its sub-instructions' series one after another or side by side,
 up to 3 iterations, and adds its break. `plan_timeline.py` only turns the series into Plotly
 figures; `StabilityProtocol` becomes a `PlotSection` and adds them in `normalize`. No parser
 change, no new entry.
