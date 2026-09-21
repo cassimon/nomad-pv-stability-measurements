@@ -351,12 +351,6 @@ class Planned(ArchiveSection):
         description='The plan that this activity is based on.',
     )
 
-    is_consistent_with_plan = Quantity(
-        type=bool,
-        description='Whether the activity is consistent with the plan it is based on. '
-        'Derived from the activity and the plan.',
-    )
-
     deviations_from_plan = SubSection(
         section_def=Deviation,
         description='What is different between the activity and the plan it is based '
@@ -367,6 +361,10 @@ class Planned(ArchiveSection):
     def populate_from_plan(self):
         """Override it to fill in the activity from its `plan`. By default, nothing is
         filled in."""
+
+    def has_reached_objectives(self) -> bool:
+        """Override it to state if the objectives were achieved. By default, yes"""
+        return True
 
     def check_consistency_with_plan(self) -> bool:
         """Override it to check the activity against its `plan`. By default, it is
