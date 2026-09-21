@@ -24,7 +24,11 @@ START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def executed(protocol, **given):
-    return protocol.create_activity(name='run 1', datetime=START, **given)
+    activity = StabilityActivity(
+        name='run 1', datetime=START, plans=[protocol], **given
+    )
+    activity.populate_from_plans(activity.plans)
+    return activity
 
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
@@ -86,7 +90,7 @@ def test_coordinates_the_wrong_way_round_are_reported(normalized, log):
     assert 'wrong way round' in error
 
 
-def test_executed_it_is_the_test_that_ran_it_as_the_caller_says():
+def test_executed_what_the_caller_says_stands():
     protocol = StabilityProtocol(
         name='protocol', description='planned', standard='ISOS-L-2', location='Lab A'
     )
@@ -100,7 +104,7 @@ def test_executed_it_is_the_test_that_ran_it_as_the_caller_says():
     )
 
     assert isinstance(activity, StabilityActivity)
-    assert activity.protocol is protocol
+    assert activity.plans == [protocol]
     assert (activity.name, activity.description) == ('run 1', 'the first run')
     assert (activity.method, activity.location) == ('soak', 'Lab B')
     assert [step.name for step in activity.steps] == ['light on']

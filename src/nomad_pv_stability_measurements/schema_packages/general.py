@@ -3,7 +3,7 @@ from datetime import timedelta
 
 import numpy as np
 from nomad.datamodel.data import ArchiveSection
-from nomad.datamodel.metainfo.basesections.v2 import Activity, BaseSection
+from nomad.datamodel.metainfo.basesections.v2 import Activity, BaseSection, ActivityStep
 from nomad.metainfo import (
     Datetime,
     MEnum,
@@ -12,7 +12,7 @@ from nomad.metainfo import (
     Section,
     SubSection,
 )
-from nomad.metainfo.metainfo import SectionProxy
+from nomad.metainfo.metainfo import Reference, SectionProxy
 from nomad.units import ureg
 
 m_package = SchemaPackage()
@@ -261,6 +261,8 @@ class CountingRepeatingBlock(RepeatingBlock):
         return self.repeat_n * one
 
 
+
+
 class Plan(BaseSection):
     """What is planned to be done, as instructions. A specialized class describes
     how to turn the instructions into a (specialized) activity with concrete steps, by
@@ -273,15 +275,64 @@ class Plan(BaseSection):
         description='The instructions that make up this plan.',
     )
 
-    def create_activity(self, **fields) -> Activity:
-        """The activity running this plan: made from `fields`, what the caller says
-        happened, which are whatever the activity takes.
+class Deviation(ArchiveSection):
+    """What is different between an activity and the plans it is based on."""
 
-        Override it: a specialized plan makes its own activity, with its own return
-        type, and fills in from the plan what the caller left out. A plain plan knows
-        nothing to fill in, so its activity is the caller's alone.
-        """
-        return Activity(**fields)
+    description = Quantity(
+        type=str,
+        description='A short description of what is different between the activity '
+        'and the plans it is based on.',
+    )
+
+    plan = Quantity(
+        type=Reference(Plan),
+        description='The plan that this deviation is related to.',
+    )
+
+    conflicting_instructions = Quantity(
+        type=Reference(Instruction),
+        description='The instruction that this deviation is related to.',
+        repeats=True,
+    )
+
+    conflicting_steps = Quantity(
+        type=Reference(ActivityStep),
+        description='The steps that are different between the activity and the plans it is based on.',
+        repeats=True,
+    )
+
+class Planned(ArchiveSection):
+    """A mixin for activities that are based on plans: inherit it next to an
+    `Activity`, e.g. `class StabilityActivity(Measurement, Planned)`."""
+
+    plans = Quantity(
+        type=Reference(Plan),
+        description='The plans that this activity is based on.',
+        repeats=True,
+    )   
+
+    is_consistent_with_plans = Quantity(
+        type=bool,
+        description='Whether the activity is consistent with the plans it is based on. '
+        'Derived from the activity and the plans.',
+    )
+
+    deviations_from_plans = SubSection(
+        section_def=Deviation,
+        description='What is different between the activity and the plans it is based on. '
+        'Derived from the activity and the plans.',
+        repeats=True,
+    )
+
+    def populate_from_plans(self, plans):
+        """Overwrite this function to populate the activity from the plans. The default implementation does nothing."""
+        pass;
+
+    def check_consistency_with_plans(self, plans) -> bool:
+        """Overwrite this function to check the consistency of the activity with the plans. The default implementation does nothing."""
+        pass;
+
+
 
 
 class TimePlan(Plan):
