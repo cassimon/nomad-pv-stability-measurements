@@ -120,8 +120,7 @@ class StabilityProtocol(TimePlan):
             self.standard_level = int(designation.group('level'))
 
 
-
-class StabilityActivity(Measurement,Planned):
+class StabilityActivity(Measurement, Planned):
     """A PV stability test as it ran: a `StabilityProtocol` executed on samples.
 
     A measurement rather than a process: a stability test is run to learn how the
@@ -129,18 +128,15 @@ class StabilityActivity(Measurement,Planned):
     for.
     """
 
-    protocol = Quantity(
-        type=StabilityProtocol,
-        description='The protocol this test ran.',
-    )
-
     def populate_from_plans(self, plans):
         """Fill in, from the protocols among `plans`, what the caller left out: the
         standard as the `method`, the protocol's `location`, and one step per
         instruction. What was said about the test stands, and nothing that is only
         planned is claimed: no end is derived from a protocol's `duration`.
         """
-        protocols = [plan for plan in plans or [] if isinstance(plan, StabilityProtocol)]
+        protocols = [
+            plan for plan in plans or [] if isinstance(plan, StabilityProtocol)
+        ]
         for protocol in protocols:
             self.method = self.method or protocol.standard
             self.location = self.location or protocol.location

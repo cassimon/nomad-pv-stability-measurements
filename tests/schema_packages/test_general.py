@@ -9,14 +9,12 @@ should. Only a plan, or a timed block, stops instructions early.
 from datetime import datetime, timezone
 
 import pytest
-from nomad.datamodel.metainfo.basesections.v2 import Activity
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
     IndefiniteRepeatingBlock,
     InstructionBlock,
-    Plan,
     ScheduledPlan,
     SingleInstruction,
     TimedRepeatingBlock,
@@ -128,18 +126,6 @@ def test_a_scheduled_plan_ends_its_duration_after_it_starts(
     )
 
     assert normalized(plan).scheduled_end_time == end
-
-
-def test_a_plain_plan_makes_the_activity_from_what_the_caller_says_alone():
-    plan = Plan(name='plan', description='what is planned')
-
-    activity = plan.create_activity(
-        name='run 1', description='the first run', method='soak', location='lab'
-    )
-
-    assert type(activity) is Activity
-    assert (activity.name, activity.description) == ('run 1', 'the first run')
-    assert (activity.method, activity.location) == ('soak', 'lab')
 
 
 @pytest.mark.parametrize(

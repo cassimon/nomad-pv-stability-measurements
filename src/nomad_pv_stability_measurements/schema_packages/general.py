@@ -3,7 +3,7 @@ from datetime import timedelta
 
 import numpy as np
 from nomad.datamodel.data import ArchiveSection
-from nomad.datamodel.metainfo.basesections.v2 import Activity, BaseSection, ActivityStep
+from nomad.datamodel.metainfo.basesections.v2 import ActivityStep, BaseSection
 from nomad.metainfo import (
     Datetime,
     MEnum,
@@ -264,9 +264,8 @@ class CountingRepeatingBlock(RepeatingBlock):
 
 
 class Plan(BaseSection):
-    """What is planned to be done, as instructions. A specialized class describes
-    how to turn the instructions into a (specialized) activity with concrete steps, by
-    overriding `create_activity()`.
+    """What is planned to be done, as instructions. An activity based on it is a
+    `Planned` one, which fills itself in from its plans.
     """
 
     instructions = SubSection(
@@ -292,13 +291,13 @@ class Deviation(ArchiveSection):
     conflicting_instructions = Quantity(
         type=Reference(Instruction),
         description='The instruction that this deviation is related to.',
-        repeats=True,
+        shape=['*'],
     )
 
     conflicting_steps = Quantity(
         type=Reference(ActivityStep),
         description='The steps that are different between the activity and the plans it is based on.',
-        repeats=True,
+        shape=['*'],
     )
 
 class Planned(ArchiveSection):
@@ -308,7 +307,7 @@ class Planned(ArchiveSection):
     plans = Quantity(
         type=Reference(Plan),
         description='The plans that this activity is based on.',
-        repeats=True,
+        shape=['*'],
     )   
 
     is_consistent_with_plans = Quantity(
@@ -325,12 +324,14 @@ class Planned(ArchiveSection):
     )
 
     def populate_from_plans(self, plans):
-        """Overwrite this function to populate the activity from the plans. The default implementation does nothing."""
-        pass;
+        """Override it to fill in the activity from `plans`. By default, nothing is
+        filled in."""
+        pass
 
     def check_consistency_with_plans(self, plans) -> bool:
-        """Overwrite this function to check the consistency of the activity with the plans. The default implementation does nothing."""
-        pass;
+        """Override it to check the activity against `plans`. By default, it is
+        consistent."""
+        return True
 
 
 
