@@ -3418,7 +3418,8 @@ change, no new entry.
 | Hold with `set_point` (dark: 0 W/m²) | line at the value |
 | Ramp with a stated path (`hold`, `sawtooth`, `triangle`) | line through its corners, exact |
 | `HoldBetween` / `HoldBelow` (from 0) | translucent band, two sharp edges, bounds as text |
-| Reference point, MPP, open circuit, `cycle` | bar with text: `MPP`, `near V_MPP` |
+| Ramp whose path (`cycle`) or pace (no rate, no duration) is not stated | band between its ends: `…, rate not stated` |
+| Reference point, MPP, open circuit | bar with text: `MPP`, `near V_MPP` |
 | Monitor only | thin bar: `monitored` |
 | Option left open (light, no value) | bar: `irradiance not specified` |
 
@@ -3428,8 +3429,20 @@ An instruction that never finishes runs to the right edge; where the whole plan 
 axis closes with `…`. Every tick shows true time; a break is made of axis segments side by side,
 never of dates.
 
-**Figures.** An overview (open), and one per repeating block showing a single iteration
-(`one_iteration_for_plotting`). Plotting-only methods end in `_for_plotting`.
+**Figures.** An overview (open), and one per repeating block whose iteration ends, showing a single
+iteration (`one_iteration_for_plotting`). Plotting-only methods end in `_for_plotting`.
+
+**Colour** says what the protocol states (`role_for_plotting`), in the words of the ISOS consensus
+(Khenkin et al. 2020): `controlled` to a value, bounds, path or named point ("controlled elevated
+temperatures of 65 or 85 °C", MPP tracking, a V_MPP bias); `specified` but not controlled ("Ambient
+(23 ± 4 °C)", open circuit — "disconnected" —, dark — light source "None"); only `monitored`
+("monitored but not explicitly controlled"); or `unspecified`: regulated to what is not stated. A
+protocol that never ends carries its time axis, and what never ends, a little past the drawing, to `⋯`. An axis whose values
+cannot be negative starts at 0. A `set_point_tolerance` is a translucent area around the value's
+line. The time axis is a black line below the rows; the row labels stand at one place on the left;
+the text in a row is as large as its narrowest bar allows (`text_size`); text too long for its bar
+at any size is left out — the colour stays, and the block's own figure has the room. Break labels
+stand above the axis, the ticks below it; a narrow axis section gets few ticks.
 
 **Tests.** A hold is drawn at its value for its duration; a device-dependent instruction is text,
 not a value; a block of 300 repetitions draws 3 and a break labelled `n=300 repetitions`; all ISOS
@@ -3438,3 +3451,32 @@ examples normalize within a time budget.
 **Steps.** 1 `set_values_for_plotting`/`annotation` on single instructions · 1b `TimePlotSeries` ·
 2 `time_series_for_plotting` on blocks (repeats, breaks) · 3 overview figure · 4 block figures ·
 5 all-ISOS check.
+
+## 30. A solar simulator is held between 800 and 1000 W/m²
+
+Reverses the twin variants of §21.1 for the light. p.43's "Ideally, light sources with an irradiance
+of 800–1000 W m–² … should be applied" is read as the standard's light: every solar-simulator
+protocol (ISOS-L, -LC, -LT) holds `hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}` as its
+only light, controlled and monitored. The variant without an irradiance is gone — it said nothing
+a reader of the timeline (§29) could use. ISOS-L 22 → 11, ISOS-LC 108 → 54, ISOS-LT 20 → 10:
+**192 → 117 variants**. Sunlight (ISOS-O) stays only monitored. OPEN_QUESTIONS.md #10 records it.
+
+## 31. Timeline adjustments
+
+- **Title** bold. **A plan that never ends** closes its axis with `⋯` only: no `//` and no
+  "indefinitely", which the `⋯` already says. A label stays where a break is followed by more.
+- **Subscripts** as Plotly's `<sub>`: `V_MPP` → V<sub>MPP</sub>. Not LaTeX: Plotly renders `$…$`
+  only where the page loads MathJax (the classic GUI does, the v2 GUI is unverified, a PNG export
+  doesn't), and only for a text that is LaTeX as a whole.
+- **Value axes** run from a little below their least value (0 at most) to a little above their
+  greatest (`VALUE_MARGIN`), so a line at 0 is as thick as any other.
+- **Rows** top to bottom: irradiance, temperature, humidity, oxygen, other quantities, then the
+  electrical load last (`TOP_ROWS`, `BOTTOM_ROWS`).
+- **Oxygen:** every ISOS file states `oxygen: reference_point: ambient air` (specified, purple).
+  Only the "I" protocols run inert (p.42), so the others run in air.
+- **A temperature ramp without a pace** (ISOS-T, ISOS-LT: no rate, no duration, or a `cycle`
+  without a path) is drawn at **100 K/h**, IEC 61215-2 MQT 11's fastest thermal cycling. A
+  `cycle` is drawn linear. The line is dashed, and a red note says what is assumed:
+  `path and rate not specified: drawn linear at 100 K/h`. Endless, it is drawn for three
+  cycles. Quantities with no plausible pace keep the band between their ends (§29). The
+  assumption is only for the plot; the stored ramp stays as the standard states it.

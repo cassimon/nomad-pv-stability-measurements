@@ -18,3 +18,6 @@ data:
     electrical_load:
       hold: mpp
       monitor: true
+  instructions:
+    # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
+    - {channel: atmosphere, variable: oxygen, reference_point: ambient air}

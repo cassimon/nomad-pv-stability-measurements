@@ -9,10 +9,7 @@ data:
       control: true
       monitor: true
       # "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied" (p.43)
-      options:
-        - {}
-        - label: recommended 800–1000 W/m²
-          hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}
+      hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}
     temperature:
       monitor: true
       options:
@@ -29,3 +26,6 @@ data:
         - {label: MPP, hold: mpp, monitor: true}
         - {label: OC, hold: open_circuit}
         - {label: fixed voltage near MPP, variable: voltage, control: true, reference_point: near V_MPP}
+  instructions:
+    # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
+    - {channel: atmosphere, variable: oxygen, reference_point: ambient air}

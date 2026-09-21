@@ -24,3 +24,6 @@ data:
         - {label: J_SC, variable: current, reference_point: J_SC}
         - {label: −V_oc, variable: voltage, reference_point: -V_oc}
         - {label: −J_MPP, variable: current, reference_point: -J_MPP}
+  instructions:
+    # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
+    - {channel: atmosphere, variable: oxygen, reference_point: ambient air}

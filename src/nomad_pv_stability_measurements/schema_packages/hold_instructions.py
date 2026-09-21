@@ -36,6 +36,13 @@ class HoldIrradiance(HoldInstruction):
         description='Which spectrum the lamp delivers, e.g. `AM1.5G`. Free text for now.',
     )
 
+    def role_for_plotting(self) -> str:
+        """Dark is specified, never controlled: no light needs no regulation (ISOS
+        consensus, Table 1: light source "None")."""
+        if self.set_point is not None and self.set_point.magnitude == 0:
+            return 'specified'
+        return super().role_for_plotting()
+
 
 class HoldVoltage(HoldInstruction):
     """The voltage at the cell's terminals."""

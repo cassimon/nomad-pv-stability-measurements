@@ -1,5 +1,6 @@
 import numpy as np
 from nomad.metainfo import Quantity, SchemaPackage
+from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     RampInstruction,
@@ -18,6 +19,11 @@ class RampTemperature(RampInstruction):
     ramp_rate = Quantity(
         type=np.float64, unit='K/s', description='How fast the temperature moves.'
     )
+
+    def assumed_rate_for_plotting(self):
+        """100 K/h, the fastest thermal cycling IEC 61215-2 (MQT 11) allows: the ISOS
+        cycles leave the pace to the lab."""
+        return 100 * ureg.kelvin / ureg.hour
 
 
 class RampIrradiance(RampInstruction):

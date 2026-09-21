@@ -80,6 +80,23 @@ class MonitorControlInstruction(SingleInstruction):
         """One row per quantity, whichever instruction acts on it."""
         return self.quantity_name()
 
+    def states_a_value(self) -> bool:
+        """Whether the protocol states what the quantity is kept at: a value, bounds, a
+        path or a named point."""
+        return self.reference_point is not None
+
+    def role_for_plotting(self) -> str:
+        """In the words of the ISOS consensus (Khenkin et al. 2020): `controlled` to
+        what the protocol states ("controlled elevated temperatures of 65 or 85 °C");
+        `specified` but not controlled ("Ambient (23 ± 4 °C)"); only `monitored`
+        ("monitored but not explicitly controlled"); or `unspecified`: regulated to
+        nothing the protocol states."""
+        if self.states_a_value():
+            return 'controlled' if self.control else 'specified'
+        if self.monitor and not self.control:
+            return 'monitored'
+        return 'unspecified'
+
     def annotation_for_plotting(self) -> str:
         """What is written in place of a value, where `set_values_for_plotting` gives none."""
         if self.reference_point is not None:
@@ -125,6 +142,16 @@ class HoldInstruction(MonitorControlInstruction):
         value = f' {shown(self.set_point)}' if self.set_point is not None else ''
         return value + super().describe_values() + held_for(self)
 
+    def states_a_value(self) -> bool:
+        return self.set_point is not None or super().states_a_value()
+
+    def bounds_for_plotting(self):
+        """`set_point ± set_point_tolerance`, drawn around the value."""
+        if self.set_point is None or self.set_point_tolerance is None:
+            return None
+        tolerance = self.set_point_tolerance.to(self.set_point.units)
+        return self.set_point - tolerance, self.set_point + tolerance
+
     def set_values_for_plotting(self, length):
         if self.set_point is None:
             return None
@@ -151,6 +178,9 @@ class HoldBelowInstruction(MonitorControlInstruction):
         if self.upper_bound is None:
             return super().annotation_for_plotting()
         return f'below {shown(self.upper_bound)}'
+
+    def states_a_value(self) -> bool:
+        return self.upper_bound is not None or super().states_a_value()
 
     def bounds_for_plotting(self):
         """From zero: every quantity kept below a bound here is one that cannot be
@@ -247,13 +277,19 @@ class RampInstruction(MonitorControlInstruction):
 
     def set_values_for_plotting(self, length):
         """Once to `end_point` and held there (`hold`), again and again with a jump back
-        (`sawtooth`), or up and down (`triangle`). A `cycle` states no path, so no value."""
-        period = self.ramp_period()
+        (`sawtooth`), or up and down (`triangle`). A `cycle` states no path: where a pace
+        is assumed (`assumed_rate_for_plotting`), it is drawn up and down."""
+        period = self.period_for_plotting()
         if period is None:
             return None
-        shape = RAMP_SHAPES[self.end_of_ramp_behavior]
+        shape = RAMP_SHAPES.get(self.end_of_ramp_behavior, triangle)
         times, phases = shape(period, length.to('s').magnitude)
         return line(times, phases, self.start_point, self.end_point - self.start_point)
+
+    def states_a_value(self) -> bool:
+        """Its ends, even where the path between them is not stated."""
+        ends = self.start_point is not None and self.end_point is not None
+        return ends or super().states_a_value()
 
     def ramp_period(self) -> float | None:
         """How long one ramp from `start_point` to `end_point` takes, in seconds: from
@@ -268,10 +304,50 @@ class RampInstruction(MonitorControlInstruction):
             return self.duration.to('s').magnitude
         return None
 
+    def assumed_rate_for_plotting(self):
+        """A plausible pace, drawn where the protocol states none; `None`: none known
+        for this quantity, and the range between the ends is drawn instead."""
+        return None
+
+    def period_for_plotting(self) -> float | None:
+        """`ramp_period`, or else the one the assumed rate gives."""
+        period = self.ramp_period()
+        rate = self.assumed_rate_for_plotting()
+        if period is not None or rate is None or not self.states_a_value():
+            return period
+        span = abs(self.end_point - self.start_point).to(rate.units * ureg.second)
+        return (span / rate).to('s').magnitude
+
+    def cycle_for_plotting(self) -> float | None:
+        """One ramp, and for a `triangle` or `cycle` the way back too, in seconds. A
+        ramp that holds its end repeats nothing."""
+        period = self.period_for_plotting()
+        if period is None or self.end_of_ramp_behavior == 'hold':
+            return None
+        return period if self.end_of_ramp_behavior == 'sawtooth' else 2 * period
+
+    def assumption_for_plotting(self) -> str | None:
+        """What the drawing assumes and the protocol does not state, in words."""
+        if self.ramp_period() is not None or self.period_for_plotting() is None:
+            return None
+        rate = shown(self.assumed_rate_for_plotting())
+        if self.end_of_ramp_behavior == 'cycle':
+            return f'path and rate not specified: drawn linear at {rate}'
+        return f'rate not specified: drawn at {rate}'
+
+    def bounds_for_plotting(self):
+        """Where the ends are stated but not the path — a `cycle` — or not the pace — no
+        `ramp_rate` and no `duration` —, and no pace is assumed either, the range
+        between the ends is what is known."""
+        if self.period_for_plotting() is not None or not self.states_a_value():
+            return None
+        return tuple(sorted((self.start_point, self.end_point)))
+
     def annotation_for_plotting(self) -> str:
-        if self.end_of_ramp_behavior == 'cycle' and self.describe_values():
-            return self.describe_values().strip()
-        return super().annotation_for_plotting()
+        if self.bounds_for_plotting() is None:
+            return super().annotation_for_plotting()
+        missing = 'path' if self.end_of_ramp_behavior == 'cycle' else 'rate'
+        return f'{self.describe_values().strip()}, {missing} not stated'
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)

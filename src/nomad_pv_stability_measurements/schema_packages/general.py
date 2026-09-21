@@ -16,6 +16,7 @@ from nomad.metainfo.metainfo import Reference, SectionProxy
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.utils import (
+    ITERATIONS_FOR_PLOTTING,
     AxisBreak,
     PlotPiece,
     TimePlotSeries,
@@ -28,9 +29,6 @@ from nomad_pv_stability_measurements.schema_packages.utils import (
 )
 
 m_package = SchemaPackage()
-
-#: A repeating block draws this many iterations at most; the rest is an axis break.
-ITERATIONS_FOR_PLOTTING = 3
 
 
 class Instruction(ArchiveSection):
@@ -118,11 +116,15 @@ class SingleInstruction(Instruction):
         if end < inf:
             corners = self.set_values_for_plotting((end - start) * ureg.second)
         piece.bounds = self.bounds_for_plotting()
+        piece.role = self.role_for_plotting()
         if corners is None:
             piece.text = self.annotation_for_plotting()
         else:
             times, piece.values = corners
             piece.times = start + times.to('s').magnitude
+            piece.assumption = self.assumption_for_plotting()
+        if endless:
+            piece.cycle = self.cycle_for_plotting()
         return TimePlotSeries([piece])
 
     def row_for_plotting(self) -> str:
@@ -137,6 +139,18 @@ class SingleInstruction(Instruction):
     def bounds_for_plotting(self):
         """`(lower, upper)` of a band the value is kept in; `None`: no band."""
         return None
+
+    def cycle_for_plotting(self) -> float | None:
+        """s: one cycle of what it repeats by itself; `None`: it repeats nothing."""
+        return None
+
+    def assumption_for_plotting(self) -> str | None:
+        """What the drawing assumes and the plan does not state; `None`: nothing."""
+        return None
+
+    def role_for_plotting(self) -> str:
+        """`controlled`, `monitored` or `unspecified`: what colour it is drawn in."""
+        return 'unspecified'
 
     def annotation_for_plotting(self) -> str:
         """What is written in place of a value."""
@@ -220,6 +234,15 @@ class InstructionBlock(Instruction):
         series = self.iteration_for_plotting(0.0, stop)
         series.end = stop
         return series
+
+    def title_for_plotting(self) -> str:
+        """Its `name`, or else how it repeats and what it runs: `Repeat indefinitely:
+        Hold irradiance 1000 W/m² for 1 h → Hold irradiance 0 W/m² for 1 h`."""
+        if self.name:
+            return self.name
+        joint = ' + ' if self.sub_instruction_execution_mode == 'parallel' else ' → '
+        labels = [each.label or each.describe() for each in self.sub_instructions]
+        return f'{self.describe_repetition()}: {joint.join(labels)}'
 
     def iteration_for_plotting(self, start: float, stop: float) -> TimePlotSeries:
         """One pass of the sub-instructions."""

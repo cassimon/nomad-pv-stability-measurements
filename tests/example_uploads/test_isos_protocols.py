@@ -31,6 +31,7 @@ from nomad_pv_stability_measurements.schema_packages.hold_below_instructions imp
 from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldCurrent,
     HoldIrradiance,
+    HoldOxygenFraction,
     HoldRelativeHumidity,
     HoldTemperature,
     HoldVoltage,
@@ -73,20 +74,15 @@ DARK = instruction(HoldIrradiance, control=True, set_point=0.0)
 #: Light: "the exact irradiance … should be reported" (p.43), checked "with a reference
 #: cell" (p.44). Darkness, open circuit and a fixed bias are conditions to report, not
 #: readings (Table 3).
-SOLAR_SIMULATOR = instruction(HoldIrradiance, control=True, monitor=True)
 #: "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied"
-#: (p.43). A recommendation is a variant of its own (§21.1): every solar simulator comes
-#: without it and with it, the latter's option last. A range, never a target (§22).
-LIGHTS = {
-    None: SOLAR_SIMULATOR,
-    ('800-1000Wm2', 'recommended 800–1000 W/m²'): instruction(
-        HoldBetweenIrradiance,
-        control=True,
-        monitor=True,
-        lower_bound=pytest.approx(800),
-        upper_bound=pytest.approx(1000),
-    ),
-}
+#: (p.43): read as what every solar simulator is held at — a range, never a target (§22).
+SOLAR_SIMULATOR = instruction(
+    HoldBetweenIrradiance,
+    control=True,
+    monitor=True,
+    lower_bound=pytest.approx(800),
+    upper_bound=pytest.approx(1000),
+)
 #: Table 3 has an outdoor test report the sunlight irradiance, so it is monitored.
 SUNLIGHT = instruction(HoldIrradiance, control=False, monitor=True)
 #: "Ambient (23 ± 4 °C)": "monitored but not explicitly controlled (room temperature in
@@ -102,6 +98,9 @@ ROOM_TEMPERATURE = instruction(
 #: monitor and report" it (p.43). Humidity is stated as RH throughout (§20.6).
 AMBIENT_TEMPERATURE = instruction(HoldTemperature, control=False, monitor=True)
 AMBIENT_HUMIDITY = instruction(HoldRelativeHumidity, control=False, monitor=True)
+#: Every protocol not marked "I" is run in ambient air: "protocols to address the intrinsic
+#: stability of solar cells in inert atmospheres … labelled by the index 'I'" (p.42).
+AMBIENT_AIR = instruction(HoldOxygenFraction, reference_point='ambient air')
 #: Monitored, and controlled only above 40 °C: the condition stays in `notes` (§20.8).
 HUMIDITY_MONITORED = instruction(HoldRelativeHumidity, monitor=True)
 OPEN_CIRCUIT = instruction(VOCTracking, control=True)
@@ -208,6 +207,10 @@ def protocol(standard, options, instructions, environment='indoor'):
     file writes them, or `None` for the alternative that adds nothing to its name."""
     options = [option for option in options if option]
     variant = ', '.join(label for _, label in options)
+    # The file's own instructions come after its settings, before its routine (§14.3).
+    routine = instructions[-1]['m_def'] == m_def(IndefiniteRepeatingBlock)
+    at = len(instructions) - routine
+    instructions = [*instructions[:at], AMBIENT_AIR, *instructions[at:]]
     archive = {
         'm_def': m_def(StabilityProtocol),
         'name': f'{standard} ({variant})' if variant else standard,
@@ -246,27 +249,26 @@ for b_token, (b_label, cls, point) in BIASES.items():
         protocol('ISOS-V-3', options, [DARK, held(celsius), humidity(85), load])
 
 # ISOS-L — light soaking.
-for light, simulator in LIGHTS.items():
-    for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
-        protocol(
-            'ISOS-L-1',
-            [light, (l_token, l_label)],
-            [simulator, ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load],
-        )
-    for (token, (label, celsius)), (l_token, (l_label, load)) in itertools.product(
-        TEMPERATURES.items(), LOWER_LEVEL_LOADS.items()
-    ):
-        protocol(
-            'ISOS-L-2',
-            [light, (token, label), (l_token, l_label)],
-            [simulator, held(celsius), AMBIENT_HUMIDITY, load],
-        )
-    for token, (label, celsius) in TEMPERATURES.items():
-        protocol(
-            'ISOS-L-3',
-            [light, (token, label)],
-            [simulator, held(celsius), humidity(50), MPP[1]],
-        )
+for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
+    protocol(
+        'ISOS-L-1',
+        [(l_token, l_label)],
+        [SOLAR_SIMULATOR, ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load],
+    )
+for (token, (label, celsius)), (l_token, (l_label, load)) in itertools.product(
+    TEMPERATURES.items(), LOWER_LEVEL_LOADS.items()
+):
+    protocol(
+        'ISOS-L-2',
+        [(token, label), (l_token, l_label)],
+        [SOLAR_SIMULATOR, held(celsius), AMBIENT_HUMIDITY, load],
+    )
+for token, (label, celsius) in TEMPERATURES.items():
+    protocol(
+        'ISOS-L-3',
+        [(token, label)],
+        [SOLAR_SIMULATOR, held(celsius), humidity(50), MPP[1]],
+    )
 
 # ISOS-O — outdoors, where nothing but the load is regulated, and the weather is monitored.
 # No site is stated: it is reported, not prescribed (Table 3).
@@ -299,47 +301,45 @@ protocol(
 
 # ISOS-LC — the light is what varies, so it alone is the routine (§16.2, Rule 2). LC-3's
 # humidity is an open question and not written (OPEN_QUESTIONS.md).
-for light, simulator in LIGHTS.items():
-    for (p_token, p_label, d_token, d_label), (on, off) in LIGHT_CYCLES.items():
-        cycle_options = [(p_token, p_label), (d_token, d_label)]
-        routine = light_dark(on, off, simulator)
-        for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
+for (p_token, p_label, d_token, d_label), (on, off) in LIGHT_CYCLES.items():
+    cycle_options = [(p_token, p_label), (d_token, d_label)]
+    routine = light_dark(on, off, SOLAR_SIMULATOR)
+    for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
+        protocol(
+            'ISOS-LC-1',
+            [(l_token, l_label), *cycle_options],
+            [ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load, routine],
+        )
+        for token, (label, celsius) in TEMPERATURES.items():
             protocol(
-                'ISOS-LC-1',
-                [(l_token, l_label), *cycle_options, light],
-                [ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load, routine],
+                'ISOS-LC-2',
+                [(token, label), (l_token, l_label), *cycle_options],
+                [held(celsius), AMBIENT_HUMIDITY, load, routine],
             )
-            for token, (label, celsius) in TEMPERATURES.items():
-                protocol(
-                    'ISOS-LC-2',
-                    [(token, label), (l_token, l_label), *cycle_options, light],
-                    [held(celsius), AMBIENT_HUMIDITY, load, routine],
-                )
 
 # ISOS-LT — only the temperature varies, so it alone is the routine (§16.2, Rule 2).
-for light, simulator in LIGHTS.items():
-    for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
-        # "Linear or step ramping": linear is a triangle, a step's path is not stated.
-        for s_token, s_label, routine in (
-            ('linear', 'linear ramping', ramping(kelvin(23), kelvin(65))),
-            ('step', 'step ramping', cycling(kelvin(23), kelvin(65))),
-        ):
-            protocol(
-                'ISOS-LT-1',
-                [light, (l_token, l_label), (s_token, s_label)],
-                [simulator, AMBIENT_HUMIDITY, load, routine],
-            )
+for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
+    # "Linear or step ramping": linear is a triangle, a step's path is not stated.
+    for s_token, s_label, routine in (
+        ('linear', 'linear ramping', ramping(kelvin(23), kelvin(65))),
+        ('step', 'step ramping', cycling(kelvin(23), kelvin(65))),
+    ):
         protocol(
-            'ISOS-LT-2',
-            [light, (l_token, l_label)],
-            [simulator, HUMIDITY_MONITORED, load, ramping(kelvin(5), kelvin(65))],
+            'ISOS-LT-1',
+            [(l_token, l_label), (s_token, s_label)],
+            [SOLAR_SIMULATOR, AMBIENT_HUMIDITY, load, routine],
         )
-    # Level 3, where MPP tracking is mandatory: the table's "MPP or OC" is no option.
     protocol(
-        'ISOS-LT-3',
-        [light],
-        [simulator, HUMIDITY_MONITORED, MPP[1], ramping(kelvin(-25), kelvin(65))],
+        'ISOS-LT-2',
+        [(l_token, l_label)],
+        [SOLAR_SIMULATOR, HUMIDITY_MONITORED, load, ramping(kelvin(5), kelvin(65))],
     )
+# Level 3, where MPP tracking is mandatory: the table's "MPP or OC" is no option.
+protocol(
+    'ISOS-LT-3',
+    [],
+    [SOLAR_SIMULATOR, HUMIDITY_MONITORED, MPP[1], ramping(kelvin(-25), kelvin(65))],
+)
 
 
 def shipped() -> dict:

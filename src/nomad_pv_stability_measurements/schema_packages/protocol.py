@@ -131,7 +131,7 @@ class StabilityProtocol(PlotSection, TimePlan):
 
     def figures_for_plotting(self) -> list[PlotlyFigure]:
         """The timeline of the whole protocol, open, then one iteration of each
-        repeating block on its own; nothing where there is nothing to draw."""
+        repeating block whose iteration ends; nothing where there is nothing to draw."""
         drawn = [
             (
                 'Timeline',
@@ -141,14 +141,15 @@ class StabilityProtocol(PlotSection, TimePlan):
             )
         ]
         for block in self.m_all_contents():
-            if isinstance(block, RepeatingBlock):
-                label = block.label or block.describe()
+            # A pass that never ends shows nothing the timeline does not already.
+            if isinstance(block, RepeatingBlock) and block.one_iteration() is not None:
+                title = block.title_for_plotting()
                 drawn.append(
                     (
-                        f'One iteration: {label}',
-                        f'One iteration of {label}',
+                        f'One iteration: {block.name or block.describe()}',
+                        f'One iteration — {title}',
                         block.one_iteration_for_plotting(),
-                        block.one_iteration() is None,
+                        False,
                     )
                 )
         return [

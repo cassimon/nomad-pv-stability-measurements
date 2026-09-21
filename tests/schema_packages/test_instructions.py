@@ -31,6 +31,7 @@ from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     VOCTracking,
 )
 from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
+    RampRelativeHumidity,
     RampTemperature,
 )
 from nomad_pv_stability_measurements.schema_packages.standard_values import (
@@ -306,13 +307,12 @@ def test_a_ramp_is_drawn_through_its_corners(behavior, hours, celsius):
             ),
             '800 W/m²–1000 W/m²',
         ),
+        # No plausible pace is known for humidity: only its range is.
         (
-            RampTemperature(
-                start_point=296.15 * K,
-                end_point=338.15 * K,
-                end_of_ramp_behavior='cycle',
+            RampRelativeHumidity(
+                start_point=0.3, end_point=0.85, end_of_ramp_behavior='cycle'
             ),
-            '23 °C → 65 °C (cycle)',
+            '30 % → 85 % (cycle), path not stated',
         ),
     ],
 )
@@ -339,3 +339,59 @@ def test_an_instruction_that_never_finishes_is_drawn_until_the_drawing_stops():
     assert (piece.row, piece.text) == ('electrical load', 'MPP')
     assert piece.end == stop
     assert piece.endless
+
+
+@pytest.mark.parametrize(
+    'instruction, role',
+    [
+        # "controlled elevated temperatures of 65 or 85 °C" (Khenkin et al. 2020)
+        (HoldTemperature(set_point=338.15 * K, control=True), 'controlled'),
+        (MPPTracking(control=True), 'controlled'),
+        (HoldVoltage(reference_point='near V_MPP', control=True), 'controlled'),
+        # "Ambient (23 ± 4 °C)": stated, but not controlled
+        (HoldTemperature(set_point=296.15 * K, control=False), 'specified'),
+        # "open-circuit (disconnected)", and a light source "None"
+        (VOCTracking(control=True), 'specified'),
+        (HoldIrradiance(set_point=0 * ureg('W/m^2'), control=True), 'specified'),
+        # "monitored but not explicitly controlled"
+        (HoldRelativeHumidity(monitor=True, control=False), 'monitored'),
+        (HoldIrradiance(control=True, monitor=True), 'unspecified'),
+    ],
+)
+def test_an_instruction_is_coloured_by_what_the_protocol_states_about_it(
+    instruction, role
+):
+    assert instruction.role_for_plotting() == role
+
+
+@pytest.mark.parametrize(
+    'behavior, assumption',
+    [
+        ('triangle', 'rate not specified: drawn at 100 K/h'),
+        ('cycle', 'path and rate not specified: drawn linear at 100 K/h'),
+    ],
+)
+def test_a_temperature_ramp_without_a_pace_is_drawn_at_a_plausible_one(
+    behavior, assumption
+):
+    """IEC 61215's fastest thermal cycling, and said so: ISOS leaves the pace open."""
+    ramp = RampTemperature(
+        start_point=296.15 * K, end_point=346.15 * K, end_of_ramp_behavior=behavior
+    )
+
+    times, values = ramp.set_values_for_plotting(1 * ureg.hour)
+
+    assert times.to('hour').magnitude == pytest.approx([0, 0.5, 1])
+    assert values.to(ureg.degC).magnitude == pytest.approx([23, 73, 23])
+    assert ramp.assumption_for_plotting() == assumption
+    assert ramp.bounds_for_plotting() is None
+
+
+def test_a_ramp_without_a_pace_or_a_plausible_one_is_drawn_as_its_range():
+    ramp = RampRelativeHumidity(
+        start_point=0.85, end_point=0.3, end_of_ramp_behavior='triangle'
+    )
+
+    assert ramp.set_values_for_plotting(1 * ureg.hour) is None
+    assert ramp.bounds_for_plotting() == (pytest.approx(0.3), pytest.approx(0.85))
+    assert ramp.annotation_for_plotting() == '85 % → 30 % (triangle), rate not stated'

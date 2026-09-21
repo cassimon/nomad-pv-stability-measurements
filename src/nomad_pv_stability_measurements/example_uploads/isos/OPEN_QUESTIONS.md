@@ -79,8 +79,10 @@ p.36 defines it for ISOS-D-1: "room temperature in the laboratory is assumed to 
 ### 10. The recommended irradiance — for which protocols?
 
 p.43: "Ideally, light sources with an irradiance of 800–1000 W m–² (1 sun = 1000 W m–²) should be
-applied". **Every solar-simulator protocol (ISOS-L, -LC, -LT) has a variant keeping the irradiance
-between 800 and 1000 W m⁻²**, beside one that does not; sunlight (ISOS-O) has none.
+applied". **Every solar-simulator protocol (ISOS-L, -LC, -LT) holds the irradiance between 800 and
+1000 W m⁻²**, as its only light: the recommendation is read as the standard's light, since a solar
+simulator at no stated irradiance says nothing a reader can use. Sunlight (ISOS-O) is only
+monitored. (Until 2026-09: a variant without an irradiance beside one with the range.)
 
 ### 11. Smaller readings
 

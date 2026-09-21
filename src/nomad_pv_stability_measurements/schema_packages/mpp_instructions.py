@@ -47,6 +47,9 @@ class MPPTracking(MonitorControlInstruction):
     def annotation_for_plotting(self) -> str:
         return 'MPP'
 
+    def states_a_value(self) -> bool:
+        return True  # the point the tracker finds, and holds the load at
+
     def quantity_name(self) -> str:
         return 'electrical load'
 
@@ -60,6 +63,14 @@ class VOCTracking(MonitorControlInstruction):
 
     def annotation_for_plotting(self) -> str:
         return 'open circuit'
+
+    def states_a_value(self) -> bool:
+        return True
+
+    def role_for_plotting(self) -> str:
+        """Specified, never controlled: the cell is disconnected, and nothing regulates
+        it (ISOS consensus: "open-circuit (disconnected) conditions")."""
+        return 'specified'
 
     def quantity_name(self) -> str:
         return 'electrical load'

@@ -5,6 +5,10 @@ from math import inf
 import numpy as np
 from nomad.units import ureg
 
+#: A repeating block draws this many iterations at most; the rest is an axis break.
+#: Something that repeats by itself, and nothing stops, is drawn this many cycles.
+ITERATIONS_FOR_PLOTTING = 3
+
 
 def shown(quantity) -> str:
     """A quantity the way a person reads it: a temperature in °C, a fraction in %, a
@@ -19,7 +23,9 @@ def shown(quantity) -> str:
         return f'{seconds:.4g} s'
     elif quantity.dimensionless:
         quantity = quantity.to('percent')
-    return f'{quantity.magnitude:.4g} {quantity.units:~P}'
+    # pint writes an hour `hr`; the SI symbol is `h`.
+    unit = re.sub(r'\bhr\b', 'h', f'{quantity.units:~P}')
+    return f'{quantity.magnitude:.4g} {unit}'
 
 
 def words(class_name: str) -> str:
@@ -43,8 +49,15 @@ class PlotPiece:
     text: str | None = None
     #: `(lower, upper)` of a band the value is kept in, in the quantity's unit.
     bounds: tuple | None = None
+    #: `controlled`, `monitored` or `unspecified`: what colour it is drawn in.
+    role: str = 'unspecified'
     #: It never finishes: drawn up to where the drawing stops.
     endless: bool = False
+    #: s: one cycle of what it repeats by itself, as a ramp up and down: a drawing
+    #: that nothing else stops shows a few.
+    cycle: float | None = None
+    #: What the drawing assumes and the protocol does not state, written in red.
+    assumption: str | None = None
 
 
 @dataclass
@@ -100,9 +113,15 @@ def instructions_for_plotting(instructions, mode: str, start: float, stop: float
 
 def drawing_end(series: TimePlotSeries) -> float:
     """Where a drawing of `series` ends: after the last thing that starts, finishes or
-    breaks off; at least an hour, so a plan of settings alone still shows."""
+    breaks off, or has drawn a few of its own cycles; at least an hour, so a plan of
+    settings alone still shows."""
     times = [piece.start for piece in series.pieces]
     times += [piece.end for piece in series.pieces if piece.end < inf]
     times += [cut.start for cut in series.breaks]
     times += [cut.end for cut in series.breaks if cut.end < inf]
+    times += [
+        piece.start + ITERATIONS_FOR_PLOTTING * piece.cycle
+        for piece in series.pieces
+        if piece.cycle
+    ]
     return max(times, default=0) or 3600.0
