@@ -14,7 +14,12 @@ from nomad.metainfo import (
 from nomad.metainfo.metainfo import Reference, SectionProxy
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.utils import shown, words
+from nomad_pv_stability_measurements.schema_packages.utils import (
+    PlotPiece,
+    TimePlotSeries,
+    shown,
+    words,
+)
 
 m_package = SchemaPackage()
 
@@ -95,6 +100,41 @@ class SingleInstruction(Instruction):
                 f'{self.name or "<unnamed>"} is a `SingleInstruction` and cannot have '
                 f'sub-instructions.'
             )
+
+    def time_series_for_plotting(self, start: float, stop: float) -> TimePlotSeries:
+        """This instruction drawn from `start` until it finishes, or until `stop` where
+        the drawing stops first, in seconds since the plan starts."""
+        if start >= stop:
+            return TimePlotSeries()
+        endless = self.duration is None
+        end = stop if endless else min(stop, start + self.duration.to('s').magnitude)
+        piece = PlotPiece(
+            row=self.row_for_plotting(),
+            label=self.label or self.describe(),
+            start=start,
+            end=end,
+            endless=endless,
+        )
+        corners = self.set_values_for_plotting((end - start) * ureg.second)
+        if corners is None:
+            piece.text = self.annotation_for_plotting()
+        else:
+            times, piece.values = corners
+            piece.times = start + times.to('s').magnitude
+        return TimePlotSeries([piece])
+
+    def row_for_plotting(self) -> str:
+        """The row it is drawn on: by default its own, named after its class."""
+        return words(type(self).__name__)
+
+    def set_values_for_plotting(self, length):
+        """The corners `(times, values)` of what it sets over `length`; `None`: nothing
+        the plan states as a value. See `MonitorControlInstruction`."""
+        return None
+
+    def annotation_for_plotting(self) -> str:
+        """What is written in place of a value."""
+        return self.label or self.describe()
 
 
 class InstructionBlock(Instruction):
@@ -243,8 +283,6 @@ class CountingRepeatingBlock(RepeatingBlock):
         return self.repeat_n * one
 
 
-
-
 class Objective(ArchiveSection):
     """What a plan is meant to achieve: an intended endpoint of the activity running
     it. A specialized objective states a criterion and overrides `is_achieved`.
@@ -264,8 +302,7 @@ class Objective(ArchiveSection):
 
 
 class Plan(BaseSection):
-    """What is planned to be done, as instructions, and what for, as objectives.
-    """
+    """What is planned to be done, as instructions, and what for, as objectives."""
 
     m_def = Section(
         # plan specification
@@ -284,6 +321,7 @@ class Plan(BaseSection):
         description='What this plan is meant to achieve. Whether an activity achieved '
         'them is a matter of that activity, not of the plan.',
     )
+
 
 class Deviation(ArchiveSection):
     """What is different between an activity and the plans it is based on."""
@@ -312,11 +350,12 @@ class Deviation(ArchiveSection):
         shape=['*'],
     )
 
+
 class Planned(ArchiveSection):
     """A mixin for an activity based on a plan: inherit it next to an `Activity`, e.g.
     `class StabilityActivity(Measurement, Planned)`.
 
-    A subclass narrows `plan` to the kind of plan it runs. 
+    A subclass narrows `plan` to the kind of plan it runs.
     """
 
     m_def = Section(

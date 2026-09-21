@@ -259,3 +259,83 @@ def test_dark_is_exactly_no_light():
 )
 def test_an_instruction_is_listed_by_what_it_does(normalized, instruction, label):
     assert normalized(instruction).label == label
+
+
+def test_a_hold_is_drawn_at_its_value_for_as_long_as_it_is_drawn():
+    times, values = HoldTemperature(set_point=338.15 * K).set_values_for_plotting(
+        12 * ureg.hour
+    )
+
+    assert times.to('hour').magnitude == pytest.approx([0, 12])
+    assert values.to(ureg.degC).magnitude == pytest.approx([65, 65])
+
+
+@pytest.mark.parametrize(
+    'behavior, hours, celsius',
+    [
+        ('hold', [0, 1, 3], [25, 65, 65]),
+        ('sawtooth', [0, 1, 1, 2, 2, 3], [25, 65, 25, 65, 25, 65]),
+        ('triangle', [0, 1, 2, 3], [25, 65, 25, 65]),
+    ],
+)
+def test_a_ramp_is_drawn_through_its_corners(behavior, hours, celsius):
+    ramp = RampTemperature(
+        start_point=298.15 * K,
+        end_point=338.15 * K,
+        ramp_rate=40 * K / ureg.hour,
+        end_of_ramp_behavior=behavior,
+    )
+
+    times, values = ramp.set_values_for_plotting(3 * ureg.hour)
+
+    assert times.to('hour').magnitude == pytest.approx(hours)
+    assert values.to(ureg.degC).magnitude == pytest.approx(celsius)
+
+
+@pytest.mark.parametrize(
+    'instruction, text',
+    [
+        (MPPTracking(), 'MPP'),
+        (VOCTracking(), 'open circuit'),
+        (HoldVoltage(reference_point='near V_MPP'), 'near V_MPP'),
+        (HoldRelativeHumidity(monitor=True, control=False), 'monitored'),
+        (HoldIrradiance(control=True, monitor=True), 'not specified'),
+        (
+            HoldBetweenIrradiance(
+                lower_bound=800 * ureg('W/m^2'), upper_bound=1000 * ureg('W/m^2')
+            ),
+            '800 W/m²–1000 W/m²',
+        ),
+        (
+            RampTemperature(
+                start_point=296.15 * K,
+                end_point=338.15 * K,
+                end_of_ramp_behavior='cycle',
+            ),
+            '23 °C → 65 °C (cycle)',
+        ),
+    ],
+)
+def test_what_the_protocol_gives_no_value_is_written_as_text(instruction, text):
+    assert instruction.set_values_for_plotting(1 * ureg.hour) is None
+    assert instruction.annotation_for_plotting() == text
+
+
+def test_an_instruction_is_drawn_on_its_quantity_row_from_when_it_starts():
+    hold = HoldTemperature(set_point=338.15 * K, duration=12 * ureg.hour)
+
+    [piece] = hold.time_series_for_plotting(start=7200, stop=10**6).pieces
+
+    assert piece.row == 'temperature'
+    assert (piece.start, piece.end) == (7200, 7200 + 12 * 3600)
+    assert piece.times.tolist() == [7200, 7200 + 12 * 3600]
+    assert not piece.endless
+
+
+def test_an_instruction_that_never_finishes_is_drawn_until_the_drawing_stops():
+    stop = 3600
+    [piece] = MPPTracking().time_series_for_plotting(start=0, stop=stop).pieces
+
+    assert (piece.row, piece.text) == ('electrical load', 'MPP')
+    assert piece.end == stop
+    assert piece.endless

@@ -44,6 +44,12 @@ class MPPTracking(MonitorControlInstruction):
         '`start_voltage_manually`.',
     )
 
+    def annotation_for_plotting(self) -> str:
+        return 'MPP'
+
+    def quantity_name(self) -> str:
+        return 'electrical load'
+
 
 class VOCTracking(MonitorControlInstruction):
     """The load at open circuit, where the voltage settles with no current drawn.
@@ -51,6 +57,12 @@ class VOCTracking(MonitorControlInstruction):
     No parameters and no set_point: open circuit is a state of the terminals, and the
     voltage there is the cell's answer. ISOS Table 1 writes it `OC`.
     """
+
+    def annotation_for_plotting(self) -> str:
+        return 'open circuit'
+
+    def quantity_name(self) -> str:
+        return 'electrical load'
 
 
 m_package.__init_metainfo__()

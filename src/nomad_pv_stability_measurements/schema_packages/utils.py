@@ -1,4 +1,7 @@
 import re
+from dataclasses import dataclass, field
+
+import numpy as np
 
 
 def shown(quantity) -> str:
@@ -22,3 +25,26 @@ def words(class_name: str) -> str:
     parts = re.findall(r'[A-Z]+(?=[A-Z][a-z]|$)|[A-Z]?[a-z]+|\d+', class_name)
     text = ' '.join(part if part.isupper() else part.lower() for part in parts)
     return text[:1].upper() + text[1:]
+
+
+@dataclass
+class PlotPiece:
+    """One instruction drawn on its row, from `start` to `end`, in seconds since the
+    plan starts: a line through `times` and `values`, or else `text`."""
+
+    row: str
+    label: str
+    start: float
+    end: float
+    times: np.ndarray | None = None
+    values: object = None
+    text: str | None = None
+    #: It never finishes: drawn up to where the drawing stops.
+    endless: bool = False
+
+
+@dataclass
+class TimePlotSeries:
+    """What a plan, or part of it, draws: plain data, no Plotly."""
+
+    pieces: list[PlotPiece] = field(default_factory=list)

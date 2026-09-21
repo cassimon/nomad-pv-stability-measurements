@@ -2,6 +2,7 @@ from math import isclose
 
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage
+from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import SingleInstruction
 from nomad_pv_stability_measurements.schema_packages.utils import shown, words
@@ -55,15 +56,37 @@ class MonitorControlInstruction(SingleInstruction):
         verb = 'Monitor' if self.monitor and not self.control else 'Hold'
         if self.kind == 'Ramp' and verb == 'Hold':
             verb = 'Ramp'
-        quantity = words(name.removeprefix(self.kind))
-        quantity = quantity if quantity[:2].isupper() else quantity.lower()
-        return f'{verb} {quantity}{self.describe_values()}'
+        return f'{verb} {self.quantity_name()}{self.describe_values()}'
+
+    def quantity_name(self) -> str:
+        """What it monitors or controls, in words: `temperature` in `HoldTemperature`."""
+        quantity = words(type(self).__name__.removeprefix(self.kind))
+        return quantity if quantity[:2].isupper() else quantity.lower()
 
     def describe_values(self) -> str:
         """What follows the quantity: its value, point or bounds."""
         if self.reference_point is not None:
             return f' at {self.reference_point}'
         return ''
+
+    def set_values_for_plotting(self, length):
+        """What the protocol sets the quantity to over `length` of this instruction, as
+        `(times, values)` at the corners of the line, times from its own start. `None`
+        where the protocol states no value: a point the device decides, bounds, or
+        nothing at all. `length` is how long it is drawn — its `duration`, or less."""
+        return None
+
+    def row_for_plotting(self) -> str:
+        """One row per quantity, whichever instruction acts on it."""
+        return self.quantity_name()
+
+    def annotation_for_plotting(self) -> str:
+        """What is written in place of a value, where `set_values_for_plotting` gives none."""
+        if self.reference_point is not None:
+            return self.reference_point
+        if self.monitor and not self.control:
+            return 'monitored'
+        return 'not specified'
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
@@ -102,6 +125,11 @@ class HoldInstruction(MonitorControlInstruction):
         value = f' {shown(self.set_point)}' if self.set_point is not None else ''
         return value + super().describe_values() + held_for(self)
 
+    def set_values_for_plotting(self, length):
+        if self.set_point is None:
+            return None
+        return line([0, length.to('s').magnitude], [0, 0], self.set_point, 0)
+
 
 class HoldBelowInstruction(MonitorControlInstruction):
     """One value, kept under a bound for as long as the instruction lasts."""
@@ -118,6 +146,11 @@ class HoldBelowInstruction(MonitorControlInstruction):
         if self.upper_bound is None:
             return held_for(self)
         return f' below {shown(self.upper_bound)}' + held_for(self)
+
+    def annotation_for_plotting(self) -> str:
+        if self.upper_bound is None:
+            return super().annotation_for_plotting()
+        return f'below {shown(self.upper_bound)}'
 
 
 class HoldBetweenInstruction(HoldBelowInstruction):
@@ -138,6 +171,11 @@ class HoldBetweenInstruction(HoldBelowInstruction):
             f' between {shown(self.lower_bound)} and {shown(self.upper_bound)}'
             + held_for(self)
         )
+
+    def annotation_for_plotting(self) -> str:
+        if self.lower_bound is None or self.upper_bound is None:
+            return super().annotation_for_plotting()
+        return f'{shown(self.lower_bound)}–{shown(self.upper_bound)}'
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
@@ -195,6 +233,34 @@ class RampInstruction(MonitorControlInstruction):
             values += f' ({self.end_of_ramp_behavior})'
         return values
 
+    def set_values_for_plotting(self, length):
+        """Once to `end_point` and held there (`hold`), again and again with a jump back
+        (`sawtooth`), or up and down (`triangle`). A `cycle` states no path, so no value."""
+        period = self.ramp_period()
+        if period is None:
+            return None
+        shape = RAMP_SHAPES[self.end_of_ramp_behavior]
+        times, phases = shape(period, length.to('s').magnitude)
+        return line(times, phases, self.start_point, self.end_point - self.start_point)
+
+    def ramp_period(self) -> float | None:
+        """How long one ramp from `start_point` to `end_point` takes, in seconds: from
+        `ramp_rate`, else from `duration`. `None` where the path is not stated."""
+        start, end = self.start_point, self.end_point
+        if start is None or end is None or self.end_of_ramp_behavior == 'cycle':
+            return None
+        if self.ramp_rate is not None:
+            rate = self.ramp_rate.to(start.units / ureg.second).magnitude
+            return abs((end - start).to(start.units).magnitude / rate)
+        if self.duration is not None:
+            return self.duration.to('s').magnitude
+        return None
+
+    def annotation_for_plotting(self) -> str:
+        if self.end_of_ramp_behavior == 'cycle' and self.describe_values():
+            return self.describe_values().strip()
+        return super().annotation_for_plotting()
+
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
         if type(self) in ABSTRACT_INSTRUCTIONS:
@@ -235,6 +301,41 @@ class RampInstruction(MonitorControlInstruction):
             f'{self.duration.to("s").magnitude:g} s make it '
             f'{derived.magnitude:g}.'
         )
+
+
+def line(times, phases, start, span):
+    """The corners `(times, values)` of a line: `times` in seconds, each value `start`
+    plus `span` times its phase, in `start`'s unit."""
+    span = span.to(start.units).magnitude if span else 0
+    values = start.magnitude + span * np.asarray(phases, dtype=float)
+    return np.asarray(times, dtype=float) * ureg.second, values * start.units
+
+
+def hold_after_ramp(period: float, length: float):
+    """Phases of a ramp that runs once, then holds its end."""
+    if length <= period:
+        return [0, length], [0, length / period]
+    return [0, period, length], [0, 1, 1]
+
+
+def sawtooth(period: float, length: float):
+    """Phases of a ramp that jumps back to its start at the end of each period."""
+    jumps = np.arange(period, length, period)
+    last = jumps[-1] if len(jumps) else 0
+    times = np.concatenate([[0], np.repeat(jumps, 2), [length]])
+    phases = np.concatenate(
+        [[0], np.tile([1, 0], len(jumps)), [(length - last) / period]]
+    )
+    return times, phases
+
+
+def triangle(period: float, length: float):
+    """Phases of a ramp that goes back down at the same rate, and up again."""
+    times = np.append(np.arange(0, length, period), length)
+    return times, 1 - np.abs(times / period % 2 - 1)
+
+
+RAMP_SHAPES = {'hold': hold_after_ramp, 'sawtooth': sawtooth, 'triangle': triangle}
 
 
 def held_for(instruction) -> str:

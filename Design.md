@@ -3402,10 +3402,10 @@ A `StabilityProtocol` shows a reader of the standard what it asks for over time.
 of the plan, not a simulated run: no start date, no device, no environment. Simulating a run, or
 reading measured data, is a separate design, started once there is real data.
 
-**Where.** Each instruction draws itself: `Instruction.to_time_plot_series(start)` returns a
+**Where.** Each instruction draws itself: `Instruction.time_series_for_plotting(start, stop)` returns a
 `TimePlotSeries` — plain data, no Plotly: times, values or text per quantity, and the axis breaks.
-A single instruction gives its own points, from `set_value_at(elapsed)` — `None` where the
-protocol states no value — or `annotation()` for the text instead (`MonitorControlInstruction`,
+A single instruction gives its own points, from `set_values_for_plotting(length)` — the corners, `None` where the
+protocol states no value — or `annotation_for_plotting()` for the text instead (`MonitorControlInstruction`,
 `routine.py`). A block combines its sub-instructions' series one after another or side by side,
 up to 3 iterations, and adds its break. `plan_timeline.py` only turns the series into Plotly
 figures; `StabilityProtocol` becomes a `PlotSection` and adds them in `normalize`. No parser
@@ -3433,6 +3433,6 @@ made of axis segments side by side, never of dates.
 not a value; a block of 300 repetitions draws 3 and a break labelled `n=300 repetitions`; all ISOS
 examples normalize within a time budget.
 
-**Steps.** 1 `TimePlotSeries` + `set_value_at`/`annotation` on single instructions ·
-2 `to_time_plot_series` on blocks (repeats, breaks) · 3 overview figure · 4 block figures ·
+**Steps.** 1 `set_values_for_plotting`/`annotation` on single instructions · 1b `TimePlotSeries` ·
+2 `time_series_for_plotting` on blocks (repeats, breaks) · 3 overview figure · 4 block figures ·
 5 all-ISOS check.
