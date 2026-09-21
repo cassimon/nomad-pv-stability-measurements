@@ -9,12 +9,14 @@ should. Only a plan, or a timed block, stops instructions early.
 from datetime import datetime, timezone
 
 import pytest
+from nomad.datamodel.metainfo.basesections.v2 import Activity
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
     IndefiniteRepeatingBlock,
     InstructionBlock,
+    Objective,
     ScheduledPlan,
     SingleInstruction,
     TimedRepeatingBlock,
@@ -184,3 +186,9 @@ def test_an_instruction_is_listed_by_its_name_or_by_what_it_does(
     normalized, block, label
 ):
     assert normalized(block).label == label
+
+
+def test_an_objective_in_words_cannot_be_told_achieved():
+    objective = Objective(description='T80 under 1 sun at 65 °C')
+
+    assert objective.is_achieved(Activity()) is None

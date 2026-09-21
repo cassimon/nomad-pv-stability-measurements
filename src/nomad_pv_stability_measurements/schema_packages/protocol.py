@@ -3,7 +3,7 @@ import re
 import numpy as np
 from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.basesections.v2 import ActivityStep, Measurement
-from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
+from nomad.metainfo import MEnum, Quantity, Reference, SchemaPackage, SubSection
 
 # The protocol's instructions name these classes; importing them registers them with NOMAD.
 from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
@@ -128,22 +128,23 @@ class StabilityActivity(Measurement, Planned):
     for.
     """
 
-    def populate_from_plans(self, plans):
-        """Fill in, from the protocols among `plans`, what the caller left out: the
-        standard as the `method`, the protocol's `location`, and one step per
-        instruction. What was said about the test stands, and nothing that is only
-        planned is claimed: no end is derived from a protocol's `duration`.
+    plan = Quantity(
+        type=Reference(StabilityProtocol),
+        description='The protocol this test runs.',
+    )
+
+    def populate_from_plan(self):
+        """Fill in, from the protocol, what the caller left out: the standard as the
+        `method`, the protocol's `location`, and one step per instruction. What was said
+        about the test stands, and nothing that is only planned is claimed: no end is
+        derived from the protocol's `duration`.
         """
-        protocols = [
-            plan for plan in plans or [] if isinstance(plan, StabilityProtocol)
-        ]
-        for protocol in protocols:
-            self.method = self.method or protocol.standard
-            self.location = self.location or protocol.location
+        if self.plan is None:
+            return
+        self.method = self.method or self.plan.standard
+        self.location = self.location or self.plan.location
         if not self.steps:
-            self.steps = [
-                step for protocol in protocols for step in self.steps_of(protocol)
-            ]
+            self.steps = self.steps_of(self.plan)
 
     def steps_of(self, protocol) -> list[ActivityStep]:
         """One step per instruction of `protocol`. They all start with the test when

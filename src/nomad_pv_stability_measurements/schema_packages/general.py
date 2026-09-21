@@ -59,7 +59,11 @@ class Instruction(ArchiveSection):
     what it contains. Only a `Plan` stops its instructions early.
     """
 
-    m_def = Section(label_quantity='label')
+    m_def = Section(
+        label_quantity='label',
+        # action specification
+        links=['http://purl.obolibrary.org/obo/IAO_0000007'],
+    )
 
     name = Quantity(type=str, description='A short name for this instruction.')
 
@@ -263,15 +267,44 @@ class CountingRepeatingBlock(RepeatingBlock):
 
 
 
-class Plan(BaseSection):
-    """What is planned to be done, as instructions. An activity based on it is a
-    `Planned` one, which fills itself in from its plans.
+class Objective(ArchiveSection):
+    """What a plan is meant to achieve: an intended endpoint of the activity running
+    it. A specialized objective states a criterion and overrides `is_achieved`.
     """
+
+    m_def = Section(
+        # objective specification
+        links=['http://purl.obolibrary.org/obo/IAO_0000005'],
+    )
+
+    description = Quantity(type=str, description='The objective, in words.')
+
+    def is_achieved(self, activity) -> bool | None:
+        """Whether `activity` met this objective at its end. `None` if that cannot be
+        told, as for an objective stated only in words."""
+        return None
+
+
+class Plan(BaseSection):
+    """What is planned to be done, as instructions, and what for, as objectives.
+    """
+
+    m_def = Section(
+        # plan specification
+        links=['http://purl.obolibrary.org/obo/IAO_0000104'],
+    )
 
     instructions = SubSection(
         section_def=Instruction,
         repeats=True,
         description='The instructions that make up this plan.',
+    )
+
+    objectives = SubSection(
+        section_def=Objective,
+        repeats=True,
+        description='What this plan is meant to achieve. Whether an activity achieved '
+        'them is a matter of that activity, not of the plan.',
     )
 
 class Deviation(ArchiveSection):
@@ -285,7 +318,8 @@ class Deviation(ArchiveSection):
 
     plan = Quantity(
         type=Reference(Plan),
-        description='The plan that this deviation is related to.',
+        description='The plan that this deviation is related to. Only needed where '
+        'the activity combines several plans.',
     )
 
     conflicting_instructions = Quantity(
@@ -301,39 +335,43 @@ class Deviation(ArchiveSection):
     )
 
 class Planned(ArchiveSection):
-    """A mixin for activities that are based on plans: inherit it next to an
-    `Activity`, e.g. `class StabilityActivity(Measurement, Planned)`."""
+    """A mixin for an activity based on a plan: inherit it next to an `Activity`, e.g.
+    `class StabilityActivity(Measurement, Planned)`.
 
-    plans = Quantity(
-        type=Reference(Plan),
-        description='The plans that this activity is based on.',
-        shape=['*'],
-    )   
+    A subclass narrows `plan` to the kind of plan it runs. 
+    """
 
-    is_consistent_with_plans = Quantity(
-        type=bool,
-        description='Whether the activity is consistent with the plans it is based on. '
-        'Derived from the activity and the plans.',
+    m_def = Section(
+        # planned process
+        links=['http://purl.obolibrary.org/obo/COB_0000082'],
     )
 
-    deviations_from_plans = SubSection(
+    plan = Quantity(
+        type=Reference(Plan),
+        description='The plan that this activity is based on.',
+    )
+
+    is_consistent_with_plan = Quantity(
+        type=bool,
+        description='Whether the activity is consistent with the plan it is based on. '
+        'Derived from the activity and the plan.',
+    )
+
+    deviations_from_plan = SubSection(
         section_def=Deviation,
-        description='What is different between the activity and the plans it is based on. '
-        'Derived from the activity and the plans.',
+        description='What is different between the activity and the plan it is based '
+        'on. Derived from the activity and the plan.',
         repeats=True,
     )
 
-    def populate_from_plans(self, plans):
-        """Override it to fill in the activity from `plans`. By default, nothing is
+    def populate_from_plan(self):
+        """Override it to fill in the activity from its `plan`. By default, nothing is
         filled in."""
-        pass
 
-    def check_consistency_with_plans(self, plans) -> bool:
-        """Override it to check the activity against `plans`. By default, it is
+    def check_consistency_with_plan(self) -> bool:
+        """Override it to check the activity against its `plan`. By default, it is
         consistent."""
         return True
-
-
 
 
 class TimePlan(Plan):

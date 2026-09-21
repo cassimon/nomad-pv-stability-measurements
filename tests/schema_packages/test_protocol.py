@@ -24,10 +24,8 @@ START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def executed(protocol, **given):
-    activity = StabilityActivity(
-        name='run 1', datetime=START, plans=[protocol], **given
-    )
-    activity.populate_from_plans(activity.plans)
+    activity = StabilityActivity(name='run 1', datetime=START, plan=protocol, **given)
+    activity.populate_from_plan()
     return activity
 
 
@@ -104,7 +102,7 @@ def test_executed_what_the_caller_says_stands():
     )
 
     assert isinstance(activity, StabilityActivity)
-    assert activity.plans == [protocol]
+    assert activity.plan is protocol
     assert (activity.name, activity.description) == ('run 1', 'the first run')
     assert (activity.method, activity.location) == ('soak', 'Lab B')
     assert [step.name for step in activity.steps] == ['light on']
@@ -132,6 +130,11 @@ def test_executed_it_fills_in_what_the_caller_leaves_out(normalized):
         ('hot', START),
         ('Hold irradiance for 1 h', START),
     ]
+
+
+def test_a_stability_test_runs_a_stability_protocol_only():
+    with pytest.raises(TypeError):
+        StabilityActivity(plan=Plan())
 
 
 def test_a_bare_archive_file_loads_through_nomad():
