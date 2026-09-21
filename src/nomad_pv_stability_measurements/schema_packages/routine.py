@@ -3,11 +3,8 @@ from math import isclose
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage
 
-from nomad_pv_stability_measurements.schema_packages.general import (
-    SingleInstruction,
-    shown,
-    words,
-)
+from nomad_pv_stability_measurements.schema_packages.general import SingleInstruction
+from nomad_pv_stability_measurements.schema_packages.utils import shown, words
 
 m_package = SchemaPackage()
 
