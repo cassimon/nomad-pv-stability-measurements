@@ -1,10 +1,10 @@
-"""Instructions, blocks and plans (Design.md §23, §27).
+"""Instructions, blocks and plans.
 
-An instruction is completed after its `duration`; empty means it never
-finishes, except for a single instruction in a parallel block, which lasts as long as the
-block (§32). A block's duration is always derived from what it contains. A repeating block's
-kind says whether it finishes: a timed one always, an indefinite one never, a counting one
-should. Only a plan, or a timed block, stops instructions early.
+An instruction is completed after its `duration`, whose kind says what it is: a fixed or
+typical length, as long as its block, open-ended, or derived. A single instruction states
+it; a block's is always derived from what it contains. A repeating block's kind says whether
+it finishes: a timed one always, an indefinite one never, a counting one should. Only a
+plan, or a timed block, stops instructions early.
 """
 
 from datetime import datetime, timezone
@@ -16,6 +16,7 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
+    Duration,
     IndefiniteRepeatingBlock,
     InstructionBlock,
     Objective,
@@ -26,31 +27,46 @@ from nomad_pv_stability_measurements.schema_packages.general import (
 )
 
 
-def single(seconds=None) -> SingleInstruction:
-    """An instruction lasting `seconds`; without them, one that never finishes."""
-    if seconds is None:
-        return SingleInstruction()
-    return SingleInstruction(duration=seconds * ureg.second)
+def single(kind='fixed', seconds=None, **fields) -> SingleInstruction:
+    duration = Duration(kind=kind)
+    if seconds is not None:
+        duration.value = seconds * ureg.second
+    return SingleInstruction(duration=duration, **fields)
+
+
+def fixed(seconds, **fields) -> SingleInstruction:
+    return single('fixed', seconds, **fields)
+
+
+def whole_block() -> SingleInstruction:
+    """A setting: as long as the block it is in."""
+    return single('whole_block')
+
+
+def open_ended() -> SingleInstruction:
+    return single('open_ended')
 
 
 def seconds(section):
-    duration = section.duration
-    return None if duration is None else duration.to('s').magnitude
+    """Its length in seconds; `None` where it is open-ended."""
+    assert section.duration.kind != 'whole_block'
+    if section.duration.kind == 'open_ended':
+        return None
+    return section.duration.value.to('s').magnitude
 
 
 @pytest.mark.parametrize(('mode', 'expected'), [('sequential', 90), ('parallel', 60)])
 def test_a_block_lasts_one_pass_of_its_instructions(normalized, mode, expected):
     block = InstructionBlock(
-        sub_instruction_execution_mode=mode, sub_instructions=[single(30), single(60)]
+        sub_instruction_execution_mode=mode, sub_instructions=[fixed(30), fixed(60)]
     )
 
     assert seconds(normalized(block)) == pytest.approx(expected)
+    assert block.duration.kind == 'derived'
 
 
 def test_a_counting_block_lasts_its_count_times_one_pass(normalized):
-    block = CountingRepeatingBlock(
-        repeat_n=3, sub_instructions=[single(30), single(60)]
-    )
+    block = CountingRepeatingBlock(repeat_n=3, sub_instructions=[fixed(30), fixed(60)])
 
     assert seconds(normalized(block)) == pytest.approx(270)
 
@@ -58,8 +74,8 @@ def test_a_counting_block_lasts_its_count_times_one_pass(normalized):
 @pytest.mark.parametrize(
     'block',
     [
-        CountingRepeatingBlock(sub_instructions=[single(60)]),
-        CountingRepeatingBlock(repeat_n=3, sub_instructions=[single()]),
+        CountingRepeatingBlock(sub_instructions=[fixed(60)]),
+        CountingRepeatingBlock(repeat_n=3, sub_instructions=[open_ended()]),
     ],
 )
 def test_a_counting_block_that_does_not_finish_is_warned_about(normalized, log, block):
@@ -69,7 +85,7 @@ def test_a_counting_block_that_does_not_finish_is_warned_about(normalized, log, 
 
 
 def test_an_indefinite_block_never_finishes(normalized, log):
-    block = normalized(IndefiniteRepeatingBlock(sub_instructions=[single(60)]))
+    block = normalized(IndefiniteRepeatingBlock(sub_instructions=[fixed(60)]))
 
     assert seconds(block) is None
     assert (log.errors, log.warnings) == ([], [])
@@ -77,16 +93,17 @@ def test_an_indefinite_block_never_finishes(normalized, log):
 
 def test_a_timed_block_lasts_its_repeat_duration_whatever_it_contains(normalized):
     block = TimedRepeatingBlock(
-        repeat_duration=3600 * ureg.second, sub_instructions=[single(60), single()]
+        repeat_duration=3600 * ureg.second, sub_instructions=[fixed(60), open_ended()]
     )
 
     assert seconds(normalized(block)) == pytest.approx(3600)
+    assert block.duration.kind == 'fixed'
 
 
-def test_what_never_finishes_makes_everything_around_it_never_finish(normalized):
-    inner = IndefiniteRepeatingBlock(sub_instructions=[single(60)])
+def test_what_is_open_ended_makes_everything_around_it_open_ended(normalized):
+    inner = IndefiniteRepeatingBlock(sub_instructions=[fixed(60)])
     plan = normalized(
-        TimePlan(instructions=[InstructionBlock(sub_instructions=[inner, single(60)])])
+        TimePlan(instructions=[InstructionBlock(sub_instructions=[inner, fixed(60)])])
     )
 
     assert seconds(plan.instructions[0]) is None
@@ -96,20 +113,19 @@ def test_what_never_finishes_makes_everything_around_it_never_finish(normalized)
 @pytest.mark.parametrize(
     ('mode', 'sub_instructions', 'expected'),
     [
-        # A single instruction without a duration lasts as long as its parallel block.
-        ('parallel', [single(), single(60)], 60),
-        ('parallel', [single(), single()], None),  # nothing in it finishes
-        # A block without a duration never finishes, and keeps its parent going.
+        # What lasts as long as its block does not count toward the block's length.
+        ('parallel', [whole_block(), fixed(60)], 60),
+        ('parallel', [whole_block(), whole_block()], None),  # nothing ends it
         (
             'parallel',
-            [single(), IndefiniteRepeatingBlock(sub_instructions=[single(60)])],
+            [whole_block(), IndefiniteRepeatingBlock(sub_instructions=[fixed(60)])],
             None,
         ),
-        # One after another, what never finishes leaves no time for what follows.
-        ('sequential', [single(), single(60)], None),
+        # One after another, what is open-ended leaves no time for what follows.
+        ('sequential', [open_ended(), fixed(60)], None),
     ],
 )
-def test_a_parallel_block_lasts_as_long_as_what_finishes_in_it(
+def test_a_block_lasts_as_long_as_what_ends_in_it(
     normalized, mode, sub_instructions, expected
 ):
     block = InstructionBlock(
@@ -119,13 +135,46 @@ def test_a_parallel_block_lasts_as_long_as_what_finishes_in_it(
     assert seconds(normalized(block)) == expected
 
 
+@pytest.mark.parametrize('mode', ['sequential', 'parallel'])
+def test_a_typical_length_counts_and_makes_the_whole_typical(normalized, mode):
+    block = normalized(
+        CountingRepeatingBlock(
+            repeat_n=2,
+            sub_instruction_execution_mode=mode,
+            sub_instructions=[single('typical', 60), fixed(30)],
+        )
+    )
+
+    assert seconds(block) == pytest.approx(180 if mode == 'sequential' else 120)
+    assert block.duration.includes_typical is True
+
+
+@pytest.mark.parametrize(
+    'owner',
+    [
+        InstructionBlock(sub_instructions=[whole_block(), fixed(60)]),
+        TimePlan(
+            instruction_execution_mode='sequential',
+            instructions=[whole_block(), fixed(60)],
+        ),
+    ],
+)
+def test_nothing_run_one_after_another_lasts_as_long_as_its_block(
+    normalized, log, owner
+):
+    normalized(owner)
+
+    [error] = log.errors
+    assert 'one after another' in error
+
+
 def test_a_phase_that_holds_a_condition_ends_with_its_routine(normalized):
-    condition = single()
-    cycling = CountingRepeatingBlock(repeat_n=2, sub_instructions=[single(1800)])
+    condition = whole_block()
+    cycling = CountingRepeatingBlock(repeat_n=2, sub_instructions=[fixed(1800)])
     phase = InstructionBlock(
         sub_instruction_execution_mode='parallel', sub_instructions=[condition, cycling]
     )
-    recovery = single(3600)
+    recovery = fixed(3600)
     block = normalized(InstructionBlock(sub_instructions=[phase, recovery]))
 
     phase_ends = 2 * 1800
@@ -136,7 +185,10 @@ def test_a_phase_that_holds_a_condition_ends_with_its_routine(normalized):
 
 
 def test_a_blocks_written_duration_is_replaced_by_the_derived_one(normalized):
-    block = InstructionBlock(duration=10 * ureg.second, sub_instructions=[single(60)])
+    block = InstructionBlock(
+        duration=Duration(kind='fixed', value=10 * ureg.second),
+        sub_instructions=[fixed(60)],
+    )
 
     assert seconds(normalized(block)) == pytest.approx(60)
 
@@ -145,22 +197,22 @@ def test_a_blocks_written_duration_is_replaced_by_the_derived_one(normalized):
     ('written', 'expected'),
     [
         (None, 90),  # derived: one instruction after another
-        (600, 600),  # written: where every instruction is stopped
+        (Duration(kind='fixed', value=600 * ureg.second), 600),  # stops them all there
+        (Duration(kind='open_ended'), None),  # ended from outside, e.g. at T80
     ],
 )
-def test_a_plans_duration_is_written_or_derived(normalized, written, expected):
-    plan = TimePlan(instructions=[single(30), single(60)])
-    if written is not None:
-        plan.duration = written * ureg.second
+def test_a_plans_duration_is_written_or_derived(normalized, log, written, expected):
+    plan = normalized(TimePlan(duration=written, instructions=[fixed(30), fixed(60)]))
 
-    assert seconds(normalized(plan)) == pytest.approx(expected)
+    assert seconds(plan) == (None if expected is None else pytest.approx(expected))
+    assert log.errors == []
 
 
 @pytest.mark.parametrize(
     ('instruction', 'end'),
     [
-        (single(90), datetime(2026, 1, 1, 0, 1, 30, tzinfo=timezone.utc)),
-        (single(), None),
+        (fixed(90), datetime(2026, 1, 1, 0, 1, 30, tzinfo=timezone.utc)),
+        (open_ended(), None),
     ],
 )
 def test_a_scheduled_plan_ends_its_duration_after_it_starts(
@@ -177,17 +229,22 @@ def test_a_scheduled_plan_ends_its_duration_after_it_starts(
 @pytest.mark.parametrize(
     ('section', 'reported'),
     [
-        (SingleInstruction(duration=0 * ureg.second), 'must be positive'),
-        (
-            SingleInstruction(sub_instructions=[single(60)]),
-            'cannot have sub-instructions',
-        ),
+        (fixed(0), 'must be positive'),
+        (SingleInstruction(), 'states no duration'),
+        (single('derived', 60), 'nothing to derive it from'),
+        (single('typical'), 'but no value'),
+        (single('open_ended', 60), 'takes no value'),
+        (fixed(60, sub_instructions=[fixed(60)]), 'cannot have sub-instructions'),
         (InstructionBlock(), 'no sub-instructions'),
         (
-            CountingRepeatingBlock(repeat_n=0, sub_instructions=[single(60)]),
+            CountingRepeatingBlock(repeat_n=0, sub_instructions=[fixed(60)]),
             'at least once',
         ),
-        (TimedRepeatingBlock(sub_instructions=[single(60)]), 'no `repeat_duration`'),
+        (TimedRepeatingBlock(sub_instructions=[fixed(60)]), 'no `repeat_duration`'),
+        (
+            TimePlan(duration=Duration(kind='whole_block'), instructions=[fixed(60)]),
+            'in no block',
+        ),
     ],
 )
 def test_an_impossible_instruction_is_reported(normalized, log, section, reported):
@@ -201,16 +258,14 @@ def test_an_impossible_instruction_is_reported(normalized, log, section, reporte
     ('block', 'label'),
     [
         (
-            InstructionBlock(sub_instructions=[single(60)]),
+            InstructionBlock(sub_instructions=[fixed(60)]),
             'Run once: Single instruction',
         ),
         # A block of one instruction is how that instruction is repeated.
         (
             CountingRepeatingBlock(
                 repeat_n=5,
-                sub_instructions=[
-                    SingleInstruction(name='JV scan', duration=60 * ureg.second)
-                ],
+                sub_instructions=[fixed(60, name='JV scan')],
             ),
             'Repeat 5 times: JV scan',
         ),
@@ -218,23 +273,23 @@ def test_an_impossible_instruction_is_reported(normalized, log, section, reporte
             CountingRepeatingBlock(
                 repeat_n=3,
                 sub_instruction_execution_mode='parallel',
-                sub_instructions=[single(60), single(60)],
+                sub_instructions=[fixed(60), fixed(60)],
             ),
             'Repeat 3 times (2 instructions, in parallel)',
         ),
         (
             TimedRepeatingBlock(
-                repeat_duration=43200 * ureg.second, sub_instructions=[single(60)]
+                repeat_duration=43200 * ureg.second, sub_instructions=[fixed(60)]
             ),
             'Repeat for 12 h: Single instruction',
         ),
         (
-            IndefiniteRepeatingBlock(sub_instructions=[single(60)]),
+            IndefiniteRepeatingBlock(sub_instructions=[fixed(60)]),
             'Repeat indefinitely: Single instruction',
         ),
         # A name, where one is written, is the label.
         (
-            IndefiniteRepeatingBlock(name='soak', sub_instructions=[single(60)]),
+            IndefiniteRepeatingBlock(name='soak', sub_instructions=[fixed(60)]),
             'soak',
         ),
     ],
@@ -264,7 +319,7 @@ def test_a_block_draws_its_instructions_one_after_another_or_together(
     block = normalized(
         InstructionBlock(
             sub_instruction_execution_mode=mode,
-            sub_instructions=[single(HOUR), single(HOUR / 2)],
+            sub_instructions=[fixed(HOUR), fixed(HOUR / 2)],
         )
     )
 
@@ -290,7 +345,7 @@ def test_a_block_draws_its_instructions_one_after_another_or_together(
 def test_a_repeating_block_draws_three_iterations_then_breaks_the_axis_to_its_end(
     normalized, block, drawn, cut
 ):
-    block.sub_instructions = [single(HOUR)]
+    block.sub_instructions = [fixed(HOUR)]
     series = normalized(block).time_series_for_plotting(0, FAR)
 
     assert [piece.start for piece in series.pieces] == [n * HOUR for n in range(drawn)]
@@ -305,7 +360,7 @@ def test_a_condition_in_a_repeating_parallel_block_is_drawn_once_per_iteration(
         CountingRepeatingBlock(
             repeat_n=2,
             sub_instruction_execution_mode='parallel',
-            sub_instructions=[single(), single(HOUR)],
+            sub_instructions=[whole_block(), fixed(HOUR)],
         )
     )
 
@@ -319,8 +374,8 @@ def test_a_condition_in_a_repeating_parallel_block_is_drawn_once_per_iteration(
 
 
 def test_a_plans_settings_last_as_long_as_its_routine(normalized):
-    setting = single()
-    routine = CountingRepeatingBlock(repeat_n=2, sub_instructions=[single(HOUR)])
+    setting = whole_block()
+    routine = CountingRepeatingBlock(repeat_n=2, sub_instructions=[fixed(HOUR)])
     plan = normalized(
         TimePlan(instruction_execution_mode='parallel', instructions=[setting, routine])
     )
@@ -330,8 +385,8 @@ def test_a_plans_settings_last_as_long_as_its_routine(normalized):
 
 
 def test_a_plan_that_never_ends_is_drawn_until_its_routine_breaks_off(normalized):
-    setting = single()
-    routine = IndefiniteRepeatingBlock(sub_instructions=[single(HOUR)])
+    setting = whole_block()
+    routine = IndefiniteRepeatingBlock(sub_instructions=[fixed(HOUR)])
     plan = normalized(
         TimePlan(instruction_execution_mode='parallel', instructions=[setting, routine])
     )
@@ -346,7 +401,8 @@ def test_a_plan_that_never_ends_is_drawn_until_its_routine_breaks_off(normalized
 def test_a_plan_is_drawn_until_its_duration(normalized):
     plan = normalized(
         TimePlan(
-            duration=90 * ureg.minute, instructions=[single(HOUR) for _ in range(3)]
+            duration=Duration(kind='fixed', value=90 * ureg.minute),
+            instructions=[fixed(HOUR) for _ in range(3)],
         )
     )
 

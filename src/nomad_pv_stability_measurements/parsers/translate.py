@@ -38,7 +38,11 @@ from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     MonitorControlInstruction,
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
+    FIXED,
+    OPEN_ENDED,
+    WHOLE_BLOCK,
     CountingRepeatingBlock,
+    Duration,
     IndefiniteRepeatingBlock,
     Instruction,
     InstructionBlock,
@@ -167,15 +171,43 @@ def _protocol(authored: dict, cls: type, path: str, problems: list) -> dict:
     ]
     if routine is not None:
         instructions += _instruction(routine, _at(path, 'routine'), problems)
+    mode = bare.get(
+        'instruction_execution_mode',
+        cls.m_def.all_quantities['instruction_execution_mode'].default,
+    )
+    _default_durations(instructions, mode)
     if instructions:
         bare['instructions'] = instructions
     return bare
 
 
+def _default_durations(instructions: list, mode: str) -> None:
+    """A single instruction written without a duration lasts as long as its block where
+    that runs in parallel, and never finishes where it runs in sequence. A ramp written
+    with a rate works its own out."""
+    for each in instructions:
+        cls = _class_of(each)
+        if cls is not None and issubclass(cls, InstructionBlock):
+            _default_durations(
+                each.get('sub_instructions', []),
+                each.get('sub_instruction_execution_mode', 'sequential'),
+            )
+        elif 'duration' not in each and 'ramp_rate' not in each:
+            kind = WHOLE_BLOCK if mode == 'parallel' else OPEN_ENDED
+            each['duration'] = {'kind': kind}
+
+
+def _class_of(bare: dict) -> type | None:
+    module, _, name = str(bare.get('m_def', '')).rpartition('.')
+    try:
+        return getattr(importlib.import_module(module), name, None)
+    except ImportError:
+        return None
+
+
 def _settings_instructions(settings, path: str, problems: list) -> list:
-    """The instructions of `channel_settings`, without a duration: they never finish, and
-    so hold for the whole protocol (D13). The routine, one block deeper, overrides them
-    while it runs."""
+    """The instructions of `channel_settings`. Written without a duration, they last as
+    long as the protocol, which runs them in parallel with its routine."""
     if settings is None:
         return []
     if not isinstance(settings, dict):
@@ -228,15 +260,8 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
             )
         elif written == 'repeat' and issubclass(cls, InstructionBlock):
             _repeat(value, cls, where, problems, bare)
-        elif written == 'duration' and issubclass(cls, InstructionBlock):
-            problems.append(
-                Problem(
-                    where,
-                    "a block's duration follows from its instructions. To stop it after a "
-                    'time, write `repeat_for`; to stop the whole protocol, write '
-                    '`duration` on the protocol.',
-                )
-            )
+        elif written == 'duration' and issubclass(cls, Instruction | Plan):
+            _duration(value, cls, where, problems, bare)
         elif key == 'm_def':
             bare[key] = value
         elif key in quantities:
@@ -251,6 +276,26 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
         else:
             problems.append(Problem(where, _unknown(written, cls)))
     return bare
+
+
+def _duration(value, cls: type, where: str, problems: list, bare: dict) -> None:
+    """`duration: 1 h` as a fixed duration; a bare archive's section as itself. A
+    block takes none: its duration follows from its instructions."""
+    if issubclass(cls, InstructionBlock):
+        problems.append(
+            Problem(
+                where,
+                "a block's duration follows from its instructions. To stop it after a "
+                'time, write `repeat_for`; to stop the whole protocol, write '
+                '`duration` on the protocol.',
+            )
+        )
+    elif isinstance(value, dict):
+        bare['duration'] = _section(value, Duration, where, problems)
+    else:
+        read = _value(value, Duration, 'value', where, problems)
+        if read is not None:
+            bare['duration'] = {'kind': FIXED, 'value': read}
 
 
 def _renamed(written: str, cls: type) -> str:

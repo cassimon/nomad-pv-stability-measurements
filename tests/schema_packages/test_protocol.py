@@ -9,7 +9,7 @@ from nomad.client import normalize_all, parse
 from nomad.datamodel.metainfo.basesections.v2 import ActivityStep
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.general import Plan
+from nomad_pv_stability_measurements.schema_packages.general import Duration, Plan
 from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldIrradiance,
     HoldTemperature,
@@ -21,6 +21,14 @@ from nomad_pv_stability_measurements.schema_packages.protocol import (
 )
 
 START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def fixed(seconds) -> Duration:
+    return Duration(kind='fixed', value=seconds * ureg.second)
+
+
+def whole_block() -> Duration:
+    return Duration(kind='whole_block')
 
 
 def executed(protocol, **given):
@@ -36,35 +44,37 @@ def test_a_protocol_is_a_plan_whose_instructions_all_start_together(normalized):
     protocol = normalized(
         StabilityProtocol(
             instructions=[
-                HoldTemperature(duration=1800 * ureg.second),
-                HoldIrradiance(duration=3600 * ureg.second),
+                HoldTemperature(duration=fixed(1800)),
+                HoldIrradiance(duration=fixed(3600)),
             ]
         )
     )
 
     assert isinstance(protocol, Plan)
-    assert protocol.duration.to('s').magnitude == pytest.approx(3600)
+    assert protocol.seconds() == pytest.approx(3600)
 
 
 def test_settings_last_as_long_as_what_finishes_beside_them(normalized):
     protocol = normalized(
         StabilityProtocol(
             instructions=[
-                HoldIrradiance(monitor=True),
-                HoldTemperature(duration=1800 * ureg.second),
+                HoldIrradiance(monitor=True, duration=whole_block()),
+                HoldTemperature(duration=fixed(1800)),
             ]
         )
     )
 
-    assert protocol.duration.to('s').magnitude == pytest.approx(1800)
+    assert protocol.seconds() == pytest.approx(1800)
 
 
 def test_settings_alone_give_the_protocol_no_end(normalized):
     protocol = normalized(
-        StabilityProtocol(instructions=[HoldIrradiance(monitor=True)])
+        StabilityProtocol(
+            instructions=[HoldIrradiance(monitor=True, duration=whole_block())]
+        )
     )
 
-    assert protocol.duration is None
+    assert protocol.duration.kind == 'open_ended'
 
 
 @pytest.mark.parametrize(
@@ -124,8 +134,8 @@ def test_executed_it_fills_in_what_the_caller_leaves_out(normalized):
             standard='ISOS-L-2',
             location='Lab A',
             instructions=[
-                HoldTemperature(name='hot'),
-                HoldIrradiance(duration=3600 * ureg.second),
+                HoldTemperature(name='hot', duration=whole_block()),
+                HoldIrradiance(duration=fixed(3600)),
             ],
         )
     )

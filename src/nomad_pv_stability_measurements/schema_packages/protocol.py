@@ -1,4 +1,5 @@
 import re
+from math import inf
 
 import numpy as np
 from nomad.datamodel.data import ArchiveSection
@@ -14,6 +15,7 @@ from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
     ramp_instructions,
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
+    OPEN_ENDED,
     Planned,
     RepeatingBlock,
     TimePlan,
@@ -137,12 +139,15 @@ class StabilityProtocol(PlotSection, TimePlan):
                 'Timeline',
                 self.name,
                 self.time_series_for_plotting(),
-                self.duration is None,
+                self.seconds() == inf,
             )
         ]
         for block in self.m_all_contents():
             # A pass that never ends shows nothing the timeline does not already.
-            if isinstance(block, RepeatingBlock) and block.one_iteration() is not None:
+            if (
+                isinstance(block, RepeatingBlock)
+                and block.one_iteration().kind != OPEN_ENDED
+            ):
                 title = block.title_for_plotting()
                 drawn.append(
                     (

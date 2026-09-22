@@ -30,8 +30,8 @@ def test_nomad_reads_an_authored_file_into_a_protocol_entry():
     )
     # One pass of the routine: 500 h + 100 h + 100 h + 24 h + 1 h. The settings last as
     # long as it, and so does the protocol.
-    assert soak.duration.to(ureg.hour).magnitude == pytest.approx(725)
-    assert archive.data.duration.to(ureg.hour).magnitude == pytest.approx(725)
+    assert soak.duration.value.to(ureg.hour).magnitude == pytest.approx(725)
+    assert archive.data.duration.value.to(ureg.hour).magnitude == pytest.approx(725)
 
 
 def test_a_file_with_options_is_one_entry_per_variant(tmp_path):

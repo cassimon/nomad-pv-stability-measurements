@@ -7,40 +7,60 @@ data:
     sample_every: 60.0
     set_point: 338.15
     control: true
+    duration:
+      kind: whole_block
   - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldIrradiance
     spectrum: AM1.5G
     monitor: true
     sample_every: 60.0
     set_point: 1000.0
     control: true
+    duration:
+      kind: whole_block
   - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldVoltage
     monitor: true
     sampling_rate: 1.0
+    duration:
+      kind: whole_block
   - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldCurrent
     monitor: true
     sampling_rate: 1.0
+    duration:
+      kind: whole_block
   - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldResistance
     monitor: true
     sampling_rate: 1.0
+    duration:
+      kind: whole_block
   - m_def: nomad_pv_stability_measurements.schema_packages.general.CountingRepeatingBlock
     name: soak
     repeat_n: 1
     sub_instructions:
     - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldTemperature
-      duration: 1800000.0
+      duration:
+        kind: fixed
+        value: 1800000.0
       sampling_rate: 10.0
       set_point: 358.15
       control: true
     - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldTemperature
-      duration: 360000.0
+      duration:
+        kind: fixed
+        value: 360000.0
     - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldIrradiance
-      duration: 360000.0
+      duration:
+        kind: fixed
+        value: 360000.0
       set_point: 0.0
       control: true
     - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldVoltage
-      duration: 86400.0
+      duration:
+        kind: fixed
+        value: 86400.0
       set_point: 0.8
       control: true
     - m_def: nomad_pv_stability_measurements.schema_packages.mpp_instructions.VOCTracking
-      duration: 3600.0
+      duration:
+        kind: fixed
+        value: 3600.0
       control: true

@@ -3205,7 +3205,8 @@ Plan (EntryData)                name, description, estimated_duration, instructi
 - **An instruction is completed after its `estimated_duration`. Empty means it never finishes.**
   There is no "condition lasting as long as its block" any more: a setting without a duration
   simply never ends. *(Superseded by §32: in a parallel block, it does last as long as its
-  block.)*
+  block. Superseded by §33: an empty duration no longer carries a meaning; a `Duration`
+  section says what kind of duration it is.)*
 - **Instructions are consistent on their own.** A block's `estimated_duration` is always derived,
   never authored. `InstructionBlock`, the parent of both repeating blocks, runs its
   sub-instructions once (`sequential` sum, `parallel` maximum); a `CountingRepeatingBlock` lasts
@@ -3489,6 +3490,9 @@ a reader of the timeline (§29) could use. ISOS-L 22 → 11, ISOS-LC 108 → 54,
 
 ## 32. A condition lasts as long as its parallel block
 
+*Superseded by §33: the context-dependent meaning of an empty duration is replaced by an
+explicit duration kind. The behaviour of conditions in parallel blocks is kept, as `whole_block`.*
+
 Supersedes the first bullet of §23.1 for parallel blocks. Under §23.1 a single instruction
 without a `duration` never finished, and that passed up to every parent. A phase could therefore
 not hold a condition: *hold 65 °C while cycling light and dark five times, then recover at
@@ -3521,3 +3525,148 @@ so all 117 variants are unchanged — durations, messages and figures compared b
 
 The meaning is written into `sub_instruction_execution_mode`'s and `instruction_execution_mode`'s
 descriptions, where an author choosing the mode reads it.
+
+## 33. Durations say what kind they are
+
+**Status: settled in review; steps 1–2 of §33.8 built.** Supersedes §32 and the first bullet
+of §23.1.
+
+### 33.1 Why
+
+An empty `duration` stood for three different things, and which one depended on where the
+instruction sat:
+
+| Meant | Example | Read as, before §33 |
+|---|---|---|
+| finite, but not known when the protocol is written | a JV scan, a ramp whose pace is not stated | never finishes |
+| as long as its block | a condition, a channel setting | as long as the block, but only in a parallel block (§32) |
+| until something outside the plan stops it | a test run to T80, a thermal cycle | never finishes |
+
+The first had no honest spelling at all: an author wrote a made-up exact duration, or none, and
+none made everything after it never run. A proposal to read every empty duration as an
+instantaneous setting was rejected: it gave the T/LT cycling ramps zero length inside an
+indefinite repeat, and settings issued within one sequence overlapped, which only
+cross-instruction logic could resolve. Making the kind explicit removes the context-dependent
+rule instead of adding another.
+
+### 33.2 The `Duration` section
+
+Every `Instruction`, and `TimePlan`, has a `duration` sub-section (a sub-section rather than two
+quantities, so it can grow, e.g. a range for a typical value):
+
+| Field | |
+|---|---|
+| `kind` | `fixed` \| `typical` \| `whole_block` \| `open_ended` \| `derived` |
+| `value` (s) | required for `fixed` and `typical`; forbidden for `whole_block` and `open_ended`; written by normalize for `derived` |
+| `includes_typical` | on a `derived` duration only, written by normalize: some part of it is `typical` |
+
+| Kind | Meaning |
+|---|---|
+| `fixed` | lasts exactly `value` |
+| `typical` | takes time the protocol does not fix; `value` is a typical one, used for sums and drawing |
+| `whole_block` | lasts as long as the block (or plan) it is in; does not count toward that block's duration |
+| `open_ended` | goes on until something outside the plan stops it: an objective such as T80, the operator, or the plan's written duration |
+| `derived` | worked out from the instruction's own content |
+
+`typical` requires a number, so that a sum is never "finite but unknown": that would be a fourth
+outcome every consumer had to handle. `instantaneous` is left out: a setting that persists is
+`whole_block`, and an action takes time, so it is `typical`. It can be added if a true
+zero-time event turns up.
+
+### 33.3 Who has which kind — each rule has one owner
+
+| Rule | Owner |
+|---|---|
+| `fixed`/`typical` need a positive `value`; `whole_block`/`open_ended` take none | the `Duration` itself (`Duration.normalize`) |
+| `whole_block` only where its container runs in parallel; not in a sequence, not on a plan (no block around it) | the `Duration`, from its place: owner → container → execution mode |
+| whether, and how, a duration is worked out | the owner's class: `derive_duration()` |
+| `derived` only where something works it out | `settle_duration` |
+
+One template, `settle_duration`, runs in `Instruction.normalize` and `TimePlan.normalize`: a
+duration `derive_duration()` returns replaces any stated one; else one must be stated, and not
+as `derived`. No class lists the kinds it may state: what was excluded that way was either a
+fact about the kind (`derived` is never written by hand) or about the place (`whole_block`).
+
+| Class | `derive_duration()` |
+|---|---|
+| `SingleInstruction` | none: it states its own |
+| `RampInstruction` | from `ramp_rate` and its ends, where nothing is stated and the path is |
+| `InstructionBlock`, `CountingRepeatingBlock` | from the sub-instructions (`derived`, or `open_ended`; a counting block without `repeat_n` also warns) |
+| `TimedRepeatingBlock` | `fixed` at `repeat_duration`, whatever it contains |
+| `IndefiniteRepeatingBlock` | `open_ended` |
+| `TimePlan` | from the instructions, where nothing is stated |
+
+A plan may state `fixed` (every instruction still running stops there), `typical`, or
+`open_ended` ("until T80", said explicitly). A `derived` duration always has a value; what has
+no end is `open_ended`. `ScheduledPlan.scheduled_end_time` follows from the plan's length, and is
+empty where it is open-ended.
+
+**Subtypes.** The role of a monitor/control instruction — setting or timed step — is its
+duration kind, not its class: the same `HoldIrradiance` is a setting in `channel_settings` and a
+timed step in the LC routine, and a class per role would double every concrete class. Where a
+class really does restrict its kinds, it checks that itself: the first such case will be a
+discrete action (a JV scan, a photograph), which completes by itself and so is `fixed` or
+`typical` only — one class, `ActionInstruction`, added when actions are modelled.
+
+### 33.4 How a derived duration is worked out
+
+- **Sequential**: the sum. Anything `open_ended` makes the result `open_ended`. `whole_block` is
+  an error: "until the end of the block" contradicts *one after another*. The `whole_block`
+  duration reports it from its own place (§33.3), so no instruction checks another; in the sum
+  it counts as open-ended.
+- **Parallel**: the longest, `whole_block` left out. Anything `open_ended` makes the result
+  `open_ended`; so does holding nothing but `whole_block`.
+- `includes_typical` passes up: any `typical` part, or a derived part that includes one.
+- In a repeating parallel block a `whole_block` instruction lasts one pass, and is drawn once per
+  iteration (kept from §32).
+
+### 33.5 Drawing
+
+A `typical` piece is drawn at its typical length and marked through the red assumption text
+("typical duration"). An `open_ended` one is drawn to the edge, as a never-ending one was. A
+`whole_block` one is drawn to its block's end, as a condition was. A plan whose derived
+duration includes a typical value shows "≈" before its length.
+
+### 33.6 Authoring
+
+The YAML changes as little as possible, using the split between settings and routine:
+
+```yaml
+duration: 1 h               # fixed, as before
+duration: typical 1 min     # typical
+duration: open-ended        # open_ended
+duration: whole block       # whole_block
+```
+
+- A missing duration in `channel_settings` or in protocol-level `instructions` is `whole_block`:
+  these are the protocol's settings, and the protocol runs in parallel (§23.2).
+- In the `routine`, a single instruction must write its duration; a missing one is reported with
+  the four spellings above.
+- `derived` is never written. Blocks still take no `duration` (§23.3); `repeat_for` stays.
+
+The ISOS files need one line each where a routine instruction had none: `duration: open-ended`
+on the cycling temperature ramps of ISOS-T-1/2/3 and ISOS-LT-1/2/3. Every other routine
+instruction already states a fixed duration. `tests/data/tree.stability.yaml` gets its tags.
+
+### 33.7 What it costs
+
+- One more sub-section per instruction: more nested sections in each archive. The Elasticsearch
+  limit of 10 000 nested documents was hit once before (uploads of the simulated LC variants of an earlier design),
+  so a server upload of all ISOS variants is part of building this.
+- Every consumer of `duration` reads `duration.value` and the kind; a helper gives the length in
+  seconds (`inf` where open-ended), so plotting code does not unpack the section.
+
+### 33.8 Order of building
+
+1. This section.
+2. The rules in `general.py` and `utils.py`, with the translator mapping mechanically: a written
+   duration is `fixed`; a missing one is what it meant before (`whole_block` in the settings and
+   in parallel blocks, `open_ended` in sequential ones). The expected ISOS archives may change
+   only in the shape of `duration`. *Built: all 117 variants and `channels` draw the same
+   figures and labels as before, compared figure by figure.*
+3. Instruction classes and drawing: a ramp with a rate is `derived`, typical pieces marked, "≈".
+4. The YAML words, the rule for the routine, and the tags in the six T/LT files. The expected
+   archives must not change.
+5. A server upload of all ISOS variants, and CLAUDE.md's rules brought up to date.
+6. Later, separately: one `RepeatingBlock` instead of three, now that timed is `fixed` and
+   indefinite `open_ended`.

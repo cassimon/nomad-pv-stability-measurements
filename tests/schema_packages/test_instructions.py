@@ -11,6 +11,7 @@ from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     MonitorControlInstruction,
     RampInstruction,
 )
+from nomad_pv_stability_measurements.schema_packages.general import Duration
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBelowRelativeHumidity,
     HoldBetweenIrradiance,
@@ -40,6 +41,14 @@ from nomad_pv_stability_measurements.schema_packages.standard_values import (
 )
 
 K = ureg.kelvin
+
+
+def fixed(value) -> Duration:
+    return Duration(kind='fixed', value=value)
+
+
+def open_ended() -> Duration:
+    return Duration(kind='open_ended')
 
 
 @pytest.mark.parametrize(
@@ -120,7 +129,7 @@ def test_either_sampling_figure_gives_the_other(normalized, written, derived, ex
     ],
 )
 def test_a_base_that_names_no_quantity_is_reported(normalized, log, cls):
-    normalized(cls(name='stray'))
+    normalized(cls(name='stray', duration=open_ended()))
 
     [error] = log.errors
     assert f'stray is a bare `{cls.__name__}`' in error
@@ -132,7 +141,7 @@ def test_a_base_that_names_no_quantity_is_reported(normalized, log, cls):
 @pytest.mark.parametrize(
     ('written', 'field', 'expected'),
     [
-        ({'duration': 3600 * ureg.second}, 'ramp_rate', 60 / 3600),
+        ({'duration': fixed(3600 * ureg.second)}, 'ramp_rate', 60 / 3600),
         ({'ramp_rate': 60 * K / ureg.hour}, 'duration', 3600),
     ],
 )
@@ -144,7 +153,11 @@ def test_a_ramp_derives_its_rate_or_its_duration(
     )
 
     # The rate is a magnitude; the direction is the ends.
-    assert getattr(ramp, field).magnitude == pytest.approx(expected)
+    derived = getattr(ramp, field)
+    if field == 'duration':
+        assert derived.kind == 'derived'
+        derived = derived.value
+    assert derived.magnitude == pytest.approx(expected)
     assert log.errors == []
 
 
@@ -154,11 +167,11 @@ def test_a_rate_that_contradicts_the_duration_is_reported_not_repaired(normalize
             start_point=298.15 * K,
             end_point=358.15 * K,
             ramp_rate=60 * K / ureg.hour,
-            duration=7200 * ureg.second,
+            duration=fixed(7200 * ureg.second),
         )
     )
 
-    assert ramp.duration.magnitude == pytest.approx(7200)
+    assert ramp.duration.value.magnitude == pytest.approx(7200)
     [error] = log.errors
     assert '`ramp_rate`' in error
 
@@ -170,10 +183,11 @@ def test_a_cycle_states_no_path_so_it_takes_no_rate(normalized, log):
             end_point=338.15 * K,
             end_of_ramp_behavior='cycle',
             ramp_rate=60 * K / ureg.hour,
+            duration=open_ended(),
         )
     )
 
-    assert ramp.duration is None
+    assert ramp.duration.kind == 'open_ended'
     [error] = log.errors
     assert 'does not state' in error
 
@@ -181,14 +195,21 @@ def test_a_cycle_states_no_path_so_it_takes_no_rate(normalized, log):
 @pytest.mark.parametrize(
     ('section', 'reported'),
     [
-        (RampTemperature(start_point=298.15 * K), 'missing an end'),
         (
-            HoldBetweenIrradiance(upper_bound=1000 * ureg('W/m^2')),
+            RampTemperature(start_point=298.15 * K, duration=open_ended()),
+            'missing an end',
+        ),
+        (
+            HoldBetweenIrradiance(
+                upper_bound=1000 * ureg('W/m^2'), duration=open_ended()
+            ),
             'missing one',
         ),
         (
             HoldBetweenIrradiance(
-                lower_bound=1000 * ureg('W/m^2'), upper_bound=800 * ureg('W/m^2')
+                lower_bound=1000 * ureg('W/m^2'),
+                upper_bound=800 * ureg('W/m^2'),
+                duration=open_ended(),
             ),
             'above its `upper_bound`',
         ),
@@ -232,7 +253,7 @@ def test_dark_is_exactly_no_light():
             'Monitor relative humidity',
         ),
         (
-            HoldIrradiance(set_point=0 * ureg('W/m^2'), duration=4800 * ureg.s),
+            HoldIrradiance(set_point=0 * ureg('W/m^2'), duration=fixed(4800 * ureg.s)),
             'Hold irradiance 0 W/m² for 80 min',
         ),
         (HoldVoltage(reference_point='near V_MPP'), 'Hold voltage at near V_MPP'),
@@ -322,7 +343,7 @@ def test_what_the_protocol_gives_no_value_is_written_as_text(instruction, text):
 
 
 def test_an_instruction_is_drawn_on_its_quantity_row_from_when_it_starts():
-    hold = HoldTemperature(set_point=338.15 * K, duration=12 * ureg.hour)
+    hold = HoldTemperature(set_point=338.15 * K, duration=fixed(12 * ureg.hour))
 
     [piece] = hold.time_series_for_plotting(start=7200, stop=10**6).pieces
 

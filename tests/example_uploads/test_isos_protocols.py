@@ -58,8 +58,18 @@ MINUTE = 60
 TIMELINES_WITHIN = 5.0
 
 
+#: How long a setting lasts: as long as the protocol, which runs them all in parallel.
+WHOLE_BLOCK = {'kind': 'whole_block'}
+#: What only the protocol, or an objective, ends: the routines, which repeat indefinitely.
+OPEN_ENDED = {'kind': 'open_ended'}
+
+
 def instruction(cls, **fields) -> dict:
     return {'m_def': m_def(cls), **fields}
+
+
+def fixed(seconds: float) -> dict:
+    return {'kind': 'fixed', 'value': pytest.approx(seconds)}
 
 
 def kelvin(celsius: float):
@@ -169,8 +179,11 @@ def ramping(start, end) -> dict:
         start_point=start,
         end_point=end,
         end_of_ramp_behavior='triangle',
+        duration=OPEN_ENDED,
     )
-    return instruction(IndefiniteRepeatingBlock, sub_instructions=[ramp])
+    return instruction(
+        IndefiniteRepeatingBlock, sub_instructions=[ramp], duration=OPEN_ENDED
+    )
 
 
 def cycling(start, end) -> dict:
@@ -183,8 +196,11 @@ def cycling(start, end) -> dict:
         start_point=start,
         end_point=end,
         end_of_ramp_behavior='cycle',
+        duration=OPEN_ENDED,
     )
-    return instruction(IndefiniteRepeatingBlock, sub_instructions=[cycle])
+    return instruction(
+        IndefiniteRepeatingBlock, sub_instructions=[cycle], duration=OPEN_ENDED
+    )
 
 
 def light_dark(light: float, dark: float, lit: dict) -> dict:
@@ -193,9 +209,10 @@ def light_dark(light: float, dark: float, lit: dict) -> dict:
     return instruction(
         IndefiniteRepeatingBlock,
         sub_instructions=[
-            {**lit, 'duration': pytest.approx(light)},
-            {**DARK, 'duration': pytest.approx(dark)},
+            {**lit, 'duration': fixed(light)},
+            {**DARK, 'duration': fixed(dark)},
         ],
+        duration=OPEN_ENDED,
     )
 
 
@@ -210,7 +227,10 @@ def protocol(standard, options, instructions, environment='indoor'):
     # The file's own instructions come after its settings, before its routine (§14.3).
     routine = instructions[-1]['m_def'] == m_def(IndefiniteRepeatingBlock)
     at = len(instructions) - routine
-    instructions = [*instructions[:at], AMBIENT_AIR, *instructions[at:]]
+    settings = [
+        {**each, 'duration': WHOLE_BLOCK} for each in [*instructions[:at], AMBIENT_AIR]
+    ]
+    instructions = [*settings, *instructions[at:]]
     archive = {
         'm_def': m_def(StabilityProtocol),
         'name': f'{standard} ({variant})' if variant else standard,
@@ -219,6 +239,7 @@ def protocol(standard, options, instructions, environment='indoor'):
         'standard_level': int(standard.rsplit('-', 1)[1].rstrip('I')),
         'environment': environment,
         'instructions': instructions,
+        'duration': OPEN_ENDED,
     }
     if variant:
         archive['standard_variant'] = variant

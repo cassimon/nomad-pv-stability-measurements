@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from math import inf
 
 import numpy as np
-from nomad.units import ureg
 
 #: A repeating block draws this many iterations at most; the rest is an axis break.
 #: Something that repeats by itself, and nothing stops, is drawn this many cycles.
@@ -84,31 +83,6 @@ class TimePlotSeries:
         self.breaks += other.breaks
 
 
-def combined_duration(instructions, mode: str):
-    """How long `instructions` last together: one after another (`sequential`) or all at
-    once (`parallel`). `None` if any of them never finishes. All at once, one that lasts
-    as long as its block decides nothing: `None` only if nothing else is there."""
-    if mode == 'parallel':
-        deciding = [
-            each for each in instructions if not each.lasts_as_long_as_its_block()
-        ]
-        if instructions and not deciding:
-            return None
-        instructions = deciding
-    durations = [each.duration for each in instructions]
-    if any(duration is None for duration in durations):
-        return None
-    seconds = [duration.to('s').magnitude for duration in durations]
-    if not seconds:
-        return 0 * ureg.second
-    return (max(seconds) if mode == 'parallel' else sum(seconds)) * ureg.second
-
-
-def seconds_or_inf(duration) -> float:
-    """A duration in seconds; `inf` for one that never ends."""
-    return inf if duration is None else duration.to('s').magnitude
-
-
 def instructions_for_plotting(instructions, mode: str, start: float, stop: float):
     """`instructions` drawn one after another (`sequential`) or all from `start`."""
     series = TimePlotSeries()
@@ -116,7 +90,7 @@ def instructions_for_plotting(instructions, mode: str, start: float, stop: float
     for each in instructions:
         series.extend(each.time_series_for_plotting(time, stop))
         if mode == 'sequential':
-            time += seconds_or_inf(each.duration)
+            time += each.seconds()
     return series
 
 

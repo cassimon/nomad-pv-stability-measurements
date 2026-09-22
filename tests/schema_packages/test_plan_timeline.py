@@ -7,6 +7,7 @@ import pytest
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
+    Duration,
     IndefiniteRepeatingBlock,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
@@ -58,13 +59,19 @@ def test_breaks_cut_the_axis_into_sections_at_their_true_times():
 
 
 def test_a_protocol_shows_its_timeline(normalized):
-    light = HoldIrradiance(set_point=SUN * ureg('W/m^2'), duration=1 * ureg.hour)
-    dark = HoldIrradiance(set_point=0 * ureg('W/m^2'), duration=1 * ureg.hour)
+    light = HoldIrradiance(
+        set_point=SUN * ureg('W/m^2'),
+        duration=Duration(kind='fixed', value=1 * ureg.hour),
+    )
+    dark = HoldIrradiance(
+        set_point=0 * ureg('W/m^2'),
+        duration=Duration(kind='fixed', value=1 * ureg.hour),
+    )
     protocol = normalized(
         StabilityProtocol(
             name='light–dark',
             instructions=[
-                MPPTracking(),
+                MPPTracking(duration=Duration(kind='whole_block')),
                 IndefiniteRepeatingBlock(sub_instructions=[light, dark]),
             ],
         )

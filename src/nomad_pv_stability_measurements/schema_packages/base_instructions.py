@@ -1,10 +1,17 @@
-from math import isclose
+from math import inf, isclose
 
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.general import SingleInstruction
+from nomad_pv_stability_measurements.schema_packages.general import (
+    DERIVED,
+    FIXED,
+    TYPICAL,
+    Duration,
+    SingleInstruction,
+    kind_of,
+)
 from nomad_pv_stability_measurements.schema_packages.utils import shown, words
 
 m_package = SchemaPackage()
@@ -300,9 +307,25 @@ class RampInstruction(MonitorControlInstruction):
         if self.ramp_rate is not None:
             rate = self.ramp_rate.to(start.units / ureg.second).magnitude
             return abs((end - start).to(start.units).magnitude / rate)
-        if self.duration is not None:
-            return self.duration.to('s').magnitude
+        if self.seconds() < inf:
+            return self.seconds()
         return None
+
+    def derive_duration(self) -> Duration | None:
+        """From `ramp_rate` and its ends, where no duration is stated and the path
+        between the ends is."""
+        if (
+            kind_of(self) not in (None, DERIVED)
+            or type(self) in ABSTRACT_INSTRUCTIONS
+            or self.ramp_rate is None
+            or self.start_point is None
+            or self.end_point is None
+            or self.end_of_ramp_behavior == 'cycle'
+        ):
+            return None
+        return Duration(
+            kind=DERIVED, value=abs(self.end_point - self.start_point) / self.ramp_rate
+        )
 
     def assumed_rate_for_plotting(self):
         """A plausible pace, drawn where the protocol states none; `None`: none known
@@ -369,24 +392,24 @@ class RampInstruction(MonitorControlInstruction):
             return
         span = abs(self.end_point - self.start_point)
         # The rate and the duration say one thing, so whichever was written, both are
-        # stored (D16, as the sampling pair is).
-        if self.ramp_rate is None and self.duration is not None:
-            self.ramp_rate = span / self.duration
-        elif self.ramp_rate is not None and self.duration is None:
-            self.duration = span / self.ramp_rate
-        elif self.ramp_rate is not None:
+        # stored, as the sampling pair is.
+        # A duration worked out from the rate is `derived`, and so not checked here.
+        stated = kind_of(self) in (FIXED, TYPICAL) and self.duration.value is not None
+        if self.ramp_rate is None and stated:
+            self.ramp_rate = span / self.duration.value
+        elif self.ramp_rate is not None and stated:
             self.report_a_rate_that_contradicts_the_duration(span, where, logger)
 
     def report_a_rate_that_contradicts_the_duration(self, span, where, logger):
-        """Reported, never repaired: both stand as authored (D13a)."""
-        derived = span / self.duration
+        """Reported, never repaired: both stand as authored."""
+        derived = span / self.duration.value
         written = self.ramp_rate.to(derived.units)
         if isclose(written.magnitude, derived.magnitude, rel_tol=1e-9):
             return
         logger.error(
             f'{where} writes a `ramp_rate` of {written.magnitude:g} {derived.units}, '
             f'but its ends over an `duration` of '
-            f'{self.duration.to("s").magnitude:g} s make it '
+            f'{self.seconds():g} s make it '
             f'{derived.magnitude:g}.'
         )
 
@@ -427,10 +450,15 @@ RAMP_SHAPES = {'hold': hold_after_ramp, 'sawtooth': sawtooth, 'triangle': triang
 
 
 def held_for(instruction) -> str:
-    """` for 12 h`, where a hold writes its duration; a hold never derives one."""
-    if instruction.duration is None:
+    """` for 12 h`, where a hold states its length; `typically` where that is only a
+    typical one. A hold never derives one."""
+    if (
+        kind_of(instruction) not in (FIXED, TYPICAL)
+        or instruction.duration.value is None
+    ):
         return ''
-    return f' for {shown(instruction.duration)}'
+    typically = 'typically ' if kind_of(instruction) == TYPICAL else ''
+    return f' for {typically}{shown(instruction.duration.value)}'
 
 
 #: The bases that name no quantity: writing one directly is an authoring mistake.

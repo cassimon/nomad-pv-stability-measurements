@@ -20,15 +20,162 @@ from nomad_pv_stability_measurements.schema_packages.utils import (
     AxisBreak,
     PlotPiece,
     TimePlotSeries,
-    combined_duration,
     drawing_end,
     instructions_for_plotting,
-    seconds_or_inf,
     shown,
     words,
 )
 
 m_package = SchemaPackage()
+
+FIXED = 'fixed'
+TYPICAL = 'typical'
+WHOLE_BLOCK = 'whole_block'
+OPEN_ENDED = 'open_ended'
+DERIVED = 'derived'
+#: The kinds that are a length, and so have a `value`.
+WITH_VALUE = (FIXED, TYPICAL, DERIVED)
+#: What a kind without a value lasts, in words.
+WITHOUT_VALUE = {
+    WHOLE_BLOCK: 'as long as its block',
+    OPEN_ENDED: 'until something outside the plan stops it',
+}
+
+
+class Duration(ArchiveSection):
+    """How long an instruction or a plan lasts, and what kind of length that is."""
+
+    kind = Quantity(
+        type=MEnum(FIXED, TYPICAL, WHOLE_BLOCK, OPEN_ENDED, DERIVED),
+        description='What kind of length this is. `fixed`: exactly `value`. '
+        '`typical`: it takes time the plan does not fix; `value` is a typical one, '
+        'used to add up and draw the plan. `whole_block`: as long as the block or plan '
+        'it is in, run in parallel; it does not count toward that length. '
+        '`open_ended`: until something outside the plan stops it, such as an objective '
+        'being reached or the operator. `derived`: worked out from the content, as a '
+        "block's is from its sub-instructions; never written by hand.",
+    )
+
+    value = Quantity(
+        type=np.float64,
+        unit='s',
+        description='The length. Required for a `fixed` or `typical` duration, and '
+        'positive; empty for `whole_block` and `open_ended`; derived for `derived`.',
+    )
+
+    includes_typical = Quantity(
+        type=bool,
+        description='Of a `derived` duration: whether some part of it is only a typical '
+        'length, so the whole is one too. Derived.',
+    )
+
+    def normalize(self, archive, logger):
+        """Whether its value suits its kind, and a `whole_block` one its place."""
+        super().normalize(archive, logger)
+        owner = getattr(self.m_parent, 'name', None) or '<unnamed>'
+        if self.kind == WHOLE_BLOCK:
+            self.report_a_place_without_a_parallel_block(owner, logger)
+        if self.kind in WITHOUT_VALUE and self.value is not None:
+            logger.error(
+                f'{owner} lasts {WITHOUT_VALUE[self.kind]}, so its duration takes no '
+                f'value.'
+            )
+        elif self.kind in (FIXED, TYPICAL) and self.value is None:
+            logger.error(f'{owner} has a {self.kind} duration, but no value.')
+        elif self.kind in (FIXED, TYPICAL) and self.value <= 0:
+            logger.error(
+                f'{owner} writes a `duration` of {self.value.to("s").magnitude:g} s: '
+                f'it must be positive.'
+            )
+
+    def report_a_place_without_a_parallel_block(self, owner: str, logger) -> None:
+        """As long as its block only exists where the block runs its instructions in
+        parallel: one after another, or with no block around it, there is no whole to
+        last as long as."""
+        container = self.m_parent.m_parent if self.m_parent is not None else None
+        mode = execution_mode(container)
+        if mode == 'parallel':
+            return
+        if mode is None:
+            where = 'it is in no block'
+        else:
+            where = (
+                f'{getattr(container, "name", None) or "<unnamed>"} runs its '
+                f'instructions one after another'
+            )
+        logger.error(
+            f'{owner} lasts as long as its block, but {where}: run it in a parallel '
+            f'block, or give it a duration of its own.'
+        )
+
+
+def execution_mode(container) -> str | None:
+    """How a block or a plan runs what it contains; `None` for anything else."""
+    for field in ('sub_instruction_execution_mode', 'instruction_execution_mode'):
+        if container is not None and field in container.m_def.all_quantities:
+            return getattr(container, field)
+    return None
+
+
+def seconds_of(duration) -> float:
+    """A duration's length in seconds; `inf` where it has none: open-ended, as long
+    as its block, or not stated at all."""
+    if duration is None or duration.kind not in WITH_VALUE or duration.value is None:
+        return inf
+    return duration.value.to('s').magnitude
+
+
+def is_typical(duration) -> bool:
+    """Whether a duration is, or includes, a typical length."""
+    return duration is not None and (
+        duration.kind == TYPICAL or bool(duration.includes_typical)
+    )
+
+
+def kind_of(instruction) -> str | None:
+    duration = instruction.duration
+    return None if duration is None else duration.kind
+
+
+def combined_duration(instructions, mode: str) -> Duration:
+    """How long `instructions` last together: one after another (`sequential`), their
+    sum; all at once (`parallel`), the longest, not counting what lasts as long as the
+    block. Open-ended where any of them is, or where nothing but `whole_block` is there.
+    One after another, `whole_block` cannot be, and counts as open-ended."""
+    parallel = mode == 'parallel'
+    deciding = list(instructions)
+    if parallel:
+        deciding = [each for each in instructions if kind_of(each) != WHOLE_BLOCK]
+        if instructions and not deciding:
+            return Duration(kind=OPEN_ENDED)
+    lengths = [each.seconds() for each in deciding]
+    if inf in lengths:
+        return Duration(kind=OPEN_ENDED)
+    value = max(lengths, default=0) if parallel else sum(lengths)
+    return Duration(
+        kind=DERIVED,
+        value=value * ureg.second,
+        includes_typical=any(is_typical(each.duration) for each in deciding),
+    )
+
+
+def settle_duration(owner, logger) -> None:
+    """The duration `owner` works out itself, where it does; else the one it states.
+    Only what works it out writes a `derived` one."""
+    derived = owner.derive_duration()
+    if derived is not None:
+        owner.duration = derived
+        return
+    name = owner.name or '<unnamed>'
+    stated = '`fixed` or `typical` with a value, `whole_block` or `open_ended`'
+    kind = kind_of(owner)
+    if kind is None:
+        logger.error(f'{name} states no duration: write {stated}.')
+    elif kind == DERIVED:
+        logger.error(
+            f'{name} has a derived duration, but nothing to derive it from: write '
+            f'{stated}.'
+        )
 
 
 class Instruction(ArchiveSection):
@@ -57,12 +204,11 @@ class Instruction(ArchiveSection):
         type=str, description='Anything else worth saying about this instruction.'
     )
 
-    duration = Quantity(
-        type=np.float64,
-        unit='s',
+    duration = SubSection(
+        section_def=Duration,
         description='How long the whole instruction is going to take, including any '
-        'sub-instructions. Must be positive. Empty: a single instruction run in parallel '
-        'with others lasts as long as they do; anywhere else, it never finishes.',
+        'sub-instructions, and what kind of length that is. A single instruction states '
+        "it; a block's is derived from its sub-instructions.",
     )
 
     sub_instructions = SubSection(
@@ -75,34 +221,29 @@ class Instruction(ArchiveSection):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        if self.duration is not None and self.duration <= 0:
-            logger.error(
-                f'{self.name or "<unnamed>"} writes a `duration` of '
-                f'{self.duration.to("s").magnitude:g} s: it must be positive.'
-            )
+        settle_duration(self, logger)
         self.label = self.name or self.describe()
+
+    def derive_duration(self) -> Duration | None:
+        """Its duration, worked out from what it contains or what is written in it;
+        `None` where it has none to work out, and states one instead."""
+        return None
 
     def describe(self) -> str:
         """What the instruction does, in a few words. Only what is written counts, not
         what `normalize` derives, so the label does not change when normalized again."""
         return words(type(self).__name__)
 
-    def lasts_as_long_as_its_block(self) -> bool:
-        """Whether, run in parallel with others, it ends when they do rather than
-        deciding when that is. A block never does: without a duration, it never
-        finishes."""
-        return False
+    def seconds(self) -> float:
+        """How long it lasts in seconds; `inf` where it has no length of its own."""
+        return seconds_of(self.duration)
 
 
 class SingleInstruction(Instruction):
     """One instruction that contains no others.
 
-    Without a `duration` it is a setting: in a parallel block, or a plan run in
-    parallel, it lasts as long as the rest of it; anywhere else it never finishes.
+    It states its own `duration`, and what kind it is: see `Duration`.
     """
-
-    def lasts_as_long_as_its_block(self) -> bool:
-        return self.duration is None
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
@@ -117,8 +258,8 @@ class SingleInstruction(Instruction):
         the drawing stops first, in seconds since the plan starts."""
         if start >= stop:
             return TimePlotSeries()
-        endless = self.duration is None
-        end = stop if endless else min(stop, start + self.duration.to('s').magnitude)
+        endless = self.seconds() == inf
+        end = stop if endless else min(stop, start + self.seconds())
         piece = PlotPiece(
             row=self.row_for_plotting(),
             label=self.label or self.describe(),
@@ -176,8 +317,7 @@ class InstructionBlock(Instruction):
     """Instructions run one after another or simultaneously — once.
 
     The parent of the blocks that repeat. Its `duration` is always derived
-    from its sub-instructions, and empty where it never finishes: see
-    `sub_instruction_execution_mode`.
+    from its sub-instructions: see `sub_instruction_execution_mode`.
     """
 
     sub_instruction_execution_mode = Quantity(
@@ -185,14 +325,11 @@ class InstructionBlock(Instruction):
         default='sequential',
         description='Whether the sub-instructions run one after another (`sequential`) '
         "or all at once (`parallel`). This decides the block's `duration`. "
-        '`sequential`: the sum of the durations of the sub-instructions. An instruction '
-        'without a duration never finishes, so the block never finishes either and '
-        'whatever follows it never runs. `parallel`: the longest duration among the '
-        'sub-instructions. A single instruction without a duration is a setting: it '
-        'is held for as long as the block runs and does not count toward its duration. '
-        'A parallel block therefore never finishes only if a sub-block in it never '
-        'finishes, or if it contains nothing but settings. To hold a setting during '
-        'a phase, put it in a parallel block beside what the phase does.',
+        '`sequential`: the sum of their durations. `parallel`: the longest, not '
+        'counting a `whole_block` one, which is held for as long as the block runs. '
+        'Either way, anything `open_ended` makes the block open-ended. A `whole_block` '
+        'instruction only exists in parallel: to hold a setting during a phase, put it '
+        'in a parallel block beside what the phase does.',
     )
 
     def normalize(self, archive, logger):
@@ -201,7 +338,6 @@ class InstructionBlock(Instruction):
             logger.error(
                 f'{self.name or "<unnamed>"} is a block, but has no sub-instructions.'
             )
-        self.duration = self.derive_duration()
 
     def describe(self) -> str:
         count = len(self.sub_instructions)
@@ -219,13 +355,13 @@ class InstructionBlock(Instruction):
     def describe_repetition(self) -> str:
         return 'Run once'
 
-    def one_iteration(self):
-        """How long the sub-instructions take once; `None` if they never finish."""
+    def one_iteration(self) -> Duration:
+        """How long the sub-instructions take once."""
         return combined_duration(
             self.sub_instructions, self.sub_instruction_execution_mode
         )
 
-    def derive_duration(self):
+    def derive_duration(self) -> Duration:
         return self.one_iteration()
 
     def repetitions(self) -> float:
@@ -238,8 +374,8 @@ class InstructionBlock(Instruction):
         up to where the block ends, labelled with how it goes on. Times are accurate:
         what the break hides is not drawn, never moved."""
         series = TimePlotSeries()
-        one = seconds_or_inf(self.one_iteration())
-        end = start + seconds_or_inf(self.derive_duration())
+        one = seconds_of(self.one_iteration())
+        end = start + seconds_of(self.derive_duration())
         time = start
         for _ in range(min(self.repetitions(), ITERATIONS_FOR_PLOTTING)):
             if time >= min(stop, end):
@@ -255,7 +391,7 @@ class InstructionBlock(Instruction):
     def one_iteration_for_plotting(self) -> TimePlotSeries:
         """One pass of the sub-instructions on its own, from 0, as the block's own
         figure shows it; drawn like a plan that never ends where the pass never does."""
-        stop = seconds_or_inf(self.one_iteration())
+        stop = seconds_of(self.one_iteration())
         if stop == inf:
             stop = drawing_end(self.iteration_for_plotting(0.0, inf))
         series = self.iteration_for_plotting(0.0, stop)
@@ -287,14 +423,14 @@ class RepeatingBlock(InstructionBlock):
 
     Its kind says which: a timed block always finishes, an indefinite one never does, and
     a counting one should. On its own it is not known to finish, so its
-    `duration` is empty.
+    `duration` is open-ended.
     """
 
     def describe_repetition(self) -> str:
         return 'Repeat indefinitely'
 
-    def derive_duration(self):
-        return None
+    def derive_duration(self) -> Duration:
+        return Duration(kind=OPEN_ENDED)
 
     def repetitions(self) -> float:
         return inf
@@ -306,7 +442,7 @@ class RepeatingBlock(InstructionBlock):
 class TimedRepeatingBlock(RepeatingBlock):
     """Instructions repeated for `repeat_duration`, then stopped — wherever they are.
 
-    It always finishes: `repeat_duration` is what ends it, and so its
+    It always finishes: `repeat_duration` is what ends it, and so its fixed
     `duration`, whether or not its sub-instructions ever finish.
     """
 
@@ -330,8 +466,10 @@ class TimedRepeatingBlock(RepeatingBlock):
             return 'Repeat'
         return f'Repeat for {shown(self.repeat_duration)}'
 
-    def derive_duration(self):
-        return self.repeat_duration
+    def derive_duration(self) -> Duration:
+        if self.repeat_duration is None:
+            return Duration(kind=OPEN_ENDED)
+        return Duration(kind=FIXED, value=self.repeat_duration)
 
     def break_label_for_plotting(self) -> str:
         return f'until t+{shown(self.repeat_duration)}'
@@ -340,16 +478,16 @@ class TimedRepeatingBlock(RepeatingBlock):
 IndefiniteRepeatingBlock = RepeatingBlock
 """Instructions repeated until something outside stops them — it never finishes.
 
-Its `duration` is always empty; only the plan it belongs to ends it.
+Its `duration` is always open-ended; only the plan it belongs to ends it.
 """
 
 
 class CountingRepeatingBlock(RepeatingBlock):
     """Instructions repeated `repeat_n` times — it should finish.
 
-    Its `duration` is one iteration times `repeat_n`. Without a count, or with a
-    sub-instruction that never finishes, it does not finish after all: that is warned
-    about, and its `duration` is empty.
+    Its `duration` is one iteration times `repeat_n`. Without a count, or with an
+    open-ended sub-instruction, it does not finish after all: that is warned about, and
+    its `duration` is open-ended.
     """
 
     repeat_n = Quantity(
@@ -372,7 +510,7 @@ class CountingRepeatingBlock(RepeatingBlock):
         if (
             self.repeat_n is not None
             and self.sub_instructions
-            and (self.one_iteration() is None)
+            and self.one_iteration().kind == OPEN_ENDED
         ):
             logger.warning(
                 f'{name} counts its repetitions, but a sub-instruction never finishes, '
@@ -384,11 +522,15 @@ class CountingRepeatingBlock(RepeatingBlock):
             return 'Repeat'
         return 'Run once' if self.repeat_n == 1 else f'Repeat {self.repeat_n} times'
 
-    def derive_duration(self):
+    def derive_duration(self) -> Duration:
         one = self.one_iteration()
-        if one is None or self.repeat_n is None or self.repeat_n < 1:
-            return None
-        return self.repeat_n * one
+        if one.kind == OPEN_ENDED or self.repeat_n is None or self.repeat_n < 1:
+            return Duration(kind=OPEN_ENDED)
+        return Duration(
+            kind=DERIVED,
+            value=self.repeat_n * one.value,
+            includes_typical=one.includes_typical,
+        )
 
     def repetitions(self) -> float:
         return inf if self.repeat_n is None else self.repeat_n
@@ -508,13 +650,13 @@ class Planned(ArchiveSection):
 class TimePlan(Plan):
     """A plan that knows how long it lasts: written, or derived from its instructions."""
 
-    duration = Quantity(
-        type=np.float64,
-        unit='s',
+    duration = SubSection(
+        section_def=Duration,
         description='How long this plan lasts (assuming everything goes as expected). '
-        'Can be used to stop its instructions before they finish. '
-        'Empty means the plan has the potential to be executed indefinitely (end '
-        'defined elsewhere).',
+        'Written, it stands: a length stops every instruction still running there, and '
+        '`open_ended` says the plan is ended from outside, e.g. when an objective is '
+        'reached. Else it is derived from the instructions. A plan is in no block, so '
+        'it cannot be `whole_block`.',
     )
 
     #: How a plan runs its `instructions`. A subclass can overwrite the default.
@@ -523,29 +665,37 @@ class TimePlan(Plan):
         default='sequential',
         description='Whether the instructions run one after another (`sequential`) or '
         'all at once (`parallel`). Where the plan has no written `duration`, this '
-        'decides it, as for a block. `sequential`: the sum of the durations of the '
-        'instructions. An instruction without a duration never finishes, and what '
-        'follows it never runs. `parallel`: the longest duration among the instructions. '
-        'A single instruction without a duration is a condition, held for as long as '
-        'the plan runs.',
+        'decides it, as for a block. `sequential`: the sum of their durations. '
+        '`parallel`: the longest, not counting a `whole_block` one, which is held for '
+        'as long as the plan runs. Either way, anything `open_ended` makes the plan '
+        'open-ended.',
     )
 
-    def combine_instruction_durations(self):
+    def combine_instruction_durations(self) -> Duration:
         """How long the instructions last together, run as `instruction_execution_mode`
-        says; `None` if one of them never finishes. Override it for any other rule."""
+        says. Override it for any other rule."""
         return combined_duration(self.instructions, self.instruction_execution_mode)
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        # The instructions are normalized before the plan, so their durations are derived.
-        if self.duration is None:
-            self.duration = self.combine_instruction_durations()
+        settle_duration(self, logger)
+
+    def derive_duration(self) -> Duration | None:
+        """From the instructions, where no duration is written. The instructions are
+        normalized before the plan, so theirs are there."""
+        if kind_of(self) not in (None, DERIVED):
+            return None
+        return self.combine_instruction_durations()
+
+    def seconds(self) -> float:
+        """How long it lasts in seconds; `inf` where it is open-ended."""
+        return seconds_of(self.duration)
 
     def time_series_for_plotting(self) -> TimePlotSeries:
         """The plan drawn from its start until its `duration`. A plan that never ends is
         drawn until the last thing in it starts, finishes or breaks off: found by a first
         pass that nothing stops, then drawn again up to there."""
-        stop = seconds_or_inf(self.duration)
+        stop = self.seconds()
         if stop == inf:
             stop = drawing_end(self.instructions_for_plotting(inf))
         series = self.instructions_for_plotting(stop)
@@ -573,9 +723,9 @@ class ScheduledPlan(TimePlan):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        if self.scheduled_datetime is not None and self.duration is not None:
+        if self.scheduled_datetime is not None and self.seconds() < inf:
             self.scheduled_end_time = self.scheduled_datetime + timedelta(
-                seconds=self.duration.to('s').magnitude
+                seconds=self.seconds()
             )
 
 
