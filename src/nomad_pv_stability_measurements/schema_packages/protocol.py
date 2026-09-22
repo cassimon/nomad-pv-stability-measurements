@@ -15,9 +15,7 @@ from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
     ramp_instructions,
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
-    OPEN_ENDED,
     Planned,
-    RepeatingBlock,
     TimePlan,
     titled_for_plotting,
 )
@@ -133,43 +131,14 @@ class StabilityProtocol(PlotSection, TimePlan):
         self.figures = self.figures_for_plotting()
 
     def figures_for_plotting(self) -> list[PlotlyFigure]:
-        """The timeline of the whole protocol, open, then one iteration of each
-        repeating block whose iteration ends; nothing where there is nothing to draw."""
-        drawn = [
-            (
-                'Timeline',
-                titled_for_plotting(self.name, self.duration),
-                self.time_series_for_plotting(),
-                self.seconds() == inf,
-            )
-        ]
-        for block in self.m_all_contents():
-            # A pass that never ends shows nothing the timeline does not already.
-            if (
-                isinstance(block, RepeatingBlock)
-                and block.one_iteration().kind != OPEN_ENDED
-            ):
-                title = block.title_for_plotting()
-                drawn.append(
-                    (
-                        f'One iteration: {block.name or block.describe()}',
-                        titled_for_plotting(
-                            f'One iteration — {title}', block.one_iteration()
-                        ),
-                        block.one_iteration_for_plotting(),
-                        False,
-                    )
-                )
-        return [
-            PlotlyFigure(
-                label=label,
-                index=index,
-                open=index == 0,
-                figure=figure_for_plotting(series, title, continues),
-            )
-            for index, (label, title, series, continues) in enumerate(drawn)
-            if series.pieces
-        ]
+        """The timeline of the whole protocol; nothing where there is nothing to draw.
+        Each repeating block shows one pass of its own."""
+        series = self.time_series_for_plotting()
+        if not series.pieces:
+            return []
+        title = titled_for_plotting(self.name, self.duration)
+        figure = figure_for_plotting(series, title, self.seconds() == inf)
+        return [PlotlyFigure(label='Timeline', index=0, open=True, figure=figure)]
 
 
 class StabilityActivity(Measurement, Planned):

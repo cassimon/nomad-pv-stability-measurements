@@ -3443,6 +3443,21 @@ never of dates.
 **Figures.** An overview (open), and one per repeating block whose iteration ends, showing a single
 iteration (`one_iteration_for_plotting`). Plotting-only methods end in `_for_plotting`.
 
+*Amended:* the protocol shows **only its timeline**. The one-iteration figure belongs to the
+block: `RepeatingBlock` is a `PlotSection` and sets it in its own `normalize`
+(`figures_for_plotting`), so it appears where a reader opens that instruction, not beside the
+timeline. Verified to be the same figure as before for all 120 shipped variants. A block whose
+pass never ends has none.
+
+*Amended:* **the timeline tells everything, on hover.** Time stays true, so a short step in a long
+protocol is too narrow for its text, which is then left out. Every piece now also lies under an
+all-but-transparent area as high as its row (`HOVER_FILL`, `hoveron: 'fills'`) that shows, where
+hovered, the piece's full `label`, when it starts and how long it runs (`from 1000 h for 1 min`:
+start and length, not start and end, which rounding at 1000 h would make equal), and the red
+notes. Nothing changes to the eye. The areas are placed after each row is drawn, once its range is
+known (`_Drawing.hover_areas`). *Not verified in a browser* here; Plotly finds a fill only where
+one is drawn, hence the 1 % opacity rather than none.
+
 **Colour** says what the protocol states (`role_for_plotting`), in the words of the ISOS consensus
 (Khenkin et al. 2020): `controlled` to a value, bounds, path or named point ("controlled elevated
 temperatures of 65 or 85 °C", MPP tracking, a V_MPP bias); `specified` but not controlled ("Ambient

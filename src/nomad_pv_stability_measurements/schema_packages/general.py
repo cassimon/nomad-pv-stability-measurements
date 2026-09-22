@@ -4,6 +4,7 @@ from math import inf
 import numpy as np
 from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.basesections.v2 import ActivityStep, BaseSection
+from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
 from nomad.metainfo import (
     Datetime,
     MEnum,
@@ -15,6 +16,9 @@ from nomad.metainfo import (
 from nomad.metainfo.metainfo import Reference, SectionProxy
 from nomad.units import ureg
 
+from nomad_pv_stability_measurements.schema_packages.plan_timeline import (
+    figure_for_plotting,
+)
 from nomad_pv_stability_measurements.schema_packages.utils import (
     ITERATIONS_FOR_PLOTTING,
     AxisBreak,
@@ -437,12 +441,15 @@ class InstructionBlock(Instruction):
         return ''
 
 
-class RepeatingBlock(InstructionBlock):
+class RepeatingBlock(PlotSection, InstructionBlock):
     """Instructions repeated — a block that may or may not finish.
 
     Its kind says which: a timed block always finishes, an indefinite one never does, and
     a counting one should. The base itself says none, and so is reported where it is
     written; it is not known to finish, so its `duration` is open-ended.
+
+    It shows one pass of what it repeats, where a pass ends: the plan's timeline shows
+    the repetitions, and this figure one of them with room for its details.
     """
 
     def normalize(self, archive, logger):
@@ -453,6 +460,18 @@ class RepeatingBlock(InstructionBlock):
                 f'say how it ends: write an IndefiniteRepeatingBlock, a '
                 f'TimedRepeatingBlock or a CountingRepeatingBlock.'
             )
+        self.figures = self.figures_for_plotting()
+
+    def figures_for_plotting(self) -> list[PlotlyFigure]:
+        """One pass of the block; nothing where a pass never ends, since that shows
+        nothing the plan's timeline does not already."""
+        if self.one_iteration().kind == OPEN_ENDED:
+            return []
+        title = titled_for_plotting(
+            f'One iteration — {self.title_for_plotting()}', self.one_iteration()
+        )
+        figure = figure_for_plotting(self.one_iteration_for_plotting(), title)
+        return [PlotlyFigure(label='One iteration', index=0, open=True, figure=figure)]
 
     def describe_repetition(self) -> str:
         return 'Repeat'

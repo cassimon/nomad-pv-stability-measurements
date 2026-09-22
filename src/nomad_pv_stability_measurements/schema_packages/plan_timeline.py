@@ -11,12 +11,14 @@ from dataclasses import replace
 from math import inf
 
 import numpy as np
+from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.utils import (
     MONITORED,
     AxisBreak,
     TimePlotSeries,
     drawing_end,
+    shown,
 )
 
 HOUR = 3600.0
@@ -61,6 +63,9 @@ BAR_OPACITY = 0.25
 #: px between two bars side by side, so each reads as its own.
 BAR_GAP = 3
 BAND_OPACITY = 0.3
+#: What hovering over a piece shows lies over it, all but transparent: Plotly finds a
+#: fill only where it is drawn.
+HOVER_FILL = 'rgba(128, 128, 128, 0.01)'
 TOLERANCE_OPACITY = 0.2
 #: What the drawing assumes and the protocol does not state.
 ASSUMPTION_COLOR = '#e5534b'
@@ -203,6 +208,7 @@ def figure_for_plotting(
             'zeroline': False,
         }
         layout[_axis('yaxis', i)]['range'] = drawing.value_range() if unit else [0, 1]
+        drawing.hover_areas(layout[_axis('yaxis', i)]['range'])
         if not _monitored(row):  # its bars say what they are, in the row's colour
             drawing.notes.append(_row_label(row, unit, domain))
     drawing.notes += _break_notes(labels, x_domains)
@@ -228,6 +234,9 @@ class _Drawing:
         #: The least and the greatest value drawn in the current row, in the unit it is
         #: shown in.
         self.lowest = self.highest = 0.0
+        #: `(axes, span, text)` of the current row's pieces: where hovering tells all
+        #: of a piece, placed once the row's range is known.
+        self.hovered = []
 
     def frame(self, i: int) -> None:
         """An invisible trace in each section of the `i`-th row: Plotly draws only the
@@ -251,6 +260,7 @@ class _Drawing:
         has text."""
         unit = ''
         self.lowest = self.highest = 0.0
+        self.hovered = []
         noted = set()
         self.size = text_size(sized, self.sections, self.x_domains)
         for k, (a, b) in enumerate(self.sections):
@@ -261,6 +271,7 @@ class _Drawing:
                 span = max(piece.start, a), min(piece.end, b)
                 if span[1] <= span[0]:
                     continue
+                self.hovered.append((axes, span, _hover_text(piece)))
                 self.color = ROLE_COLORS.get(piece.role, ROLE_COLORS['unspecified'])
                 if piece.values is not None:
                     if piece.bounds is not None:
@@ -285,6 +296,31 @@ class _Drawing:
                     noted.add(id(piece))
                     self.assumption(axes, span, '; '.join(notes))
         return unit
+
+    def hover_areas(self, value_range) -> None:
+        """Over each piece of the row, as high as the row, an area that shows nothing
+        but tells all of the piece where it is hovered: the full text, which a narrow
+        bar leaves out, when it runs, and what the drawing assumes."""
+        low, high = value_range
+        for (x, y), span, text in self.hovered:
+            start, end = span[0] / HOUR, span[1] / HOUR
+            self.data.append(
+                {
+                    'type': 'scatter',
+                    'mode': 'lines',
+                    'x': [start, end, end, start, start],
+                    'y': [low, low, high, high, low],
+                    'xaxis': x,
+                    'yaxis': y,
+                    'fill': 'toself',
+                    'fillcolor': HOVER_FILL,
+                    'line': {'width': 0},
+                    'hoveron': 'fills',
+                    'hoverinfo': 'name',
+                    'hoverlabel': {'namelength': -1},
+                    'name': text,
+                }
+            )
 
     def line(self, axes, times, values, piece, **extra) -> None:
         x, y = axes
@@ -387,6 +423,19 @@ class _Drawing:
             'showarrow': False,
             'font': {'size': self.size},
         }
+
+
+def _hover_text(piece) -> str:
+    """All of a piece in a few lines: what it is, when it starts and how long it runs,
+    and what the drawing assumes."""
+    start = shown(piece.start * ureg.s)
+    when = (
+        f'from {start} on'
+        if piece.endless or piece.end == inf
+        else f'from {start} for {shown((piece.end - piece.start) * ureg.s)}'
+    )
+    lines = [piece.label, when, piece.typical, piece.assumption]
+    return '<br>'.join(_subscripts(line) for line in lines if line)
 
 
 def _row_order(row: str) -> float:

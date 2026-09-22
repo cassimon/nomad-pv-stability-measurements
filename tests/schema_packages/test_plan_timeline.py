@@ -55,6 +55,16 @@ def red_notes(layout) -> list[str]:
     ]
 
 
+def drawn(figure) -> list[dict]:
+    """The traces that draw a value or a band: not the empty ones that frame a row,
+    nor the areas that only answer hovering."""
+    return [
+        trace
+        for trace in figure['data']
+        if trace['y'][0] is not None and trace.get('hoveron') != 'fills'
+    ]
+
+
 def row_labels(layout) -> list[dict]:
     """The row labels, top to bottom: turned on their side, left of the rows."""
     labels = [
@@ -96,7 +106,8 @@ def test_a_protocol_shows_its_timeline(normalized):
         )
     )
 
-    timeline, iteration = protocol.figures
+    [timeline] = protocol.figures
+    [iteration] = protocol.instructions[1].figures
     layout = timeline.figure['layout']
     texts = [note['text'] for note in layout['annotations']]
 
@@ -106,11 +117,9 @@ def test_a_protocol_shows_its_timeline(normalized):
     assert {'MPP', '<b>⋯</b>'} <= set(texts)
     assert 'indefinitely' not in texts
     assert layout['title']['text'] == '<b>light–dark</b>'
-    values = [
-        y for trace in timeline.figure['data'] for y in trace['y'] if y is not None
-    ]
+    values = [y for trace in drawn(timeline.figure) for y in trace['y']]
     assert max(values) == SUN
-    # The routine's own figure: one light–dark cycle.
+    # The routine's own figure, where it is opened: one light–dark cycle.
     assert iteration.figure['layout']['xaxis']['range'] == [0, 2]
     # Irradiance on top, the load at the bottom; 0 W/m² a little above the axis's
     # start, so a line there is drawn whole.
@@ -128,6 +137,7 @@ def test_a_block_whose_iteration_never_ends_gets_no_figure_of_its_own(normalized
     protocol = normalized(StabilityProtocol(instructions=[cycling]))
 
     assert [figure.label for figure in protocol.figures] == ['Timeline']
+    assert not cycling.figures
 
 
 def test_bounds_are_a_band_and_a_protocol_without_end_goes_on(normalized):
@@ -144,7 +154,7 @@ def test_bounds_are_a_band_and_a_protocol_without_end_goes_on(normalized):
     )
 
     [timeline] = protocol.figures
-    fill, lower, upper = (t for t in timeline.figure['data'] if t['y'][0] is not None)
+    fill, lower, upper = drawn(timeline.figure)
     texts = [note['text'] for note in timeline.figure['layout']['annotations']]
 
     assert (lower['y'], upper['y']) == ([800, 800], [SUN, SUN])
@@ -161,7 +171,7 @@ def test_a_set_point_is_drawn_with_its_tolerance_around_it(normalized):
     protocol = normalized(StabilityProtocol(instructions=[room]))
 
     [timeline] = protocol.figures
-    area, value = (t for t in timeline.figure['data'] if t['y'][0] is not None)
+    area, value = drawn(timeline.figure)
 
     assert area['fill'] == 'toself'
     assert (min(area['y']), max(area['y'])) == pytest.approx((19, 27))  # °C
@@ -180,7 +190,7 @@ def test_a_pace_the_protocol_does_not_state_is_drawn_dashed_and_said_in_red(
     protocol = normalized(StabilityProtocol(instructions=[cycling]))
 
     [timeline] = protocol.figures
-    [ramp] = (t for t in timeline.figure['data'] if t['y'][0] is not None)
+    [ramp] = drawn(timeline.figure)
     [said] = (
         note
         for note in timeline.figure['layout']['annotations']
@@ -206,9 +216,10 @@ def test_a_typical_length_is_drawn_as_its_length_and_said_in_red_and_in_the_titl
     routine = CountingRepeatingBlock(repeat_n=2, sub_instructions=[light])
     protocol = normalized(StabilityProtocol(name='soak', instructions=[routine]))
 
-    timeline, iteration = protocol.figures
+    [timeline] = protocol.figures
+    [iteration] = routine.figures
     layout = timeline.figure['layout']
-    lines = [t for t in timeline.figure['data'] if t['y'][0] is not None]
+    lines = drawn(timeline.figure)
 
     assert layout['title']['text'] == f'<b>soak · {about}2 h</b>'
     assert iteration.figure['layout']['title']['text'].endswith(f' · {about}1 h</b>')
@@ -231,6 +242,31 @@ def one_after_another(*instructions) -> StabilityProtocol:
             )
         ]
     )
+
+
+def test_every_piece_tells_all_of_itself_where_hovered_even_if_too_narrow_to_write(
+    normalized,
+):
+    brief = HoldCurrent(
+        set_point=0.02 * ureg.ampere,
+        duration=Duration(kind='fixed', value=1 * ureg.minute),
+    )
+    protocol = normalized(
+        one_after_another(
+            HoldVoltage(
+                set_point=0.8 * ureg.volt,
+                duration=Duration(kind='fixed', value=1000 * ureg.hour),
+            ),
+            brief,
+        )
+    )
+    figure = protocol.figures[0].figure
+    written = [note['text'] for note in figure['layout']['annotations']]
+    hovered = [t['name'] for t in figure['data'] if t.get('hoveron') == 'fills']
+
+    assert 'Hold current 0.02 A for 1 min' not in written
+    assert 'Hold current 0.02 A for 1 min<br>from 1000 h for 1 min' in hovered
+    assert 'Hold voltage 0.8 V for 1000 h<br>from 0 s for 1000 h' in hovered
 
 
 def test_the_electrical_load_is_one_row_whichever_quantity_is_set(normalized):
@@ -258,7 +294,7 @@ def test_values_in_different_units_on_one_row_are_written_not_drawn(normalized):
     texts = [note['text'] for note in figure['layout']['annotations']]
 
     # A volt and an ampere share no axis: each is a bar with its label.
-    assert not [y for trace in figure['data'] for y in trace['y'] if y is not None]
+    assert not drawn(figure)
     assert {'Hold voltage 0.8 V for 1 h', 'Hold current 0.02 A for 1 h'} <= set(texts)
     assert 'open circuit' in texts  # what had no value keeps its own text
     assert [note['text'] for note in row_labels(figure['layout'])] == [
