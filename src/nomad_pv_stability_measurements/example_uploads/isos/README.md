@@ -71,6 +71,12 @@ routine:                   # only what changes during the test
 measurement schedule** in any file, because the standard fixes none — add your own. A light–dark
 cycle states its period, and repeats for as long as your test runs.
 
+- **Every duration says what kind it is.** A setting, in `channel_settings` or `instructions`,
+  lasts as long as the test unless it says otherwise. In the `routine`, every instruction writes
+  its `duration`: a length (`1 h`), a typical one where the protocol fixes none
+  (`typical 1 min`, e.g. a JV scan), `open-ended` where it goes on until the test is stopped
+  (the temperature cycles of ISOS-T and ISOS-LT), or `whole block` where it lasts as long as
+  the parallel block it is in. A ramp given a `rate` works its duration out.
 - **Every test here runs in ambient air.** Only the protocols marked "I" run in an inert
   atmosphere, so the oxygen is written as `reference_point: ambient air`, stated but neither
   regulated nor measured.

@@ -62,7 +62,10 @@ def test_problems_are_logged_with_their_path_and_the_rest_still_loads(tmp_path):
 
     StabilityYamlParser().parse(str(mainfile), archive, logger)
 
-    [(message,), details] = logger.error.call_args
-    assert details == {'path': 'data.routine.instructions[0].duraton'}
-    assert 'Did you mean `duration`?' in message
+    logged = {
+        details['path']: message for (message,), details in logger.error.call_args_list
+    }
+    assert 'Did you mean `duration`?' in logged['data.routine.instructions[0].duraton']
+    # And so it wrote none.
+    assert 'writes its `duration`' in logged['data.routine.instructions[0]']
     assert isinstance(archive.data.instructions[0].sub_instructions[0], HoldTemperature)

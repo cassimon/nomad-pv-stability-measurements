@@ -54,15 +54,29 @@ def entry(cls, **fields) -> dict:
     return {'m_def': m_def(cls), **fields}
 
 
+#: What a protocol's own instruction lasts where it writes no duration.
+WHOLE_BLOCK = {'kind': 'whole_block'}
+HOUR = {'kind': 'fixed', 'value': 3600.0}
+
+
 def instructions(*authored):
-    """Authored instructions, read the way a block reads them."""
-    return translate_section({'instructions': list(authored)}, CountingRepeatingBlock)
+    """Authored instructions, read the way a protocol reads its own."""
+    return translate_section({'instructions': list(authored)}, StabilityProtocol)
+
+
+def read_as(translation) -> list[dict]:
+    """The instructions read, without the duration a setting is given where it writes
+    none: the tests using it are about something else."""
+    return [
+        {key: value for key, value in each.items() if value != WHOLE_BLOCK}
+        for each in translation.archive['instructions']
+    ]
 
 
 def only(translation) -> dict:
     """The one instruction a translation without problems produced."""
     assert translation.problems == []
-    [instruction] = translation.archive['sub_instructions']
+    [instruction] = read_as(translation)
     return instruction
 
 
@@ -86,12 +100,7 @@ def only(translation) -> dict:
         ),
         (
             {'channel': 'mechanical', 'bend_radius': '2 m', 'duration': '1 h'},
-            entry(
-                HoldBendRadius,
-                control=True,
-                set_point=2.0,
-                duration={'kind': 'fixed', 'value': 3600.0},
-            ),
+            entry(HoldBendRadius, control=True, set_point=2.0, duration=HOUR),
         ),
         (
             {'channel': 'temperature', 'monitor': True, 'control': False},
@@ -107,7 +116,7 @@ def test_a_channel_logged_as_a_whole_is_one_instruction_per_variable():
     translation = instructions({'channel': 'electrical_load', 'monitor': True})
 
     assert translation.problems == []
-    assert translation.archive['sub_instructions'] == [
+    assert read_as(translation) == [
         entry(cls, monitor=True) for cls in (HoldVoltage, HoldCurrent, HoldResistance)
     ]
 
@@ -255,12 +264,12 @@ def test_humidity_is_relative_or_absolute(authored, expected):
     ],
 )
 def test_how_a_block_repeats_and_runs(authored, expected):
-    temperature = {'channel': 'temperature'}
+    temperature = {'channel': 'temperature', 'duration': '1 h'}
     translation = instructions({**authored, 'instructions': [temperature]})
 
     assert only(translation) == {
         **expected,
-        'sub_instructions': [entry(HoldTemperature)],
+        'sub_instructions': [entry(HoldTemperature, duration=HOUR)],
     }
 
 
@@ -291,7 +300,7 @@ def test_how_a_block_repeats_and_runs(authored, expected):
 )
 def test_what_a_block_cannot_say_is_reported(authored, path, reported):
     translation = instructions(
-        {**authored, 'instructions': [{'channel': 'temperature'}]}
+        {**authored, 'instructions': [{'channel': 'temperature', 'duration': '1 h'}]}
     )
 
     [problem] = translation.problems
@@ -317,7 +326,9 @@ def test_settings_come_first_then_the_routine():
                 'duration': '1000 h',
                 'channel_settings': {'temperature': {'hold': '65 °C'}},
                 'routine': {
-                    'instructions': [{'channel': 'irradiation', 'hold': 'dark'}]
+                    'instructions': [
+                        {'channel': 'irradiation', 'hold': 'dark', 'duration': '1 h'}
+                    ]
                 },
             }
         }
@@ -375,7 +386,7 @@ def test_a_value_that_cannot_be_read_is_a_problem_and_the_instruction_stays(
     [problem] = translation.problems
     assert problem.path == f'instructions[0].{path}'
     assert reported in problem.message
-    assert len(translation.archive['sub_instructions']) == 1
+    assert len(translation.archive['instructions']) == 1
 
 
 @pytest.mark.parametrize(
@@ -400,15 +411,81 @@ def test_an_instruction_that_cannot_be_placed_is_left_out(authored, reported):
 
     [problem] = translation.problems
     assert reported in problem.message
-    assert translation.archive['sub_instructions'] == []
+    assert translation.archive.get('instructions', []) == []
 
 
 def test_the_former_word_commands_is_reported_and_still_read():
     translation = translate_section(
-        {'commands': [{'channel': 'temperature'}]}, CountingRepeatingBlock
+        {'commands': [{'channel': 'temperature', 'duration': '1 h'}]},
+        CountingRepeatingBlock,
     )
 
     [problem] = translation.problems
     assert problem.path == 'commands'
     assert 'write `instructions`' in problem.message
-    assert translation.archive['sub_instructions'] == [entry(HoldTemperature)]
+    assert translation.archive['sub_instructions'] == [
+        entry(HoldTemperature, duration=HOUR)
+    ]
+
+
+# Durations.
+
+
+@pytest.mark.parametrize(
+    ('written', 'duration'),
+    [
+        ('1 h', HOUR),
+        ('typical 1 min', {'kind': 'typical', 'value': 60.0}),
+        ('open-ended', {'kind': 'open_ended'}),
+        ('whole block', WHOLE_BLOCK),
+    ],
+)
+def test_a_duration_is_a_length_or_says_what_kind_it_is(written, duration):
+    translation = translate_section(
+        {'instructions': [{'channel': 'temperature', 'duration': written}]},
+        CountingRepeatingBlock,
+    )
+
+    assert translation.problems == []
+    assert translation.archive['sub_instructions'][0]['duration'] == duration
+
+
+def test_a_setting_written_without_a_duration_lasts_as_long_as_the_protocol():
+    translation = translate(
+        {
+            'data': {
+                'channel_settings': {'temperature': {'hold': '65 °C'}},
+                'instructions': [{'channel': 'irradiation', 'hold': 'dark'}],
+            }
+        }
+    )
+
+    assert translation.problems == []
+    durations = [
+        each['duration'] for each in translation.archive['data']['instructions']
+    ]
+    assert durations == [WHOLE_BLOCK, WHOLE_BLOCK]
+
+
+@pytest.mark.parametrize(
+    ('ramp', 'reported'),
+    [
+        ({'from': '25 °C', 'to': '85 °C'}, ['writes its `duration`']),
+        # A rate works the duration out.
+        ({'from': '25 °C', 'to': '85 °C', 'rate': '60 K/h'}, []),
+    ],
+)
+def test_an_instruction_in_the_routine_writes_its_duration(ramp, reported):
+    translation = translate(
+        {
+            'data': {
+                'routine': {'instructions': [{'channel': 'temperature', 'ramp': ramp}]}
+            }
+        }
+    )
+
+    assert [problem.path for problem in translation.problems] == [
+        'data.routine.instructions[0]' for _ in reported
+    ]
+    for problem, fragment in zip(translation.problems, reported):
+        assert fragment in problem.message

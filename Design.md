@@ -3528,7 +3528,7 @@ descriptions, where an author choosing the mode reads it.
 
 ## 33. Durations say what kind they are
 
-**Status: settled in review; steps 1–3 of §33.8 built.** Supersedes §32 and the first bullet
+**Status: settled in review; steps 1–4 of §33.8 built.** Supersedes §32 and the first bullet
 of §23.1.
 
 ### 33.1 Why
@@ -3647,8 +3647,12 @@ duration: whole block       # whole_block
 
 - A missing duration in `channel_settings` or in protocol-level `instructions` is `whole_block`:
   these are the protocol's settings, and the protocol runs in parallel (§23.2).
-- In the `routine`, a single instruction must write its duration; a missing one is reported with
-  the four spellings above.
+- Inside any block — the `routine` and whatever it contains — a single instruction must write
+  its duration; a missing one is reported, at the instruction's path, with the four spellings
+  above. A ramp written with a `rate` is the exception: it works its duration out. (The schema
+  reports the missing duration too; the translator's message is the one that names the file's
+  spellings.) The rule is structural — the protocol's own instructions against those in a
+  block — rather than tied to the word `routine`.
 - `derived` is never written. Blocks still take no `duration` (§23.3); `repeat_for` stays.
 
 The ISOS files need one line each where a routine instruction had none: `duration: open-ended`
@@ -3675,7 +3679,8 @@ instruction already states a fixed duration. `tests/data/tree.stability.yaml` ge
    *Built: only the titles of the ISOS figures changed — the 54 LC iteration figures now end in
    their pass's length.*
 4. The YAML words, the rule for the routine, and the tags in the six T/LT files. The expected
-   archives must not change.
+   archives must not change. *Built: they did not; `duration: open-ended` on the six cycling
+   ramps, the README says how durations are written.*
 5. A server upload of all ISOS variants, and CLAUDE.md's rules brought up to date.
 6. Later, separately: one `RepeatingBlock` instead of three, now that timed is `fixed` and
    indefinite `open_ended`.

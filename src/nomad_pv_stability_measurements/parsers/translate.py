@@ -40,6 +40,7 @@ from nomad_pv_stability_measurements.schema_packages.base_instructions import (
 from nomad_pv_stability_measurements.schema_packages.general import (
     FIXED,
     OPEN_ENDED,
+    TYPICAL,
     WHOLE_BLOCK,
     CountingRepeatingBlock,
     Duration,
@@ -87,6 +88,12 @@ RETIRED_REPEATS = {
     'until_end_of_duration': 'a timed block, `repeat_for: 12 h`',
     'n_times': 'the number itself, `repeat: 5`',
 }
+#: How a duration is written where it is no fixed length.
+DURATION_WORDS = {'open-ended': OPEN_ENDED, 'whole block': WHOLE_BLOCK}
+#: What a typical length is written with: `typical 1 min`.
+TYPICAL_WORD = 'typical'
+#: Every way a single instruction in a block may write its duration.
+DURATION_SPELLINGS = '`1 h`, `typical 1 min`, `open-ended` or `whole block`'
 #: The former word for `instructions` (§25).
 RETIRED_INSTRUCTIONS = 'commands'
 
@@ -171,30 +178,30 @@ def _protocol(authored: dict, cls: type, path: str, problems: list) -> dict:
     ]
     if routine is not None:
         instructions += _instruction(routine, _at(path, 'routine'), problems)
-    mode = bare.get(
-        'instruction_execution_mode',
-        cls.m_def.all_quantities['instruction_execution_mode'].default,
-    )
-    _default_durations(instructions, mode)
     if instructions:
         bare['instructions'] = instructions
     return bare
 
 
-def _default_durations(instructions: list, mode: str) -> None:
-    """A single instruction written without a duration lasts as long as its block where
-    that runs in parallel, and never finishes where it runs in sequence. A ramp written
-    with a rate works its own out."""
-    for each in instructions:
+def _settled(reads: list, path: str, in_block: bool, problems: list) -> list:
+    """`reads`, the instructions one entry became, each with a duration where it wrote
+    none. The protocol's own instructions — its settings — last as long as it; inside a
+    block each states its own, unless a ramp works it out from its rate."""
+    for each in reads:
         cls = _class_of(each)
-        if cls is not None and issubclass(cls, InstructionBlock):
-            _default_durations(
-                each.get('sub_instructions', []),
-                each.get('sub_instruction_execution_mode', 'sequential'),
+        if cls is None or issubclass(cls, InstructionBlock) or 'duration' in each:
+            continue
+        if not in_block:
+            each['duration'] = {'kind': WHOLE_BLOCK}
+        elif 'ramp_rate' not in each:
+            problems.append(
+                Problem(
+                    path,
+                    f'an instruction in a block writes its `duration`: '
+                    f'{DURATION_SPELLINGS}.',
+                )
             )
-        elif 'duration' not in each and 'ramp_rate' not in each:
-            kind = WHOLE_BLOCK if mode == 'parallel' else OPEN_ENDED
-            each['duration'] = {'kind': kind}
+    return reads
 
 
 def _class_of(bare: dict) -> type | None:
@@ -227,7 +234,8 @@ def _settings_instructions(settings, path: str, problems: list) -> list:
                     f'`channel: {written}` does not match the slot `{channel}`.',
                 )
             )
-        instructions += _instruction({**block, 'channel': channel}, where, problems)
+        read = _instruction({**block, 'channel': channel}, where, problems)
+        instructions += _settled(read, where, False, problems)
     return instructions
 
 
@@ -269,7 +277,8 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
             if read is not None:
                 bare[key] = read
         elif key in sub_sections and sub_sections[key].repeats:
-            bare[key] = _instruction_list(value, where, problems)
+            in_block = issubclass(cls, InstructionBlock)
+            bare[key] = _instruction_list(value, where, in_block, problems)
         elif key in sub_sections:
             nested = sub_sections[key].sub_section.section_cls
             bare[key] = _section(value, nested, where, problems)
@@ -279,7 +288,8 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
 
 
 def _duration(value, cls: type, where: str, problems: list, bare: dict) -> None:
-    """`duration: 1 h` as a fixed duration; a bare archive's section as itself. A
+    """`duration: 1 h` as a fixed duration, `typical 1 min` as a typical one, and
+    `open-ended` or `whole block` as those kinds; a bare archive's section as itself. A
     block takes none: its duration follows from its instructions."""
     if issubclass(cls, InstructionBlock):
         problems.append(
@@ -292,10 +302,15 @@ def _duration(value, cls: type, where: str, problems: list, bare: dict) -> None:
         )
     elif isinstance(value, dict):
         bare['duration'] = _section(value, Duration, where, problems)
+    elif isinstance(value, str) and value.strip().lower() in DURATION_WORDS:
+        bare['duration'] = {'kind': DURATION_WORDS[value.strip().lower()]}
     else:
-        read = _value(value, Duration, 'value', where, problems)
+        kind, text = FIXED, value
+        if isinstance(value, str) and value.strip().lower().startswith(TYPICAL_WORD):
+            kind, text = TYPICAL, value.strip()[len(TYPICAL_WORD) :]
+        read = _value(text, Duration, 'value', where, problems)
         if read is not None:
-            bare['duration'] = {'kind': FIXED, 'value': read}
+            bare['duration'] = {'kind': kind, 'value': read}
 
 
 def _renamed(written: str, cls: type) -> str:
@@ -343,15 +358,16 @@ def _repeat(value, cls: type, where: str, problems: list, bare: dict) -> None:
     problems.append(Problem(where, message))
 
 
-def _instruction_list(entries, path: str, problems: list) -> list:
+def _instruction_list(entries, path: str, in_block: bool, problems: list) -> list:
     if not isinstance(entries, list):
         problems.append(Problem(path, 'expected a list of instructions.'))
         return []
-    return [
-        read
-        for index, entry in enumerate(entries)
-        for read in _instruction(entry, f'{path}[{index}]', problems)
-    ]
+    instructions = []
+    for index, entry in enumerate(entries):
+        where = f'{path}[{index}]'
+        read = _instruction(entry, where, problems)
+        instructions += _settled(read, where, in_block, problems)
+    return instructions
 
 
 def _instruction(entry, path: str, problems: list) -> list[dict]:

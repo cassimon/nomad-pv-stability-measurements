@@ -20,6 +20,8 @@ data:
     instructions:
       - channel: temperature
         monitor: true
+        # It goes on cycling until the test is stopped.
+        duration: open-ended
         ramp:
           from: RT
           options:
