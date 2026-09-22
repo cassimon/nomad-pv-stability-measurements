@@ -69,7 +69,7 @@ class StabilityProtocol(PlotSection, TimePlan):
     """A PV stability test protocol: the instructions a test runs.
 
     All of the protocol's own instructions run in parallel. It shows its timeline: what
-    it asks for over time, for a reader of the standard (Design.md §29).
+    it asks for over time, for a reader of the standard.
     """
 
     instruction_execution_mode = Quantity(
@@ -77,8 +77,7 @@ class StabilityProtocol(PlotSection, TimePlan):
         default='parallel',
         description='How the instructions are executed. `parallel` by default: the '
         'settings and the routine all start together, and the settings last as long as '
-        "the protocol: its `duration` where written, else the routine's (Design.md "
-        '§23.2, §32).',
+        "the protocol: its `duration` where written, else the routine's.",
     )
 
     standard = Quantity(

@@ -35,9 +35,8 @@ class Instruction(ArchiveSection):
     """Something to be done, which is completed after its `duration`.
 
     Instructions are consistent on their own: a block's duration is always derived from
-    what it contains. Only a `Plan`, or a timed block, stops its instructions early. The
-    one thing a sibling decides is how long a single instruction without a duration lasts
-    in a parallel block (Design.md §32).
+    what it contains. However, in some instances a `TimePlan`, or a timed block, can stop
+    an instruction before it finishes, just like a process in a computer.
     """
 
     m_def = Section(
@@ -98,7 +97,7 @@ class Instruction(ArchiveSection):
 class SingleInstruction(Instruction):
     """One instruction that contains no others.
 
-    Without a `duration` it is a condition: in a parallel block, or a plan run in
+    Without a `duration` it is a setting: in a parallel block, or a plan run in
     parallel, it lasts as long as the rest of it; anywhere else it never finishes.
     """
 
@@ -184,14 +183,16 @@ class InstructionBlock(Instruction):
     sub_instruction_execution_mode = Quantity(
         type=MEnum('sequential', 'parallel'),
         default='sequential',
-        description='Whether the sub-instructions are executed one after another '
-        '(`sequential`) or all at once (`parallel`). This also decides what an instruction '
-        'without a `duration` means. `parallel`: a single instruction without one is a '
-        'condition, held for as long as the others run, so the block lasts as long as its '
-        'longest other sub-instruction; it never finishes only if a sub-block never does, '
-        'or if nothing else is there. `sequential`: an instruction without a duration never '
-        'finishes, so the block never does and whatever follows it never runs. To hold a '
-        'condition during a phase, put it in a parallel block beside what the phase does.',
+        description='Whether the sub-instructions run one after another (`sequential`) '
+        "or all at once (`parallel`). This decides the block's `duration`. "
+        '`sequential`: the sum of the durations of the sub-instructions. An instruction '
+        'without a duration never finishes, so the block never finishes either and '
+        'whatever follows it never runs. `parallel`: the longest duration among the '
+        'sub-instructions. A single instruction without a duration is a setting: it '
+        'is held for as long as the block runs and does not count toward its duration. '
+        'A parallel block therefore never finishes only if a sub-block in it never '
+        'finishes, or if it contains nothing but settings. To hold a setting during '
+        'a phase, put it in a parallel block beside what the phase does.',
     )
 
     def normalize(self, archive, logger):
@@ -520,11 +521,13 @@ class TimePlan(Plan):
     instruction_execution_mode = Quantity(
         type=MEnum('sequential', 'parallel'),
         default='sequential',
-        description='How the instructions are supposed to be executed: `sequential` '
-        'means one after another, `parallel` means they all start at once, but may '
-        'finish at different times. In parallel, a single instruction without a '
-        '`duration` lasts as long as the plan; one after another, it never finishes and '
-        'what follows never runs.',
+        description='Whether the instructions run one after another (`sequential`) or '
+        'all at once (`parallel`). Where the plan has no written `duration`, this '
+        'decides it, as for a block. `sequential`: the sum of the durations of the '
+        'instructions. An instruction without a duration never finishes, and what '
+        'follows it never runs. `parallel`: the longest duration among the instructions. '
+        'A single instruction without a duration is a condition, held for as long as '
+        'the plan runs.',
     )
 
     def combine_instruction_durations(self):
