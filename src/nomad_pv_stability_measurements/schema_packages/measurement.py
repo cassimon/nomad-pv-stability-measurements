@@ -7,13 +7,15 @@ conditions and output over time is a `StabilitySeriesStep`; a J–V sweep is a
 """
 
 import numpy as np
+from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.basesections.v2 import (
     ActivityStep,
     InstrumentReference,
     SystemReference,
 )
 from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
-from nomad.metainfo import MEnum, Quantity, SchemaPackage
+from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
+from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.protocol import (
     StabilityActivity,
@@ -33,7 +35,8 @@ class StabilitySeriesStep(PlotSection, ActivityStep):
 
     One array per quantity, one value per sample, each as long as `time`. Only what
     was recorded is filled in: a test in the dark has no `irradiance`, one without
-    MPP tracking no `voltage`, `current_density` or `power_density`. It shows what the
+    MPP tracking no `voltage`, `current_density` or `power_density`. `controlled` says
+    which of them were controlled; the rest were only monitored. It shows what the
     electrical load read over time, where it read anything.
     """
 
@@ -92,6 +95,21 @@ class StabilitySeriesStep(PlotSection, ActivityStep):
         'power_density',
     )
 
+    controlled = Quantity(
+        type=MEnum(
+            'temperature',
+            'irradiance',
+            'relative_humidity',
+            'voltage',
+            'current_density',
+        ),
+        shape=['*'],
+        description='Which recorded quantities were controlled during the step: held '
+        'or driven to a value, not only logged. Every other recorded quantity was only '
+        'monitored. Under MPP tracking the voltage is controlled and the current '
+        'follows; the power is never controlled, so it cannot be named here.',
+    )
+
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
         filled = [name for name in self.recorded if getattr(self, name) is not None]
@@ -122,7 +140,7 @@ class StabilitySeriesStep(PlotSection, ActivityStep):
             return []
         hours = self.time.to('hour').magnitude.tolist()
         figure = over_time_figure_for_plotting(
-            [(self.name, hours, recorded)], self.name or ''
+            [(self.name, hours, recorded, self.controlled or [])], self.name or ''
         )
         return [
             PlotlyFigure(label='Electrical output', index=0, open=True, figure=figure)
@@ -141,12 +159,73 @@ class StabilitySeriesStep(PlotSection, ActivityStep):
         }
 
 
+class JVFiguresOfMerit(ArchiveSection):
+    """What the J–V station reports of one scan: the figures of merit it worked out
+    from the curve. Taken as the station reports them, never worked out again here.
+    """
+
+    direction = Quantity(
+        type=MEnum('forward', 'reverse'),
+        description='Which scan of the sweep these figures are of.',
+    )
+    irradiance = Quantity(
+        type=np.float64,
+        unit='W/m^2',
+        description='The light on the cell during the scan; 1000 W/m² is one sun.',
+    )
+    open_circuit_voltage = Quantity(
+        type=np.float64,
+        unit='V',
+        description='The voltage where no current flows, V_oc.',
+    )
+    short_circuit_current_density = Quantity(
+        type=np.float64,
+        unit='A/m^2',
+        description='The current density at zero voltage, J_sc.',
+    )
+    fill_factor = Quantity(
+        type=np.float64,
+        unit='dimensionless',
+        description='The power at the maximum power point over V_oc · J_sc, as a '
+        'fraction: 0.8 is 80 %.',
+    )
+    efficiency = Quantity(
+        type=np.float64,
+        unit='dimensionless',
+        description='The power conversion efficiency, PCE: the power at the maximum '
+        'power point over the power of the light, as a fraction: 0.2 is 20 %.',
+    )
+    potential_at_maximum_power_point = Quantity(
+        type=np.float64,
+        unit='V',
+        description='The voltage at the maximum power point, V_mpp.',
+    )
+    current_density_at_maximum_power_point = Quantity(
+        type=np.float64,
+        unit='A/m^2',
+        description='The current density at the maximum power point, J_mpp.',
+    )
+    series_resistance = Quantity(
+        type=np.float64,
+        unit='ohm*m^2',
+        description='The series resistance per area, from the slope of the curve '
+        'at open circuit.',
+    )
+    shunt_resistance = Quantity(
+        type=np.float64,
+        unit='ohm*m^2',
+        description='The shunt resistance per area, from the slope of the curve '
+        'at short circuit.',
+    )
+
+
 class JVSweepStep(PlotSection, ActivityStep):
     """A step that sweeps the voltage across the cell and records the current density.
 
     One row per point: `voltage`, `current_density` and `direction` are equally long.
     A reverse and a forward sweep are listed together, `direction` telling them apart,
-    and are shown as one curve each.
+    and are shown as one curve each. What the J–V station worked out of each scan is in
+    `figures_of_merit`.
     """
 
     voltage = Quantity(
@@ -167,6 +246,12 @@ class JVSweepStep(PlotSection, ActivityStep):
         shape=['*'],
         description='Which way the voltage was swept at each point: `forward` from '
         'short circuit towards open circuit, `reverse` back.',
+    )
+
+    figures_of_merit = SubSection(
+        section_def=JVFiguresOfMerit,
+        repeats=True,
+        description='The figures of merit the J–V station reported, one per scan.',
     )
 
     def normalize(self, archive, logger):
@@ -222,10 +307,12 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         self.figures = self.figures_for_plotting(logger)
 
     def figures_for_plotting(self, logger) -> list[PlotlyFigure]:
-        """Everything the series recorded, on one time axis in hours since the test
-        started, with a dashed line where each J–V sweep was taken; nothing where no
-        series recorded anything. A step with no `start_time` has no place on the axis
-        and is left out, with a warning."""
+        """The whole test on one time axis, in hours since it started: on top the
+        efficiency of each J–V scan as the station reported it, one line per direction,
+        then the output and the conditions the series recorded, each in the colour of
+        its role, controlled or only monitored, and a dashed line where
+        each J–V sweep was taken. Nothing where there is nothing to draw. A step with no
+        `start_time` has no place on the axis and is left out, with a warning."""
         placed = [step for step in self.steps if step.start_time is not None]
         for step in self.steps:
             if step.start_time is None and isinstance(
@@ -247,19 +334,31 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
                 step.name,
                 (since_start(step) + step.time.to('hour').magnitude).tolist(),
                 step.recorded_for_plotting(ROWS),
+                step.controlled or [],
             )
             for step in placed
             if isinstance(step, StabilitySeriesStep)
         ]
         pieces = [piece for piece in pieces if piece[2]]
-        if not pieces:
+        sweeps = [step for step in placed if isinstance(step, JVSweepStep)]
+        reported = {}
+        for step in sweeps:
+            for scan in step.figures_of_merit:
+                if scan.direction is not None and scan.efficiency is not None:
+                    reported.setdefault(scan.direction, []).append(
+                        (since_start(step), scan.efficiency.to('').magnitude)
+                    )
+        scans = {
+            direction: (
+                [at for at, _ in points],
+                [value for _, value in points] * ureg(''),
+            )
+            for direction, points in reported.items()
+        }
+        if not pieces and not scans:
             return []
-        marks = [
-            (since_start(step), 'J–V')
-            for step in placed
-            if isinstance(step, JVSweepStep)
-        ]
-        figure = over_time_figure_for_plotting(pieces, self.name or '', marks)
+        marks = [(since_start(step), 'J–V') for step in sweeps]
+        figure = over_time_figure_for_plotting(pieces, self.name or '', marks, scans)
         return [PlotlyFigure(label='Over time', index=0, open=True, figure=figure)]
 
     def read_files(
@@ -270,8 +369,11 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
 
         `read_protocol(path)` returns `{'run': {...}, 'steps': [...]}`; each step
         names its `kind`, `stability_series` or `jv`, and the `file` the matching
-        function reads into one array per column. Returns what had no place here, one
-        message each, so that nothing is left out unsaid.
+        function reads into one array per column. A J–V file may also hand back
+        `figures_of_merit`, a table of what the station reported, one row per scan. A
+        series step may say which of its quantities were `controlled`.
+        Returns what had no place here, one message each, so that nothing is left out
+        unsaid.
         """
         protocol = read_protocol(path)
         run = protocol['run']
@@ -297,15 +399,50 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
                 continue
             section_class, read = readers[step['kind']]
             section = section_class(name=step.get('name'), start_time=step.get('start'))
-            problems += _fill_columns(section, read(step['file']), step.get('name'))
+            if step.get('controlled') is not None:
+                if isinstance(section, StabilitySeriesStep):
+                    section.controlled = list(step['controlled'])
+                else:
+                    problems.append(
+                        f'step `{step.get("name")}` says what was controlled, which '
+                        'only a stability series has a place for.'
+                    )
+            columns = dict(read(step['file']))
+            reported = columns.pop('figures_of_merit', None)
+            problems += _fill_columns(section, columns, step.get('name'))
+            if reported is not None and isinstance(section, JVSweepStep):
+                scans = []
+                for row in _rows(reported):
+                    scans.append(JVFiguresOfMerit())
+                    problems += _fill_columns(scans[-1], row, step.get('name'))
+                section.figures_of_merit = scans
+            elif reported is not None:
+                problems.append(
+                    f'step `{step.get("name")}` has figures of merit, which only a '
+                    'J–V sweep has a place for.'
+                )
             steps.append(section)
         self.steps = steps
         return problems
 
 
+def _rows(table: dict) -> list[dict]:
+    """A table of columns as its rows, each a value per column: text as `str`."""
+    count = len(next(iter(table.values()), []))
+    return [
+        {
+            name: str(values[index])
+            if isinstance(values, np.ndarray) and values.dtype.kind == 'U'
+            else values[index]
+            for name, values in table.items()
+        }
+        for index in range(count)
+    ]
+
+
 def _fill_columns(section, columns: dict, step_name) -> list[str]:
     """Each column into the quantity of its name; a column with no such quantity is
-    reported, not dropped unsaid."""
+    reported, not dropped unsaid. A column is an array, or one value of a row."""
     own = set(section.m_def.all_quantities) - set(ActivityStep.m_def.all_quantities)
     problems = []
     for name, values in columns.items():

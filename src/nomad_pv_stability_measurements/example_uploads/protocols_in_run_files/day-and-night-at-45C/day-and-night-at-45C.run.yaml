@@ -37,6 +37,11 @@ steps:
   kind: stability_series
   file: 02_stability_series.csv
   start: '2026-08-17T09:12:00+01:00'
+  controlled:
+  - temperature
+  - irradiance
+  - voltage
+  - current_density
 - name: final J–V
   kind: jv
   file: 03_jv_final.csv

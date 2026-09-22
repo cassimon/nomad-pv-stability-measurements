@@ -3707,7 +3707,7 @@ instruction already states a fixed duration. `tests/data/tree.stability.yaml` ge
 
 ## 34. Stability runs — what a test recorded, read from an institution's files
 
-**Status: built, steps 1–9 of §34.7.** The first measured side of the plugin: until now only
+**Status: built, steps 1–11 of §34.7.** The first measured side of the plugin: until now only
 `StabilityActivity` bridged plan and activity (§23). Nothing here changes the protocol schema.
 
 ### 34.1 What a run is
@@ -3724,7 +3724,7 @@ several series; a J–V sweep between them is its own step.
 | Class | |
 |---|---|
 | `StabilitySeriesStep(ActivityStep)` | `time` (from the step's `start_time`), `temperature`, `irradiance`, `relative_humidity`, `voltage`, `current_density`, `power_density`, each `shape=['*']`; only what was recorded is filled in |
-| `JVSweepStep(ActivityStep)` | `voltage`, `current_density`, `direction` (`MEnum('forward', 'reverse')` per point); a reverse and a forward sweep listed together |
+| `JVSweepStep(ActivityStep)` | `voltage`, `current_density`, `direction` (`MEnum('forward', 'reverse')` per point); a reverse and a forward sweep listed together; `figures_of_merit`, one `JVFiguresOfMerit` per scan (§34.9) |
 | `StabilityMeasurement(StabilityActivity)` | `operator`, and `read_files(path, read_protocol, read_stability_series, read_jv_file)` |
 
 - Each step checks only itself (the dividing test, §13): arrays as long as `time`, `time` never
@@ -3758,7 +3758,7 @@ with the same interface, written out in `file_reading/file_reading_TEMPLATE.py`.
 | `is_stability_series_file(path)`, `is_jv_file(path)` | which kind of step file |
 | `read_protocol(path)` | `{'run': {...}, 'steps': [{name, kind, file, start}, ...]}`, dates as datetimes, each `file` a path that opens as it is |
 | `read_stability_series(path)` | one quantity array per column, by the name of the quantity it fills |
-| `read_jv_file(path)` | `voltage`, `current_density`, `direction` |
+| `read_jv_file(path)` | `voltage`, `current_density`, `direction`, and `figures_of_merit` (a table, one row per scan) where the file holds them (§34.9) |
 | `read_embedded_protocol(path)` | the protocol the run file describes itself, as a `*.stability.yaml` holds it (`{'data': {...}}`), or `None` where it names a protocol file (§34.4a) |
 
 - Plain functions, plain data (dicts, datetimes, pint quantities): an institution only fills in
@@ -3778,7 +3778,9 @@ with the same interface, written out in `file_reading/file_reading_TEMPLATE.py`.
 **SIM**, the simulated examples, writes a run as a folder: `<name>.run.yaml` (saying
 `institution: SIM`), `01_jv_initial.csv`, `02_stability_series.csv` (or one per phase,
 `02_stability_series_burn_in.csv`, with `03_jv_after_burn_in.csv` between), `…_jv_final.csv`.
-Every CSV names each column's unit in its header.
+Every CSV names each column's unit in its header. A J–V file starts with the figures of merit
+the station reported, one row per scan, then an empty line, then the curve
+(`read_csv_tables_with_units_in_header`).
 
 ### 34.4 Parsing — one parser for every institution
 
@@ -3872,9 +3874,13 @@ Seeded per run, so the files are reproduced exactly.
    `protocol_from_phases`, the child entry, the third run upload. *Built.*
 
 9. The figures of the steps (§34.8). *Built.*
+10. The figures of merit of the J–V scans, as reported, and the efficiency in the overview
+    (§34.9). *Built.*
+11. What a series controlled, and the colours of the roles in its figures (§34.10). *Built.*
 
-Not done, on purpose: the J–V sweeps of a run overlaid in one figure, figures of merit from the J–V sweeps (V_oc, J_sc, FF, PCE, T80), J–V scans as
-instructions of a protocol, and `deviations_from_plan` worked out from a run. Each is a step of
+Not done, on purpose: the J–V sweeps of a run overlaid in one figure, T80 and other figures of
+the whole run, the efficiency in NOMAD's `results` (searchable), J–V scans as instructions of a
+protocol, and `deviations_from_plan` worked out from a run. Each is a step of
 its own.
 
 ### 34.8 Figures of the steps
@@ -3896,8 +3902,8 @@ grid and background so both read on a light and a dark page.
 - A figure is drawn only from arrays that pass the step's own checks: a sweep whose arrays
   differ in length has none, and a series draws only quantities with one value per sample.
 - **The whole run:** `StabilityMeasurement` is a `PlotSection` too, with one figure, `Over time`:
-  every quantity any series recorded, one row each (electrical output, then irradiance,
-  temperature, humidity), on one axis in hours since the run's `datetime` (else its earliest
+  on top the efficiency of each J–V scan (§34.9), then every quantity any series recorded but
+  its power density, one row each (current density, voltage, irradiance, temperature, humidity), on one axis in hours since the run's `datetime` (else its earliest
   step). Each series is drawn where its `start_time` puts it, as a line of its own, so nothing is
   drawn across the time between two. Each J–V sweep is a dashed line at its `start_time`, marked
   `J–V`. A step without `start_time` has no place on the axis: it is left out, with a warning.
@@ -3907,6 +3913,65 @@ grid and background so both read on a light and a dark page.
   store its data a second time, in the figures; thinning is left until such a run exists.
 - *Not verified:* how GUI v2 shows figures of a subsection (the steps sit in
   `StabilityMeasurement.steps`); the archive holds them either way.
+
+### 34.9 Figures of merit of the J–V scans
+
+**Status: built.** Amends §34.8: the overview draws the efficiency of the J–V scans on top. A
+stability test is judged by the efficiency its J–V scans report. (For a while the overview left
+the series' power density out; *amended by §34.10*: it is back, as what MPP tracking records.)
+
+- **Reported, not worked out.** A J–V station works its figures of merit out of the curve and
+  writes them with it; they are **read from the file**, never computed again in the schema. A
+  file without them gives a sweep without them. (The simulator, standing in for the station,
+  works them out of the curve it writes.)
+- `JVFiguresOfMerit(ArchiveSection)`, repeating as `JVSweepStep.figures_of_merit`, one per scan:
+  `direction`, `irradiance`, `open_circuit_voltage`, `short_circuit_current_density`,
+  `fill_factor`, `efficiency`, `potential_at_maximum_power_point`,
+  `current_density_at_maximum_power_point`, `series_resistance`, `shunt_resistance`. Names from
+  `SolarCellJV` in nomad-hzb's `nomad-baseclasses` (`jvmeasurement.py`), so a mapping from it is
+  one to one; `light_intensity` is `irradiance` here as everywhere in this plugin, and the typo
+  `maximun` is not taken over. SI units as the rest of the plugin; fill factor and efficiency
+  as fractions (0.2 is 20 %), as relative humidity.
+- The blueprint keeps each scan as a section of its own with its curve; here the curve stays in
+  the sweep's arrays, told apart by `direction` (§34.2), and only the reported figures are one
+  section per scan.
+- **Reading:** `read_jv_file` may hand back `figures_of_merit`, a table of one row per scan by
+  quantity name. `read_files` fills one `JVFiguresOfMerit` per row; a column it has no place for
+  is reported like any other. SIM writes the table first in the J–V file, an empty line after
+  it.
+- **Overview:** the top row, `PCE (%)`, one line of dots per direction (reverse, forward in the
+  sweep's colours) at each sweep's `start_time`, where its dashed `J–V` mark is.
+
+### 34.10 Controlled or monitored — the colours of what was recorded
+
+**Status: built.** Amends §34.8 and §34.9: the over-time figures colour what was recorded by its
+**role**, in `ROLE_COLORS` of the protocol's timeline (§29, §36): `controlled` blue, `monitored`
+green. `specified` and `unspecified` do not occur: what was recorded was either regulated or only
+logged. Every row is in the colour of its role, no longer a colour of its own; the rows' labels
+say which quantity each is.
+
+- **What was controlled is a fact of the run**, so it is recorded with the run:
+  `StabilitySeriesStep.controlled`, an `MEnum` array of the recorded quantities that were
+  controlled during the step. **Every other recorded quantity was only monitored**, so an
+  institution that says nothing gets everything green, which is what a logger alone gives.
+- It is **not taken from the plan** at normalization: the plan says what should have been
+  controlled, the run what was (§34.4a keeps the two apart), and the protocol is another entry,
+  which need not be processed first.
+- The power density cannot be named: nothing controls it, the operating point sets it. Under MPP
+  tracking the voltage is controlled and current and power are monitored (§36.2); at a held
+  voltage the same; at open circuit (`VOCTracking`) the current is controlled, and a recorded
+  current density is shown so.
+- **Reading:** a step of the run file may say `controlled: [temperature, voltage]`; `read_files`
+  puts it into a series and reports it on any other step. The template shows it.
+- **SIM:** the simulator writes it per phase: the columns an instruction with `control: true`
+  controls (`controlled_quantities()`) at any time in that phase.
+- **Scan directions** move off the roles' colours: reverse orange, forward magenta, in the J–V
+  figure and the PCE row alike.
+- **One legend, as in the timeline:** a line of text above the rows on the right, a square per
+  role drawn, a dot per scan direction. Plotly's own legend is off.
+- **Hover:** each line is named `<step> · <quantity> · <role>`.
+- The **power density is back in the overview**, under the PCE row: it is what MPP tracking
+  records, and a run without tracking has no such row.
 
 ## 35. Open question — one entry per protocol
 

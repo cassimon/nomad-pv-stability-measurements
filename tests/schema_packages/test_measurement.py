@@ -10,10 +10,12 @@ from nomad.units import ureg
 import nomad_pv_stability_measurements
 from nomad_pv_stability_measurements.file_reading import file_reading_SIM
 from nomad_pv_stability_measurements.schema_packages.measurement import (
+    JVFiguresOfMerit,
     JVSweepStep,
     StabilityMeasurement,
     StabilitySeriesStep,
 )
+from nomad_pv_stability_measurements.schema_packages.plan_timeline import ROLE_COLORS
 from nomad_pv_stability_measurements.schema_packages.protocol import (
     StabilityActivity,
 )
@@ -107,24 +109,36 @@ ELECTRICAL = {
 
 
 @pytest.mark.parametrize(
-    ('recorded', 'rows'),
+    ('recorded', 'controlled', 'rows'),
     [
         (
             ['voltage', 'current_density', 'power_density'],
-            ['power density', 'current density', 'voltage'],
+            ['voltage'],
+            [
+                ('power density', 'monitored'),
+                ('current density', 'monitored'),
+                ('voltage', 'controlled'),
+            ],
         ),
-        (['current_density'], ['current density']),
-        ([], None),
+        (
+            ['voltage', 'current_density'],
+            ['voltage'],
+            [('current density', 'monitored'), ('voltage', 'controlled')],
+        ),
+        ([], [], None),
     ],
     ids=['maximum power point', 'fixed voltage', 'dark'],
 )
-def test_a_series_shows_the_electrical_output_it_recorded_over_time(
-    normalized, recorded, rows
+def test_a_series_shows_its_electrical_output_in_the_colour_of_its_role(
+    normalized, recorded, controlled, rows
 ):
+    """Controlled or only monitored, in the colours of a protocol's timeline; a
+    recorded quantity not said to be controlled was monitored."""
     step = normalized(
         StabilitySeriesStep(
             time=HOURS,
             temperature=[338.0] * 3 * ureg.kelvin,
+            controlled=controlled,
             **{name: ELECTRICAL[name] for name in recorded},
         )
     )
@@ -133,33 +147,59 @@ def test_a_series_shows_the_electrical_output_it_recorded_over_time(
         assert not step.figures
         return
     [figure] = step.figures
-    assert [trace['name'] for trace in figure.figure['data']] == rows
-    assert all(trace['x'] == [0.0, 1.0, 2.0] for trace in figure.figure['data'])
+    traces = figure.figure['data']
+    assert [trace['name'] for trace in traces] == [
+        f'{row} · {role}' for row, role in rows
+    ]
+    assert [trace['line']['color'] for trace in traces] == [
+        ROLE_COLORS[role] for _, role in rows
+    ]
+    assert all(trace['x'] == [0.0, 1.0, 2.0] for trace in traces)
 
 
 def test_a_measurement_shows_its_series_over_time_since_it_started(normalized):
-    """Each series where it ran, a J–V sweep as a mark where it was taken."""
+    """On top the efficiency each J–V scan reported, one line per direction, at the
+    sweep's mark; below, what the series recorded where it ran."""
+
+    def sweep(hour, reverse, forward):
+        return JVSweepStep(
+            start_time=START + timedelta(hours=hour),
+            figures_of_merit=[
+                JVFiguresOfMerit(direction='reverse', efficiency=reverse),
+                JVFiguresOfMerit(direction='forward', efficiency=forward),
+            ],
+        )
+
     measurement = normalized(
         StabilityMeasurement(
             datetime=START,
             steps=[
-                JVSweepStep(name='initial J–V', start_time=START),
+                sweep(0, 0.20, 0.19),
                 StabilitySeriesStep(
                     name='ageing',
                     start_time=START + timedelta(hours=1),
                     time=HOURS,
                     temperature=[338.0] * 3 * ureg.kelvin,
                     power_density=ELECTRICAL['power_density'],
+                    controlled=['temperature'],
                 ),
+                sweep(4, 0.18, 0.16),
             ],
         )
     )
 
     [figure] = measurement.figures
-    power, temperature = figure.figure['data']
-    assert (power['name'], power['x']) == ('ageing', [1.0, 2.0, 3.0])
+    reverse, forward, power, temperature = figure.figure['data']
+    assert (reverse['name'], reverse['x']) == ('reverse', [0.0, 4.0])
+    assert forward['y'] == pytest.approx([19.0, 16.0])  # %
+    assert 'markers' in reverse['mode']
+    assert power['name'] == 'ageing · power density · monitored'
+    assert (temperature['name'], temperature['x']) == (
+        'ageing · temperature · controlled',
+        [1.0, 2.0, 3.0],
+    )
     assert temperature['y'] == pytest.approx([64.85] * 3)  # °C
-    assert [mark['x0'] for mark in figure.figure['layout']['shapes']] == [0.0]
+    assert [mark['x0'] for mark in figure.figure['layout']['shapes']] == [0.0, 4.0]
 
 
 def test_a_step_without_a_start_is_left_out_of_the_overview(normalized, log):
@@ -232,7 +272,12 @@ def test_a_measurement_takes_who_ran_what_when_and_on_what_from_the_run_file():
 def test_each_step_is_read_in_order_by_the_function_for_its_kind():
     steps = [
         {'name': 'initial J–V', 'kind': 'jv', 'file': 'jv.csv', 'start': START},
-        {'name': 'ageing', 'kind': 'stability_series', 'file': 'series.csv'},
+        {
+            'name': 'ageing',
+            'kind': 'stability_series',
+            'file': 'series.csv',
+            'controlled': ['temperature'],
+        },
     ]
     tables = {
         'jv.csv': {
@@ -253,6 +298,34 @@ def test_each_step_is_read_in_order_by_the_function_for_its_kind():
     assert jv.direction == ['reverse', 'forward']
     assert type(series) is StabilitySeriesStep
     assert series.temperature.to('K').magnitude.tolist() == [338.0] * 3
+    assert series.controlled == ['temperature']
+
+
+def test_a_sweep_takes_the_figures_of_merit_its_station_reported_per_scan():
+    tables = {
+        'jv.csv': {
+            'voltage': [0.0, 1.1] * ureg.volt,
+            'direction': np.array(['reverse', 'forward']),
+            'figures_of_merit': {
+                'direction': np.array(['reverse', 'forward']),
+                'efficiency': [20.1, 19.6] * ureg.percent,
+                'open_circuit_voltage': [1.12, 1.11] * ureg.volt,
+                'wind_speed': [1.0, 1.0] * ureg('m/s'),
+            },
+        }
+    }
+    steps = [{'name': 'initial J–V', 'kind': 'jv', 'file': 'jv.csv'}]
+    measurement = StabilityMeasurement()
+
+    problems = measurement.read_files(
+        'run.yaml', **read_from({'run': {}, 'steps': steps}, tables)
+    )
+
+    reverse, forward = measurement.steps[0].figures_of_merit
+    assert (reverse.direction, forward.direction) == ('reverse', 'forward')
+    assert forward.efficiency.to('').magnitude == pytest.approx(0.196)
+    assert reverse.open_circuit_voltage.to('V').magnitude == pytest.approx(1.12)
+    assert ['column `wind_speed`' in problem for problem in problems] == [True, True]
 
 
 def test_what_has_no_place_is_reported_and_the_rest_read():

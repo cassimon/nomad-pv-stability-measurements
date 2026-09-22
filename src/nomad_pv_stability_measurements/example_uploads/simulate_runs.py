@@ -154,6 +154,7 @@ CONDITIONS = {
 
 # The simulated cell: efficiency, J–V shape and how fast it ages.
 EFFICIENCY = 0.20
+SUN = 1000.0  # W/m^2
 JSC = 23.5  # mA/cm^2 at one sun
 VOC = 1.12  # V at one sun
 IDEALITY = 1.5
@@ -300,6 +301,23 @@ def phases(protocol, length: float) -> list[tuple[str, float, float]]:
             time += hours(each)
         return found
     return [('ageing', 0.0, length)]
+
+
+def controlled(protocol, start: float, end: float, length: float) -> list[str]:
+    """The columns the protocol controls between `start` and `end` hours, by the name
+    of the quantity each fills, in the order of `COLUMNS`."""
+    found = {
+        column.replace(' ', '_').replace('current', 'current_density')
+        for begins, ends, instruction in run_together(
+            protocol.instructions, 'parallel', 0.0, length
+        )
+        if begins < end
+        and ends > start
+        and isinstance(instruction, MonitorControlInstruction)
+        and instruction.control
+        for column in instruction.controlled_quantities()
+    }
+    return [name for name in COLUMNS if name in found]
 
 
 # --- Simulating the conditions -------------------------------------------------------
@@ -541,11 +559,74 @@ def write_table(path: Path, columns: dict[str, np.ndarray]) -> None:
         writer.writerows(zip(*formatted))
 
 
+#: What the J–V station reports of each scan, by column, and how it writes each.
+FIGURES_OF_MERIT = {
+    'direction': '{}',
+    'irradiance (W/m^2)': '{:.0f}',
+    'open_circuit_voltage (V)': '{:.4f}',
+    'short_circuit_current_density (mA/cm^2)': '{:.3f}',
+    'fill_factor (%)': '{:.2f}',
+    'efficiency (%)': '{:.3f}',
+    'potential_at_maximum_power_point (V)': '{:.3f}',
+    'current_density_at_maximum_power_point (mA/cm^2)': '{:.3f}',
+    'series_resistance (ohm*cm^2)': '{:.3f}',
+    'shunt_resistance (ohm*cm^2)': '{:.0f}',
+}
+
+
+def figures_of_merit(voltage: np.ndarray, current: np.ndarray) -> tuple:
+    """What a J–V station works out of one scan (V, mA/cm², at one sun): the values of
+    `FIGURES_OF_MERIT` after the direction, in order."""
+    order = np.argsort(voltage)
+    voltage, current = voltage[order], current[order]
+    voc = np.interp(0.0, -current, voltage)  # the current falls as the voltage rises
+    jsc = np.interp(0.0, voltage, current)
+    best = np.argmax(voltage * current)
+    vmpp, jmpp = voltage[best], current[best]
+    fill_factor = vmpp * jmpp / (voc * jsc)
+    efficiency = vmpp * jmpp / (SUN / 10)  # mW/cm² over the light's mW/cm²
+
+    def slope_at(index: int) -> float:  # Ω cm²: V over mA/cm², times 1000
+        return (
+            -1000
+            * (voltage[index + 1] - voltage[index - 1])
+            / (current[index + 1] - current[index - 1])
+        )
+
+    series = slope_at(int(np.searchsorted(voltage, voc)))
+    shunt = slope_at(int(np.searchsorted(voltage, 0.0)))
+    return (
+        SUN,
+        voc,
+        jsc,
+        100 * fill_factor,
+        100 * efficiency,
+        vmpp,
+        jmpp,
+        series,
+        shunt,
+    )
+
+
 def write_jv(path: Path, kept: float) -> None:
+    """The station's figures of merit, one row per scan, an empty line, the curve."""
+    sweep = jv_sweep(kept)
     with path.open('w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
+        writer.writerow(FIGURES_OF_MERIT)
+        for direction in dict.fromkeys(row[2] for row in sweep):
+            # Worked out of the curve as the file holds it.
+            scan = [row for row in sweep if row[2] == direction]
+            voltage = np.round([row[0] for row in scan], 3)
+            current = np.round([row[1] for row in scan], 4)
+            values = (direction, *figures_of_merit(voltage, current))
+            writer.writerow(
+                style.format(value)
+                for style, value in zip(FIGURES_OF_MERIT.values(), values)
+            )
+        writer.writerow([])
         writer.writerow(['voltage (V)', 'current_density (mA/cm^2)', 'direction'])
-        for voltage, current, direction in jv_sweep(kept):
+        for voltage, current, direction in sweep:
             writer.writerow([f'{voltage:.3f}', f'{current:.4f}', direction])
 
 
@@ -578,7 +659,7 @@ def simulate(source: Source, index: int, output: Path) -> str:
     folder.mkdir(parents=True, exist_ok=True)
     recorded = phases(protocol, length)
     number = iter(range(1, 2 * len(recorded) + 2))
-    steps = [('initial J–V', 'jv', f'{next(number):02d}_jv_initial.csv', started)]
+    steps = [('initial J–V', 'jv', f'{next(number):02d}_jv_initial.csv', started, [])]
     write_jv(folder / steps[0][2], 1.0)
     begins = ageing_start
     for position, (name, start, end) in enumerate(recorded):
@@ -589,7 +670,19 @@ def simulate(source: Source, index: int, output: Path) -> str:
         suffix = '' if len(recorded) == 1 else f'_{slug(name)}'
         file = f'{next(number):02d}_stability_series{suffix}.csv'
         write_table(folder / file, series)
-        steps.append((name, 'stability_series', file, begins))
+        steps.append(
+            (
+                name,
+                'stability_series',
+                file,
+                begins,
+                [
+                    each
+                    for each in controlled(protocol, start, end, length)
+                    if each in series
+                ],
+            )
+        )
         after = begins + timedelta(hours=end - start) + CHANGEOVER
         jv_name, jv_file = (
             ('final J–V', 'jv_final')
@@ -598,7 +691,7 @@ def simulate(source: Source, index: int, output: Path) -> str:
         )
         jv_file = f'{next(number):02d}_{jv_file}.csv'
         write_jv(folder / jv_file, float(kept[rows][-1]))
-        steps.append((jv_name, 'jv', jv_file, after))
+        steps.append((jv_name, 'jv', jv_file, after, []))
         begins = after + JV_LENGTH + CHANGEOVER
 
     run = {
@@ -620,8 +713,14 @@ def simulate(source: Source, index: int, output: Path) -> str:
         'run': {name: value for name, value in run.items() if value is not None},
         **({'test conditions': source.describes} if source.describes else {}),
         'steps': [
-            {'name': name, 'kind': kind, 'file': file, 'start': start.isoformat()}
-            for name, kind, file, start in steps
+            {
+                'name': name,
+                'kind': kind,
+                'file': file,
+                'start': start.isoformat(),
+                **({'controlled': held} if held else {}),
+            }
+            for name, kind, file, start, held in steps
         ],
     }
     (folder / f'{designation}.run.yaml').write_text(

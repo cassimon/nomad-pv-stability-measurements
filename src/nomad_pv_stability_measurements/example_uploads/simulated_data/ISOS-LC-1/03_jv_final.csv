@@ -1,3 +1,7 @@
+direction,irradiance (W/m^2),open_circuit_voltage (V),short_circuit_current_density (mA/cm^2),fill_factor (%),efficiency (%),potential_at_maximum_power_point (V),current_density_at_maximum_power_point (mA/cm^2),series_resistance (ohm*cm^2),shunt_resistance (ohm*cm^2)
+reverse,1000,1.1172,22.729,84.13,21.363,0.990,21.579,1.594,2985
+forward,1000,1.1072,22.502,84.04,20.936,0.980,21.363,1.611,2985
+
 voltage (V),current_density (mA/cm^2),direction
 1.150,-29.6881,reverse
 1.140,-17.7957,reverse

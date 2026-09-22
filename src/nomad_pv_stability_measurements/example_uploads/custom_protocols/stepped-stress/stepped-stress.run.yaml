@@ -25,6 +25,10 @@ steps:
   kind: stability_series
   file: 02_stability_series_burn_in.csv
   start: '2026-08-03T09:12:00+01:00'
+  controlled:
+  - temperature
+  - irradiance
+  - voltage
 - name: J–V after burn-in
   kind: jv
   file: 03_jv_after_burn_in.csv
@@ -33,6 +37,10 @@ steps:
   kind: stability_series
   file: 04_stability_series_temperature_cycles_under_light.csv
   start: '2026-08-04T09:34:00+01:00'
+  controlled:
+  - temperature
+  - irradiance
+  - voltage
 - name: J–V after temperature cycles under light
   kind: jv
   file: 05_jv_after_temperature_cycles_under_light.csv
@@ -41,6 +49,10 @@ steps:
   kind: stability_series
   file: 06_stability_series_recovery_in_the_dark.csv
   start: '2026-08-05T21:56:00+01:00'
+  controlled:
+  - temperature
+  - irradiance
+  - voltage
 - name: final J–V
   kind: jv
   file: 07_jv_final.csv

@@ -73,12 +73,21 @@ def read_protocol(path: str | Path) -> dict:
                     'file': '/full/path/to/01_jv_initial.csv',
                     'start': datetime(...),
                 },
+                {
+                    'name': 'ageing',
+                    'kind': 'stability_series',
+                    'file': '/full/path/to/02_stability_series.csv',
+                    'start': datetime(...),
+                    'controlled': ['temperature', 'irradiance', 'voltage'],
+                },
                 ...
             ],
         }
 
     Leave out what the file does not say. List the steps in the order they ran, and
-    give each step's `file` as a path that can be opened as it is.
+    give each step's `file` as a path that can be opened as it is. A series' optional
+    `controlled` names the recorded quantities that were controlled, by their names in
+    a `StabilitySeriesStep`; every other recorded quantity was only monitored.
     """
     raise NotImplementedError
 
@@ -114,5 +123,10 @@ def read_stability_series(path: str | Path) -> dict[str, pint.Quantity]:
 def read_jv_file(path: str | Path) -> dict[str, object]:
     """The J–V sweep at `path`: `voltage` and `current_density` as quantity arrays,
     and `direction` as an array of `'forward'` or `'reverse'`, one per point, as in a
-    `JVSweepStep`. Current density is positive where the cell delivers power."""
+    `JVSweepStep`. Current density is positive where the cell delivers power.
+
+    Where the file holds what the J–V station reported of each scan, also
+    `figures_of_merit`: a table of one row per scan, one array per column by the name
+    of the `JVFiguresOfMerit` quantity it fills (`direction`, `efficiency`,
+    `open_circuit_voltage`, ...). They are taken as reported, never worked out again."""
     raise NotImplementedError

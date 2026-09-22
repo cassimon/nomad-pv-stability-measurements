@@ -35,8 +35,27 @@ def read_csv_with_units_in_header(path: str | Path) -> dict[str, object]:
     where the header states a unit, an array of text where it does not. A unit that
     cannot be read raises a `ValueError` naming the column.
     """
+    [table] = read_csv_tables_with_units_in_header(path)
+    return table
+
+
+def read_csv_tables_with_units_in_header(path: str | Path) -> list[dict[str, object]]:
+    """A CSV of several tables, one after another, an empty line between two: each
+    table as `read_csv_with_units_in_header` reads a file of one, in the order
+    written."""
     with Path(path).open(newline='', encoding='utf-8') as file:
-        header, *rows = list(csv.reader(file))
+        lines = list(csv.reader(file))
+    tables, table = [], []
+    for line in [*lines, []]:
+        if any(cell.strip() for cell in line):
+            table.append(line)
+        elif table:
+            tables.append(_read_table(*table))
+            table = []
+    return tables
+
+
+def _read_table(header, *rows) -> dict[str, object]:
     columns = list(zip(*rows)) if rows else [()] * len(header)
     return dict(_read_column(title, cells) for title, cells in zip(header, columns))
 

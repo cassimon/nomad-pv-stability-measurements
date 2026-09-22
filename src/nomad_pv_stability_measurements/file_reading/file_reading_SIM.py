@@ -22,7 +22,9 @@ after another, `repeat` times, and what each holds:
       phases:
       - {name: damp heat, duration: 1000 h, temperature: 85 °C, ...}
 
-Each CSV names a column and its unit in the header, as `temperature (°C)`. What
+Each CSV names a column and its unit in the header, as `temperature (°C)`. A J–V file
+starts with the figures of merit the station reported, one row per scan, then an empty
+line, then the curve. What
 another institution could share is in `file_reading_utils.py`.
 """
 
@@ -35,6 +37,7 @@ import yaml
 from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
     as_datetime,
     protocol_from_phases,
+    read_csv_tables_with_units_in_header,
     read_csv_with_units_in_header,
 )
 
@@ -104,5 +107,10 @@ def read_stability_series(path: str | Path) -> dict[str, pint.Quantity]:
 
 def read_jv_file(path: str | Path) -> dict[str, object]:
     """The J–V sweeps at `path`: `voltage` and `current_density` as quantity arrays,
-    and `direction`, `reverse` or `forward` for each row, as text."""
-    return read_csv_with_units_in_header(path)
+    and `direction`, `reverse` or `forward` for each row, as text. Where the file
+    starts with what the station reported of each scan, a table of one row per scan
+    and an empty line after it, that table as `figures_of_merit`."""
+    *reported, curve = read_csv_tables_with_units_in_header(path)
+    if reported:
+        curve['figures_of_merit'] = reported[0]
+    return curve

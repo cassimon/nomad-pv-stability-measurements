@@ -25,6 +25,9 @@ steps:
   kind: stability_series
   file: 02_stability_series.csv
   start: '2026-04-13T09:12:00+01:00'
+  controlled:
+  - irradiance
+  - voltage
 - name: final J–V
   kind: jv
   file: 03_jv_final.csv

@@ -99,7 +99,7 @@ def test_the_protocol_file_gives_dates_and_step_files_beside_it(tmp_path):
 
 def test_the_simulated_runs_are_recognized_and_read():
     """Every file the example upload ships is recognized as SIM's and readable, each
-    step's columns one length."""
+    step's columns one length, and each J–V sweep reported per direction swept."""
     protocol_files = sorted(SIMULATED.glob('*/*.run.yaml'))
 
     assert len(protocol_files) == ISOS_FILES
@@ -108,8 +108,14 @@ def test_the_simulated_runs_are_recognized_and_read():
         for step in read_protocol(path)['steps']:
             read = read_jv_file if is_jv_file(step['file']) else read_stability_series
             assert is_jv_file(step['file']) or is_stability_series_file(step['file'])
-            lengths = {np.size(values) for values in read(step['file']).values()}
+            columns = read(step['file'])
+            reported = columns.pop('figures_of_merit', None)
+            lengths = {np.size(values) for values in columns.values()}
             assert len(lengths) == 1, step['file']
+            if is_jv_file(step['file']):
+                assert list(reported['direction']) == list(
+                    dict.fromkeys(columns['direction'])
+                ), step['file']
 
 
 def test_a_run_file_describing_its_test_gives_that_protocol(tmp_path):
