@@ -3992,7 +3992,7 @@ and the run parser gets `level=1` (step 3), since nothing reads a run's protocol
 
 ## 36. The electrical load is one port — dependent quantities
 
-**Status: built, steps 1–2 of §36.4.** Amends §29's "one row per quantity" for the electrical load.
+**Status: built, steps 1–3 of §36.4.** Amends §29's "one row per quantity" for the electrical load.
 
 ### 36.1 Why
 
@@ -4070,6 +4070,10 @@ resistance V/I or the power V·I, are never listed as dependents.
   second one. The row is keyed `electrical load, monitored` and has no label of its own: its bars
   say what they are. A sub-row rather than a strip inside the bar, so it never overlaps a value
   line.
+- **Bars side by side stay apart** (`BAR_GAP`, 3 px), so that `Hold voltage` followed by
+  `Hold current` reads as two bars, not one long one. This applies to every row.
+- **A row and its monitored row write their text at one size**, the size that fits the
+  narrowest bar of either.
 
 ### 36.4 Order of building
 
@@ -4077,3 +4081,4 @@ resistance V/I or the power V·I, are never listed as dependents.
    electrical classes; one parametrized test over the table in §36.2.
 2. Plotting per §36.3; a test that open circuit followed by a fixed voltage draws one row; the
    monitored sub-row.
+3. The gap between bars side by side; one text size for a row and its monitored row.

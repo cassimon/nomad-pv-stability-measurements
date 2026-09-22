@@ -282,3 +282,27 @@ def test_what_follows_the_load_is_monitored_on_a_thin_row_under_it(normalized):
     ]
     layout = protocol.figures[0].figure['layout']
     assert [note['text'] for note in row_labels(layout)] == ['electrical load<br>(V)']
+
+
+def test_bars_side_by_side_stay_apart_and_a_row_shares_its_text_size(normalized):
+    protocol = normalized(
+        one_after_another(
+            VOCTracking(monitor=True, duration=one_hour()),
+            HoldVoltage(reference_point='V_MPP', monitor=True, duration=one_hour()),
+        )
+    )
+    layout = protocol.figures[0].figure['layout']
+    bars = sorted(
+        (shape['yref'], shape['x0'], shape['x1']) for shape in layout['shapes']
+    )
+    sizes = {
+        note['font']['size']
+        for note in layout['annotations']
+        if note['text'].startswith(('open circuit', 'V<sub>MPP</sub>', 'monitored:'))
+    }
+
+    # Each bar of a row ends before the next one starts.
+    for (row, _, end), (next_row, start, _) in zip(bars, bars[1:]):
+        assert row != next_row or end < start
+    # The electrical load and its monitored row write at one size.
+    assert len(sizes) == 1

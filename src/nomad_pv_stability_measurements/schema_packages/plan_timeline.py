@@ -58,6 +58,8 @@ ROLE_COLORS = {
     'unspecified': '#9a9a9a',
 }
 BAR_OPACITY = 0.25
+#: px between two bars side by side, so each reads as its own.
+BAR_GAP = 3
 BAND_OPACITY = 0.3
 TOLERANCE_OPACITY = 0.2
 #: What the drawing assumes and the protocol does not state.
@@ -190,7 +192,9 @@ def figure_for_plotting(
         }
     for i, (row, domain) in enumerate(zip(rows, y_domains)):
         drawing.frame(i)
-        unit = drawing.row(i, [piece for piece in pieces if piece.row == row])
+        # A row and its monitored row write their text at one size.
+        family = [p for p in pieces if _parent(p.row) == _parent(row)]
+        unit = drawing.row(i, [piece for piece in family if piece.row == row], family)
         layout[_axis('yaxis', i)] = {
             'domain': domain,
             'anchor': 'x',
@@ -241,13 +245,14 @@ class _Drawing:
                 }
             )
 
-    def row(self, i: int, pieces) -> str:
-        """Draws the `i`-th row's pieces into every section they reach; returns the
-        row's unit, empty where it only has text."""
+    def row(self, i: int, pieces, sized) -> str:
+        """Draws the `i`-th row's pieces into every section they reach, their text at
+        the size that fits all of `sized`; returns the row's unit, empty where it only
+        has text."""
         unit = ''
         self.lowest = self.highest = 0.0
         noted = set()
-        self.size = text_size(pieces, self.sections, self.x_domains)
+        self.size = text_size(sized, self.sections, self.x_domains)
         for k, (a, b) in enumerate(self.sections):
             axes = _axis('x', k), _axis('y', i)
             left, right = self.x_domains[k]
@@ -347,13 +352,15 @@ class _Drawing:
         value."""
         x, y = axes[0], f'{axes[1]} domain'
         start, end = span[0] / HOUR, span[1] / HOUR
+        # Half the gap off each end, never more than a quarter of a narrow bar.
+        inset = min(BAR_GAP / 2 / self.px_per_second / HOUR, (end - start) / 4)
         self.shapes.append(
             {
                 'type': 'rect',
                 'xref': x,
                 'yref': y,
-                'x0': start,
-                'x1': end,
+                'x0': start + inset,
+                'x1': end - inset,
                 'y0': 0.2,
                 'y1': 0.8,
                 'fillcolor': _translucent(self.color, BAR_OPACITY),
@@ -386,12 +393,17 @@ def _row_order(row: str) -> float:
     """Where `row` stands, top to bottom (`TOP_ROWS`, `BOTTOM_ROWS`); a monitored
     row right under its own."""
     if _monitored(row):
-        return _row_order(row.removesuffix(MONITORED)) + 0.5
+        return _row_order(_parent(row)) + 0.5
     if row in TOP_ROWS:
         return TOP_ROWS.index(row)
     if row in BOTTOM_ROWS:
         return len(TOP_ROWS) + 1 + BOTTOM_ROWS.index(row)
     return len(TOP_ROWS)
+
+
+def _parent(row: str) -> str:
+    """The row `row` stands under, where it is a monitored row; else `row` itself."""
+    return row.removesuffix(MONITORED)
 
 
 def _monitored(row: str) -> bool:
