@@ -56,10 +56,10 @@ Search for `standard` to find every variant of a protocol, and for `standard_var
 ```yaml
 channel_settings:          # conditions that hold for the whole test
   temperature: {hold: RT, control: false, monitor: true}              # assumed 23 ± 4 °C
-  atmosphere: {variable: relative_humidity, control: false, monitor: true}   # ambient
+  atmosphere:              # a channel of several variables: one setting each
+    - {variable: relative_humidity, control: false, monitor: true}       # ambient
+    - {variable: oxygen, reference_point: ambient air}
   electrical_load: {hold: mpp}
-instructions:              # a second atmosphere setting: one channel, one setting above
-  - {channel: atmosphere, variable: oxygen, reference_point: ambient air}
 routine:                   # only what changes during the test
   repeat: indefinitely
   instructions:
@@ -79,7 +79,7 @@ cycle states its period, and repeats for as long as your test runs.
   the parallel block it is in. A ramp given a `rate` works its duration out.
 - **Every test here runs in ambient air.** Only the protocols marked "I" run in an inert
   atmosphere, so the oxygen is written as `reference_point: ambient air`, stated but neither
-  regulated nor measured.
+  regulated nor measured. It is the atmosphere's second setting, beside the humidity.
 - **Ambient means monitored, not regulated.** The standard assumes room temperature to be
   23 ± 4 °C without controlling it, and asks for every uncontrolled condition to be monitored and
   reported: `control: false`, `monitor: true`.

@@ -2365,6 +2365,14 @@ This splits ISOS Table 1 cleanly in two:
 | **ISOS-D, -V, -L, -O** | every condition constant → `channel_settings` only, no `routine` |
 | **ISOS-T, -LC, -LT** | something varies within the run — a thermal cycle, a light/dark duty cycle, a ramping temperature → the varying part, and only that, goes in `routine` |
 
+*Amended: a channel of several variables lists one setting per variable in its slot,
+`atmosphere: [{variable: relative_humidity, …}, {variable: oxygen, reference_point: ambient
+air}]`. The ambient air of every ISOS file used to be a protocol-level `instructions:` entry,
+only because the `atmosphere` slot already held the humidity; it read as if it were something
+that happens during the test. Each item is read like a slot of its own and reported at its index
+(`channel_settings.atmosphere[1]`). The settings are still in file order, so the air now comes
+right after the humidity. Status: built.*
+
 **No invented names.** A block or protocol is named only where the standard names it. The
 protocol's own `name` is the designation from the table (`ISOS-D-1`) and nothing more;
 descriptive titles like "dark storage, ambient" are the author's prose, and a block that the

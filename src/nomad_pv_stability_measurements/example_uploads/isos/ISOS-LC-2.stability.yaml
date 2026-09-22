@@ -11,9 +11,11 @@ data:
         - hold: 65 °C
         - hold: 85 °C
     atmosphere:
-      variable: relative_humidity
-      control: false
-      monitor: true
+      - variable: relative_humidity
+        control: false
+        monitor: true
+      # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
+      - {variable: oxygen, reference_point: ambient air}
     electrical_load:
       # "options of exposure under open-circuit condition or using a fixed voltage bias near
       # the MPP (instead of active MPP tracking)" (p.37)
@@ -21,9 +23,6 @@ data:
         - {label: MPP, hold: mpp, monitor: true}
         - {label: OC, hold: open_circuit}
         - {label: fixed voltage near MPP, variable: voltage, control: true, reference_point: near V_MPP}
-  instructions:
-    # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
-    - {channel: atmosphere, variable: oxygen, reference_point: ambient air}
   routine:
     repeat: indefinitely
     # "cycle periods of 2, 8, or 24 h and duty cycles (light:dark) of 1:1 or 1:2" (p.39)

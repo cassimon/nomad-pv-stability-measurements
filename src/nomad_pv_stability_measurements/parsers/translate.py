@@ -214,29 +214,39 @@ def _class_of(bare: dict) -> type | None:
 
 def _settings_instructions(settings, path: str, problems: list) -> list:
     """The instructions of `channel_settings`. Written without a duration, they last as
-    long as the protocol, which runs them in parallel with its routine."""
+    long as the protocol, which runs them in parallel with its routine. A channel of
+    several variables may list one setting per variable: `atmosphere: [{...}, {...}]`."""
     if settings is None:
         return []
     if not isinstance(settings, dict):
         problems.append(Problem(path, f'expected a section, got {settings!r}.'))
         return []
     instructions = []
-    for channel, block in settings.items():
+    for channel, written in settings.items():
         where = _at(path, channel)
-        if not isinstance(block, dict):
-            problems.append(Problem(where, f'expected a section, got {block!r}.'))
-            continue
-        written = block.get('channel', channel)
-        if written != channel:
-            problems.append(
-                Problem(
-                    _at(where, 'channel'),
-                    f'`channel: {written}` does not match the slot `{channel}`.',
-                )
-            )
-        read = _instruction({**block, 'channel': channel}, where, problems)
-        instructions += _settled(read, where, False, problems)
+        if isinstance(written, list):
+            for index, block in enumerate(written):
+                instructions += _setting(block, channel, f'{where}[{index}]', problems)
+        else:
+            instructions += _setting(written, channel, where, problems)
     return instructions
+
+
+def _setting(block, channel: str, path: str, problems: list) -> list:
+    """One setting of `channel`, as the instructions it reads as."""
+    if not isinstance(block, dict):
+        problems.append(Problem(path, f'expected a section, got {block!r}.'))
+        return []
+    written = block.get('channel', channel)
+    if written != channel:
+        problems.append(
+            Problem(
+                _at(path, 'channel'),
+                f'`channel: {written}` does not match the slot `{channel}`.',
+            )
+        )
+    read = _instruction({**block, 'channel': channel}, path, problems)
+    return _settled(read, path, False, problems)
 
 
 def _section(authored, cls: type, path: str, problems: list) -> dict:

@@ -227,9 +227,14 @@ def protocol(standard, options, instructions, environment='indoor'):
     # The file's own instructions come after its settings, before its routine (§14.3).
     routine = instructions[-1]['m_def'] == m_def(IndefiniteRepeatingBlock)
     at = len(instructions) - routine
-    settings = [
-        {**each, 'duration': WHOLE_BLOCK} for each in [*instructions[:at], AMBIENT_AIR]
-    ]
+    # The air is the atmosphere's second setting, after its humidity.
+    humid = next(
+        index
+        for index, each in enumerate(instructions)
+        if each['m_def'] == m_def(HoldRelativeHumidity)
+    )
+    written = [*instructions[: humid + 1], AMBIENT_AIR, *instructions[humid + 1 : at]]
+    settings = [{**each, 'duration': WHOLE_BLOCK} for each in written]
     instructions = [*settings, *instructions[at:]]
     archive = {
         'm_def': m_def(StabilityProtocol),

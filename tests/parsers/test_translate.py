@@ -27,6 +27,7 @@ from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldBendRadius,
     HoldCurrent,
     HoldIrradiance,
+    HoldOxygenFraction,
     HoldRelativeHumidity,
     HoldResistance,
     HoldTemperature,
@@ -341,6 +342,35 @@ def test_settings_come_first_then_the_routine():
     assert [each['m_def'] for each in data['instructions']] == [
         m_def(HoldTemperature),
         m_def(IndefiniteRepeatingBlock),
+    ]
+
+
+def test_a_channel_of_several_variables_lists_one_setting_per_variable():
+    translation = translate(
+        {
+            'data': {
+                'channel_settings': {
+                    'atmosphere': [
+                        {'relative_humidity': '85 %'},
+                        {'variable': 'oxygen', 'reference_point': 'ambient air'},
+                        'air',
+                    ]
+                }
+            }
+        }
+    )
+
+    assert [p.path for p in translation.problems] == [
+        'data.channel_settings.atmosphere[2]'
+    ]
+    assert translation.archive['data']['instructions'] == [
+        entry(
+            HoldRelativeHumidity,
+            control=True,
+            set_point=approx(0.85),
+            duration=WHOLE_BLOCK,
+        ),
+        entry(HoldOxygenFraction, reference_point='ambient air', duration=WHOLE_BLOCK),
     ]
 
 
