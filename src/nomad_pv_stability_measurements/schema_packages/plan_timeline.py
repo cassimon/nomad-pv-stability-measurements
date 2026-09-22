@@ -13,6 +13,7 @@ from math import inf
 import numpy as np
 
 from nomad_pv_stability_measurements.schema_packages.utils import (
+    MONITORED,
     AxisBreak,
     TimePlotSeries,
     drawing_end,
@@ -33,6 +34,8 @@ OVERHANG = 0.05
 
 #: px: the height of one row, and of everything around the rows together.
 ROW_HEIGHT = 150
+#: Of a row's height: the thin row under it that says what is logged beside it.
+MONITORED_ROW_HEIGHT = 0.4
 FRAME_HEIGHT = 180
 #: px: the left margin, where the row labels stand, one above the other.
 LABEL_MARGIN = 125
@@ -68,7 +71,8 @@ GRID_COLOR = 'rgba(128, 128, 128, 0.3)'
 VALUE_MARGIN = 0.06
 
 #: The rows, top to bottom: the light first, the electrical load last; any other
-#: quantity in between, in the order the plan names it.
+#: quantity in between, in the order the plan names it. A row's monitored row stands
+#: right under it.
 TOP_ROWS = (
     'irradiance',
     'temperature',
@@ -76,7 +80,7 @@ TOP_ROWS = (
     'absolute humidity',
     'oxygen fraction',
 )
-BOTTOM_ROWS = ('electrical load', 'voltage', 'current', 'resistance')
+BOTTOM_ROWS = ('electrical load',)
 
 
 def axis_sections(end: float, breaks: list[AxisBreak]):
@@ -130,8 +134,9 @@ def figure_for_plotting(
     further, up to `⋯`."""
     end = drawing_end(series) if series.end is None else series.end
     rows = sorted(dict.fromkeys(piece.row for piece in series.pieces), key=_row_order)
+    heights = [MONITORED_ROW_HEIGHT if _monitored(row) else 1 for row in rows]
     sections, labels = axis_sections(end, series.breaks)
-    pieces = series.pieces
+    pieces = _one_unit_per_row(series.pieces)
     # A block that never ends closes the axis: the `⋯` says it goes on, no label.
     endless_break = len(labels) == len(sections) and any(
         cut.end == inf for cut in series.breaks
@@ -146,7 +151,7 @@ def figure_for_plotting(
     x_domains = _domains([b - a for a, b in sections], SECTION_GAP, SECTION_MIN_WIDTH)
     y_domains = [
         [AXIS_GAP + (1 - AXIS_GAP) * low, AXIS_GAP + (1 - AXIS_GAP) * high]
-        for low, high in _domains([1] * len(rows), ROW_GAP, 0)[::-1]  # first on top
+        for low, high in _domains(heights[::-1], ROW_GAP, 0)[::-1]  # first on top
     ]
     drawing = _Drawing(sections, x_domains)
     layout = {
@@ -155,7 +160,7 @@ def figure_for_plotting(
             'font': {'size': FONT_SIZE + 2},
         },
         'font': {'size': FONT_SIZE},
-        'height': ROW_HEIGHT * len(rows) + FRAME_HEIGHT,
+        'height': ROW_HEIGHT * sum(heights) + FRAME_HEIGHT,
         'showlegend': False,
         'margin': {'l': LABEL_MARGIN, 'r': 95, 't': 80, 'b': 95},
         # The page shows through, light or dark; the text takes the page's colour.
@@ -194,7 +199,8 @@ def figure_for_plotting(
             'zeroline': False,
         }
         layout[_axis('yaxis', i)]['range'] = drawing.value_range() if unit else [0, 1]
-        drawing.notes.append(_row_label(row, unit, domain))
+        if not _monitored(row):  # its bars say what they are, in the row's colour
+            drawing.notes.append(_row_label(row, unit, domain))
     drawing.notes += _break_notes(labels, x_domains)
     if goes_on:
         drawing.notes.append(_on_axis('<b>⋯</b>', x_domains[-1][1], 'left', xshift=4))
@@ -376,13 +382,53 @@ class _Drawing:
         }
 
 
-def _row_order(row: str) -> int:
-    """Where `row` stands, top to bottom (`TOP_ROWS`, `BOTTOM_ROWS`)."""
+def _row_order(row: str) -> float:
+    """Where `row` stands, top to bottom (`TOP_ROWS`, `BOTTOM_ROWS`); a monitored
+    row right under its own."""
+    if _monitored(row):
+        return _row_order(row.removesuffix(MONITORED)) + 0.5
     if row in TOP_ROWS:
         return TOP_ROWS.index(row)
     if row in BOTTOM_ROWS:
         return len(TOP_ROWS) + 1 + BOTTOM_ROWS.index(row)
     return len(TOP_ROWS)
+
+
+def _monitored(row: str) -> bool:
+    """Whether `row` is the thin row under another, saying what is logged beside it."""
+    return row.endswith(MONITORED)
+
+
+def _one_unit_per_row(pieces):
+    """`pieces`, where each row's values share one axis. A row whose pieces carry
+    values in different units — a voltage, then a current — has none to share: each
+    piece with a value is drawn as a bar with its label instead."""
+    units = {}
+    for piece in pieces:
+        if (unit := _unit(piece)) is not None:
+            units.setdefault(piece.row, set()).add(unit)
+    mixed = {row for row, found in units.items() if len(found) > 1}
+    return [
+        replace(
+            piece,
+            times=None,
+            values=None,
+            bounds=None,
+            assumption=None,
+            text=piece.label,
+        )
+        if piece.row in mixed and _unit(piece) is not None
+        else piece
+        for piece in pieces
+    ]
+
+
+def _unit(piece):
+    """The dimensions of what `piece` draws on its row's axis; `None`: only text."""
+    value = piece.values if piece.values is not None else piece.bounds
+    if isinstance(value, tuple):
+        value = value[1]
+    return None if value is None else value.dimensionality
 
 
 def _subscripts(text: str) -> str:

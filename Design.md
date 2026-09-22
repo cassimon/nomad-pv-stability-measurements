@@ -3992,7 +3992,7 @@ and the run parser gets `level=1` (step 3), since nothing reads a run's protocol
 
 ## 36. The electrical load is one port — dependent quantities
 
-**Status:** step 1 of §36.4 built. Step 2 (plotting) planned, not built.
+**Status: built, steps 1–2 of §36.4.** Amends §29's "one row per quantity" for the electrical load.
 
 ### 36.1 Why
 
@@ -4051,7 +4051,7 @@ resistance V/I or the power V·I, are never listed as dependents.
   classes, the shared descriptions of `monitor` and `control` on `MonitorControlInstruction`
   point to the readouts.
 
-### 36.3 Plotting (step 2, planned)
+### 36.3 Plotting
 
 - **One row, `electrical load`,** for every `ElectricalLoad` instruction (`row_for_plotting`).
   `BOTTOM_ROWS` loses `voltage`, `current` and `resistance`. The variants of one ISOS file
@@ -4059,12 +4059,17 @@ resistance V/I or the power V·I, are never listed as dependents.
   open circuit to a fixed voltage draws one continuous row instead of two rows with gaps.
 - **Controlled side** as today: a line at the value, or a bar with `V_MPP`, `MPP`,
   `open circuit`. The row's unit (V, A, Ω) says which quantity a line is. Where pieces of one
-  row carry **different units**, their values can't share an axis, so each is drawn as a bar
-  with its label instead (`Hold current 20 mA`).
-- **Monitored side:** where `monitor: true`, a sub-row `monitored` right under the row, a green
-  bar with `monitored_quantities()` (`current`; `voltage, current`). It is derived from the one
-  instruction, never authored as a second one. A sub-row rather than a strip inside the bar,
-  so it never overlaps a value line.
+  row carry **different units**, their values can't share an axis, so each piece with a value
+  is drawn as a bar with its label instead (`Hold current 0.02 A for 1 h`). Pieces without a value
+  keep their own text (`open circuit`). This rule is generic (`_one_unit_per_row`), but only the
+  electrical row can mix units today.
+- **Monitored side:** where `monitor: true`, a thin row (`MONITORED_ROW_HEIGHT`, 0.4 of a row)
+  right under the electrical row, with a green bar `monitored: current` (or
+  `monitored: voltage, current`) from `monitored_quantities()`. The mixin adds this piece in
+  `time_series_for_plotting`; it is derived from the one instruction, never authored as a
+  second one. The row is keyed `electrical load, monitored` and has no label of its own: its bars
+  say what they are. A sub-row rather than a strip inside the bar, so it never overlaps a value
+  line.
 
 ### 36.4 Order of building
 

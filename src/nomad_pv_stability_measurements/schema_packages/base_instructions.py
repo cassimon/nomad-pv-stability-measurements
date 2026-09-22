@@ -1,3 +1,4 @@
+from dataclasses import replace
 from math import inf, isclose
 
 import numpy as np
@@ -12,7 +13,11 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     SingleInstruction,
     kind_of,
 )
-from nomad_pv_stability_measurements.schema_packages.utils import shown, words
+from nomad_pv_stability_measurements.schema_packages.utils import (
+    MONITORED,
+    shown,
+    words,
+)
 
 m_package = SchemaPackage()
 
@@ -160,6 +165,28 @@ class DependentMonitorControl(MSection):
     def monitored_quantities(self) -> tuple[str, ...]:
         return self.dependent
 
+    def time_series_for_plotting(self, start: float, stop: float):
+        """Its own piece and, where `monitor` is set, a bar on the thin row under it
+        that names what follows and is logged: `monitored: current`."""
+        series = super().time_series_for_plotting(start, stop)
+        if self.monitor and series.pieces:
+            piece = series.pieces[0]
+            series.pieces.append(
+                replace(
+                    piece,
+                    row=piece.row + MONITORED,
+                    times=None,
+                    values=None,
+                    bounds=None,
+                    text=f'monitored: {", ".join(self.monitored_quantities())}',
+                    role='monitored',
+                    cycle=None,
+                    assumption=None,
+                    typical=None,
+                )
+            )
+        return series
+
 
 class ElectricalLoad(DependentMonitorControl):
     """The load on the cell's terminals. One port: one of voltage, current, resistance
@@ -169,6 +196,11 @@ class ElectricalLoad(DependentMonitorControl):
     and at the port that is only ever voltage and current. A resistance is a setting of
     the load, never measured, and what is computed from the measurements (V/I, V·I) is
     never listed."""
+
+    def row_for_plotting(self) -> str:
+        """One row for the port, whichever quantity is set: it is in one state at a
+        time."""
+        return 'electrical load'
 
 
 class HoldInstruction(MonitorControlInstruction):

@@ -10,15 +10,21 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
     Duration,
     IndefiniteRepeatingBlock,
+    InstructionBlock,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBetweenIrradiance,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
+    HoldCurrent,
     HoldIrradiance,
     HoldTemperature,
+    HoldVoltage,
 )
-from nomad_pv_stability_measurements.schema_packages.mpp_instructions import MPPTracking
+from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
+    MPPTracking,
+    VOCTracking,
+)
 from nomad_pv_stability_measurements.schema_packages.plan_timeline import (
     ASSUMPTION_COLOR,
     OVERHANG,
@@ -210,3 +216,69 @@ def test_a_typical_length_is_drawn_as_its_length_and_said_in_red_and_in_the_titl
     assert red_notes(layout) == said
     assert [line['x'] for line in lines] == [[0, 1], [1, 2]]
     assert all('dash' not in line.get('line', {}) for line in lines)
+
+
+def one_hour() -> Duration:
+    return Duration(kind='fixed', value=1 * ureg.hour)
+
+
+def one_after_another(*instructions) -> StabilityProtocol:
+    return StabilityProtocol(
+        instructions=[
+            InstructionBlock(
+                sub_instruction_execution_mode='sequential',
+                sub_instructions=list(instructions),
+            )
+        ]
+    )
+
+
+def test_the_electrical_load_is_one_row_whichever_quantity_is_set(normalized):
+    protocol = normalized(
+        one_after_another(
+            VOCTracking(duration=one_hour()),
+            HoldVoltage(set_point=0.8 * ureg.volt, duration=one_hour()),
+        )
+    )
+    layout = protocol.figures[0].figure['layout']
+
+    # The terminals are one port, in one state at a time.
+    assert [note['text'] for note in row_labels(layout)] == ['electrical load<br>(V)']
+
+
+def test_values_in_different_units_on_one_row_are_written_not_drawn(normalized):
+    protocol = normalized(
+        one_after_another(
+            VOCTracking(duration=one_hour()),
+            HoldVoltage(set_point=0.8 * ureg.volt, duration=one_hour()),
+            HoldCurrent(set_point=0.02 * ureg.ampere, duration=one_hour()),
+        )
+    )
+    figure = protocol.figures[0].figure
+    texts = [note['text'] for note in figure['layout']['annotations']]
+
+    # A volt and an ampere share no axis: each is a bar with its label.
+    assert not [y for trace in figure['data'] for y in trace['y'] if y is not None]
+    assert {'Hold voltage 0.8 V for 1 h', 'Hold current 0.02 A for 1 h'} <= set(texts)
+    assert 'open circuit' in texts  # what had no value keeps its own text
+    assert [note['text'] for note in row_labels(figure['layout'])] == [
+        'electrical load'
+    ]
+
+
+def test_what_follows_the_load_is_monitored_on_a_thin_row_under_it(normalized):
+    protocol = normalized(
+        one_after_another(
+            HoldVoltage(set_point=0.8 * ureg.volt, monitor=True, duration=one_hour()),
+            VOCTracking(duration=one_hour()),
+        )
+    )
+    series = protocol.time_series_for_plotting()
+    monitored = [piece for piece in series.pieces if piece.role == 'monitored']
+
+    # Only while `monitor` is set; a row without a label of its own.
+    assert [(piece.row, piece.text, piece.end) for piece in monitored] == [
+        ('electrical load, monitored', 'monitored: current', HOUR)
+    ]
+    layout = protocol.figures[0].figure['layout']
+    assert [note['text'] for note in row_labels(layout)] == ['electrical load<br>(V)']

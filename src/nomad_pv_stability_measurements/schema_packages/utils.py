@@ -4,6 +4,10 @@ from math import inf
 
 import numpy as np
 
+#: Ends the name of the thin row under a row, which says what is logged beside what
+#: that row sets: `electrical load, monitored`.
+MONITORED = ', monitored'
+
 #: A repeating block draws this many iterations at most; the rest is an axis break.
 #: Something that repeats by itself, and nothing stops, is drawn this many cycles.
 ITERATIONS_FOR_PLOTTING = 3
