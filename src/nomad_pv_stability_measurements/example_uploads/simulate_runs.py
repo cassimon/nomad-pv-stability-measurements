@@ -416,7 +416,7 @@ def simulate(path: Path, index: int) -> str:
             'location': 'Berlin, rooftop test site'
             if protocol.environment == 'outdoor'
             else 'Berlin, lab 2.14',
-            'samples': [{'name': 'cell A', 'lab_id': f'SIM-{designation}-A'}],
+            'samples': [{'name': 'cell A'}],
             'instruments': instruments(protocol, quantities),
             'notes': ' '.join([SIMULATED, *sorted(clock.notes)]),
         },

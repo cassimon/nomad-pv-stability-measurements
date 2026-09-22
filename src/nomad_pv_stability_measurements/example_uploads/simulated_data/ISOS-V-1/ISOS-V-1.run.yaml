@@ -10,7 +10,6 @@ run:
   location: Berlin, lab 2.14
   samples:
   - name: cell A
-    lab_id: SIM-ISOS-V-1-A
   instruments:
   - name: temperature and humidity logger
   - name: J–V station

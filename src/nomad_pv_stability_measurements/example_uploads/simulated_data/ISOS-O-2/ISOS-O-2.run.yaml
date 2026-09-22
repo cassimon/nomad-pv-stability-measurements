@@ -10,7 +10,6 @@ run:
   location: Berlin, rooftop test site
   samples:
   - name: cell A
-    lab_id: SIM-ISOS-O-2-A
   instruments:
   - name: outdoor test rack
   - name: pyranometer

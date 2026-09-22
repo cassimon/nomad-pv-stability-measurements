@@ -10,7 +10,6 @@ run:
   location: Berlin, lab 2.14
   samples:
   - name: cell A
-    lab_id: SIM-ISOS-D-2-A
   instruments:
   - name: oven
   - name: temperature and humidity logger

@@ -10,7 +10,6 @@ run:
   location: Berlin, lab 2.14
   samples:
   - name: cell A
-    lab_id: SIM-ISOS-T-2-A
   instruments:
   - name: thermal cycling chamber
   - name: temperature and humidity logger

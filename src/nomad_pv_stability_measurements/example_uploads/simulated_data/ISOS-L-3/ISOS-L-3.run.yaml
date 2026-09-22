@@ -10,7 +10,6 @@ run:
   location: Berlin, lab 2.14
   samples:
   - name: cell A
-    lab_id: SIM-ISOS-L-3-A
   instruments:
   - name: solar simulator
   - name: climate chamber

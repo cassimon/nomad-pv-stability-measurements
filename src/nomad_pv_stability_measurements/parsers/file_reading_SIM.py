@@ -1,20 +1,6 @@
 """Reading the stability runs of one institution: SIM, the simulated example data.
 
-Every institution writes its runs in its own format, so each gets a module of its own,
-`file_reading_<INSTITUTION>.py`, with the same interface. Plain functions that return
-plain data, so that a `StabilityMeasurement` can be handed them and never needs to know
-about files:
-
-- `INSTITUTION`: the short name in the module's name.
-- `is_protocol_file`, `is_stability_series_file`, `is_jv_file`: whether a file is one
-  of this institution's, and which kind; from its name, and where it says so, its
-  content.
-- `read_protocol`: the file that says how a run went. Which protocol and standard it
-  followed, who ran it, when, where, on which samples and instruments, and its steps
-  in the order they ran, each with the file that holds its data.
-- `read_stability_series`: a step that records conditions and output over time, every
-  quantity as one column of a single table.
-- `read_jv_file`: a step that sweeps the voltage and records the current density.
+The interface of `file_reading_TEMPLATE.py`, filled in for SIM's files.
 
 SIM writes a run as a folder:
 
