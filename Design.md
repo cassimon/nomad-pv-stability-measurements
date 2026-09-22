@@ -3681,6 +3681,10 @@ instruction already states a fixed duration. `tests/data/tree.stability.yaml` ge
 4. The YAML words, the rule for the routine, and the tags in the six T/LT files. The expected
    archives must not change. *Built: they did not; `duration: open-ended` on the six cycling
    ramps, the README says how durations are written.*
-5. A server upload of all ISOS variants, and CLAUDE.md's rules brought up to date.
+5. A server upload of all ISOS variants, and CLAUDE.md's rules brought up to date. *Checked
+   without the server: every variant has 28–70 searchable quantities (the nested documents
+   Elasticsearch counts against its limit of 10 000); the `Duration` sub-sections add about two
+   each. CLAUDE.md updated. The server upload itself waits for a restart of the running
+   services, which still hold the code from before §33.*
 6. Later, separately: one `RepeatingBlock` instead of three, now that timed is `fixed` and
    indefinite `open_ended`.
