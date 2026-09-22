@@ -3874,3 +3874,118 @@ Seeded per run, so the files are reproduced exactly.
 Not done, on purpose: figures of the steps, figures of merit from the J–V sweeps (V_oc, J_sc, FF,
 PCE, T80), J–V scans as instructions of a protocol, and `deviations_from_plan` worked out from a
 run. Each is a step of its own.
+
+## 35. Open question — one entry per protocol
+
+**Status:** open. Planned, not built. Parked because NOMAD offers no way to re-check entries that
+already exist when something is uploaded or published (§35.2).
+
+Every upload that copies the ISOS files, and every run file that describes its own test (§34.4a),
+makes protocol entries again. The aim is one entry per protocol: a run's `plan` refers to an
+existing protocol wherever one is equal, and the duplicate is not stored.
+
+### 35.1 Decisions taken
+
+- **Equal** means every field equal **except name and metadata**. Ignored: `name`,
+  `description`, `notes`, `datetime`, `lab_id`, `location`, `geo_location`, `standard`,
+  `standard_variant`, `standard_level`, the figures, and the names of blocks and instructions
+  (the last two still to be confirmed). Compared: the whole instruction tree (every value,
+  duration, repetition, mode, ramp), `environment`, `objectives`, the protocol's duration; values
+  in SI, so `65 °C` equals `338.15 K`. Held as `StabilityProtocol.fingerprint`, a hash computed in
+  `normalize`, searchable once published.
+- **Compared against** published protocols only (`owner='public'`): they cannot be deleted, so a
+  reference to one stays valid. Within an upload, identical protocols make only one entry.
+- **Who wins:** the oldest published protocol with the fingerprint; else the first in the upload,
+  protocol files before protocols in run files, each by path and variant key.
+- **A duplicate is deleted:** no entry at all. `is_mainfile` returns `False` for a protocol file,
+  or only the variants that are not duplicates, and a run file makes no `'protocol'` child. On
+  reprocessing, NOMAD deletes an existing entry whose file no longer matches (**verified**,
+  `Upload` processing, "remove existing entries if unmatched"). The raw file stays.
+- **The run is told:** it refers to the winner, logs a warning that its protocol was not stored,
+  and keeps the name its own protocol had in a new `StabilityActivity.plan_name_alias`.
+- **By name:** a run naming a protocol its upload does not contain is matched to published
+  protocols by variant, else standard; of several, the oldest published; its differing name goes
+  into `plan_name_alias`.
+
+### 35.2 What NOMAD offers (verified in `nomad-FAIR`)
+
+- `is_mainfile` receives the raw file's real path, `<fs.staging>/<prefix>/<upload_id>/raw/<mainfile>`,
+  so the upload's other files can be read to find duplicates within it (relies on the internal
+  layout). Parsers run by `level`: every entry of a level finishes before the next starts.
+- **No trigger:** no plugin entry point runs when something is uploaded or published. The kinds
+  are app, schema package, normalizer, parser, example upload, API, dashboard, action and NORTH
+  tool; parsers and normalizers run only on the entry being processed. Publishing is a Temporal
+  workflow that packs the entries as they are, without parsing or normalizing.
+- **Staged uploads** can be reprocessed by their owners (GUI, API). An `ActionEntryPoint` or an
+  `APIEntryPoint` could offer "re-check my staged uploads", but a user starts it, not an event.
+- **Published uploads** are immutable to users; only an admin reprocesses them
+  (`nomad admin uploads process`). By default `reprocess.delete_unmatched_published_entries` is
+  `False`, so a published duplicate would stay even when no longer matched; switching it on deletes
+  entries others may already refer to.
+- A periodic admin job (outside the plugin), or a publish hook proposed upstream to NOMAD, are the
+  only ways to re-check old entries automatically.
+- **Actions** (`nomad/actions/`) could do the re-checking: a Temporal workflow in a worker, with
+  access to MongoDB, Elasticsearch and the files, allowed to `users`/`groups` named on the entry
+  point. But one starts only by a logged-in user (`POST /actions`) or by code calling
+  `start_action(action_id, data)` with a `user_id`: no schedule, no event. Options, if taken up:
+  (a) an action "check my uploads for duplicate protocols" that reprocesses the user's own staged
+  uploads, so `is_mainfile` drops duplicates — within NOMAD's rules, preferred; (b) an admin-only
+  action run by a Temporal schedule set up outside the plugin, also over published uploads —
+  bypasses their immutability, needs the operators' consent; (c) event triggers for actions
+  (on publish) proposed upstream. Not: a parser calling `start_action`, which fires on
+  processing, not publishing, and loops through reprocessing. Actions are new in the development
+  build; their API may change.
+
+### 35.2a Intended route — an admin action "harmonize published results"
+
+Parsing decides which protocol wins and drops the rest (§35.1); the action only finds the
+published uploads concerned and reprocesses them, so the rules live in one place.
+
+1. Aggregate published protocols by `fingerprint`; groups of more than one; the oldest published
+   wins.
+2. The uploads concerned: those holding a losing protocol, and those holding runs that refer to
+   one (`metadata.entry_references.target_entry_id` is indexed, **verified**).
+3. A dry run first: which entries are deleted, which runs get another `plan`, which aliases are
+   kept. An admin approves.
+4. `upload.process_upload(reprocess_settings={'rematch_published': True,
+   'delete_unmatched_published_entries': True})` (**verified**: what `nomad admin uploads process`
+   calls). Losing protocols no longer match and are deleted; runs refer to the winner and keep
+   their old name in `plan_name_alias`.
+5. Startable by an admin group only (`groups` on the `ActionEntryPoint`).
+
+What parsing needs for it: a protocol is dropped only for one published **before** it (reprocessing
+a published upload finds its own protocols); an entry in a dataset with a DOI stays, as NOMAD
+refuses to remove it (**verified**), and could refer to the winner instead.
+
+### 35.3 What remains open
+
+- Owners are not told that their published entries changed; whether a plugin can send NOMAD's
+  notifications is unchecked.
+- A deleted entry's URL stops working outside NOMAD; only NOMAD's own references are repaired by
+  the reprocessing.
+
+- A duplicate protocol file no run refers to is deleted silently: without an entry there is no
+  place to warn.
+- Between matching and parsing (seconds), a protocol published elsewhere can make a run refer to
+  an entry that was never made; reprocessing fixes it.
+- An upload processed before an identical protocol is published elsewhere publishes its duplicate
+  unless reprocessed first; nothing re-checks it afterwards (§35.2).
+
+### 35.4 Order of building, once taken up
+
+Checked against the code as built (§34): nothing blocks it. Translating and normalizing a variant
+takes ~9 ms and is deterministic (all 117 ISOS variants), so matching computes the fingerprint on a
+normalized copy exactly as the schema will; `normalize` adds only `duration` (compared) and
+`standard_level` (ignored). Every variant's `data.name` is its entry key, so the search by name
+works as is. Two edits come with it: `fingerprint` joins `DISPLAY` in `test_isos_protocols.py`,
+and the run parser gets `level=1` (step 3), since nothing reads a run's protocol entry today.
+
+1. `fingerprint`, and tests of what it ignores and what it compares.
+2. The winner, found once for matching and parsing alike; a cache of fingerprints per file so
+   matching stays linear; duplicates within an upload made no entry.
+3. Runs refer to the winner; `plan_name_alias`; the warning.
+4. Published protocols by fingerprint, and by name.
+5. Example uploads with a duplicate; docs; the regression.
+6. A check against a running NOMAD: the derived upload root, the search syntax for the plugin's
+   own quantity, references across uploads, deletion on reprocessing.
+7. The admin action "harmonize published results" (§35.2a), dry run first.
