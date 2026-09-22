@@ -13,7 +13,8 @@ reading a CSV that names each column's unit in its header, are in
 
 A run is one file that says how the run went (`read_protocol`) and one file per step
 that holds the step's data: a stability series (`read_stability_series`) or a J–V sweep
-(`read_jv_file`).
+(`read_jv_file`). The run file either names the protocol file the run followed, in the
+same upload, or describes the test itself (`read_embedded_protocol`).
 """
 
 from pathlib import Path
@@ -78,6 +79,22 @@ def read_protocol(path: str | Path) -> dict:
 
     Leave out what the file does not say. List the steps in the order they ran, and
     give each step's `file` as a path that can be opened as it is.
+    """
+    raise NotImplementedError
+
+
+def read_embedded_protocol(path: str | Path) -> dict | None:
+    """The protocol the run file at `path` describes itself, or `None` where it names a
+    protocol file instead.
+
+    Return what a `*.stability.yaml` file holds, as plain data: `{'data': {...}}`, with
+    values as text such as `'85 °C'`. The run's entry and an entry for this protocol are
+    both made from the run file, and the run refers to it. Where the file only lists
+    phases and the values held in each, `file_reading_utils.protocol_from_phases` builds
+    it. Otherwise, `return None`.
+
+    Called when the parser decides which entries a file makes, so it must not fail on a
+    run file that names a protocol file.
     """
     raise NotImplementedError
 

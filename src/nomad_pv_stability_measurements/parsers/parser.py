@@ -78,7 +78,7 @@ class StabilityYamlParser(MatchingParser):
         for problem in expansion.problems:
             logger.error(problem.message, path=problem.path)
         if not expansion.has_options:
-            _load(expansion.variants[0].document, archive, logger)
+            load_protocol(expansion.variants[0].document, archive, logger)
             return
         for variant in expansion.variants:
             key = variant.key(stem(mainfile))
@@ -87,10 +87,12 @@ class StabilityYamlParser(MatchingParser):
                 logger.error('no entry was made for this variant.', variant=key)
                 continue
             child.metadata.entry_name = key
-            _load(variant.document, child, logger.bind(variant=key))
+            load_protocol(variant.document, child, logger.bind(variant=key))
 
 
-def _load(document, archive: 'EntryArchive', logger: 'BoundLogger') -> None:
+def load_protocol(document, archive: 'EntryArchive', logger: 'BoundLogger') -> None:
+    """Fills `archive` with the protocol of `document`, what a `*.stability.yaml` file
+    holds without options, and logs what cannot be read."""
     translation = translate(document)
     for problem in translation.problems:
         logger.error(problem.message, path=problem.path)

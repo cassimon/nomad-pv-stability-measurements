@@ -4,12 +4,19 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from nomad.datamodel import EntryArchive
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
     as_datetime,
+    protocol_from_phases,
     read_csv_with_units_in_header,
 )
+from nomad_pv_stability_measurements.parsers.translate import translate
+from nomad_pv_stability_measurements.schema_packages.base_instructions import (
+    MonitorControlInstruction,
+)
+from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 
 
 def written(tmp_path, name, text):
@@ -77,3 +84,43 @@ def test_a_date_is_read_quoted_or_not(value):
     assert as_datetime(value) == datetime(
         2026, 3, 2, 9, tzinfo=timezone(timedelta(hours=1))
     )
+
+
+def test_phases_make_a_protocol_run_in_sequence_and_repeated(log):
+    document = protocol_from_phases(
+        'Day and night',
+        [
+            {'name': 'day', 'duration': '12 h', 'irradiance': '1000 W/m^2'},
+            {'name': 'night', 'duration': '12 h', 'irradiance': 'dark'},
+        ],
+        repeat=7,
+        notes='A lab test.',
+    )
+    translation = translate(document)
+    protocol = StabilityProtocol.m_from_dict(translation.archive['data'])
+    for section in protocol.m_all_contents(depth_first=True, include_self=True):
+        section.normalize(EntryArchive(), log)
+    monitored = [
+        each.monitor
+        for each in protocol.m_all_contents()
+        if isinstance(each, MonitorControlInstruction)
+    ]
+
+    assert translation.problems == []
+    assert log.errors == []
+    assert protocol.seconds() == 7 * 24 * 3600
+    assert protocol.notes == 'A lab test.'
+    # Held and monitored, except the light in the dark.
+    assert monitored == [True, None]
+
+
+@pytest.mark.parametrize(
+    ('phase', 'fragment'),
+    [
+        ({'name': 'soak', 'duration': '1 h', 'pressure': '1 bar'}, 'pressure'),
+        ({'name': 'soak', 'temperature': '85 °C'}, 'no duration'),
+    ],
+)
+def test_a_phase_that_cannot_be_written_raises(phase, fragment):
+    with pytest.raises(ValueError, match=fragment):
+        protocol_from_phases('test', [phase])

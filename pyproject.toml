@@ -137,6 +137,7 @@ normalizer_entry_point = "nomad_pv_stability_measurements.normalizers:normalizer
 example_upload_entry_point = "nomad_pv_stability_measurements.example_uploads:example_upload_entry_point"
 simulated_runs_example_upload_entry_point = "nomad_pv_stability_measurements.example_uploads:simulated_runs_example_upload_entry_point"
 custom_protocols_example_upload_entry_point = "nomad_pv_stability_measurements.example_uploads:custom_protocols_example_upload_entry_point"
+protocols_in_run_files_example_upload_entry_point = "nomad_pv_stability_measurements.example_uploads:protocols_in_run_files_example_upload_entry_point"
 
 [tool.cruft]
 # Avoid updating workflow files, this leads to permissions issues

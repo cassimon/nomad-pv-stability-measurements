@@ -29,3 +29,13 @@ custom_protocols_example_upload_entry_point = ExampleUploadEntryPoint(
     'count and by time, and conditions held side by side. Nothing was measured.',
     resources=['example_uploads/custom_protocols/*'],
 )
+
+protocols_in_run_files_example_upload_entry_point = ExampleUploadEntryPoint(
+    title='Simulated stability runs that describe their own test',
+    category='Examples',
+    description='Two simulated runs whose run files name no protocol file but '
+    'describe the test themselves: damp heat at open circuit, and seven days and '
+    'nights at 45 °C. Each run file makes two entries, the run and the protocol it '
+    'describes, and the run refers to its protocol. Nothing was measured.',
+    resources=['example_uploads/protocols_in_run_files/*'],
+)

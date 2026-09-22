@@ -6,6 +6,8 @@ from nomad.utils import generate_entry_id
 
 from nomad_pv_stability_measurements.parsers import measurement_parser_entry_point
 from nomad_pv_stability_measurements.parsers.measurement_parser import (
+    PROTOCOL_KEY,
+    embedded_protocol_reference,
     protocol_reference,
 )
 
@@ -48,6 +50,30 @@ def test_a_run_refers_to_the_protocol_entry_it_followed(run, key):
     entry_id = generate_entry_id('upload', run['protocol'], key)
 
     assert protocol_reference(run, archive) == f'../upload/archive/{entry_id}#/data'
+
+
+def test_a_run_file_describing_its_test_also_makes_the_protocol_entry(tmp_path):
+    path = tmp_path / 'x.run.yaml'
+    content = (
+        'run:\n  institution: SIM\n'
+        'test conditions:\n'
+        '  name: Damp heat\n'
+        '  phases: [{name: soak, duration: 1000 h, temperature: 85 °C}]\n'
+    )
+    path.write_text(content, encoding='utf-8')
+
+    matched = PARSER.is_mainfile(str(path), 'text/plain', content.encode(), content)
+
+    assert list(matched) == [PROTOCOL_KEY]
+
+
+def test_a_run_describing_its_test_refers_to_the_protocol_entry_of_its_own_file():
+    archive = EntryArchive(
+        metadata=EntryMetadata(upload_id='upload', mainfile='a/x.run.yaml')
+    )
+    entry_id = generate_entry_id('upload', 'a/x.run.yaml', PROTOCOL_KEY)
+
+    assert embedded_protocol_reference(archive) == f'../upload/archive/{entry_id}#/data'
 
 
 def test_outside_an_upload_a_run_refers_to_no_protocol():

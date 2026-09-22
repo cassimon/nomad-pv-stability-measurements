@@ -12,6 +12,7 @@ from nomad_pv_stability_measurements.file_reading.file_reading_SIM import (
     is_jv_file,
     is_protocol_file,
     is_stability_series_file,
+    read_embedded_protocol,
     read_jv_file,
     read_protocol,
     read_stability_series,
@@ -109,3 +110,22 @@ def test_the_simulated_runs_are_recognized_and_read():
             assert is_jv_file(step['file']) or is_stability_series_file(step['file'])
             lengths = {np.size(values) for values in read(step['file']).values()}
             assert len(lengths) == 1, step['file']
+
+
+def test_a_run_file_describing_its_test_gives_that_protocol(tmp_path):
+    described = written(
+        tmp_path,
+        'x.run.yaml',
+        'run: {institution: SIM}\n'
+        'test conditions:\n'
+        '  name: Damp heat\n'
+        '  phases: [{name: soak, duration: 1000 h, temperature: 85 °C}]\n',
+    )
+    named = written(
+        tmp_path,
+        'y.run.yaml',
+        'run: {institution: SIM, protocol: isos/ISOS-D-3.stability.yaml}\n',
+    )
+
+    assert read_embedded_protocol(described)['data']['name'] == 'Damp heat'
+    assert read_embedded_protocol(named) is None

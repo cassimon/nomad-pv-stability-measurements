@@ -1,0 +1,37 @@
+run:
+  institution: SIM
+  name: Damp heat at open circuit, cell A
+  operator: A. Researcher
+  start: '2026-08-10T09:00:00+01:00'
+  end: '2026-08-17T09:24:00+01:00'
+  location: Berlin, lab 2.14
+  samples:
+  - name: cell A
+  instruments:
+  - name: climate chamber
+  - name: temperature and humidity logger
+  - name: J–V station
+  notes: 'Simulated data: nothing was measured.'
+test conditions:
+  name: Damp heat at open circuit
+  repeat: 1
+  phases:
+  - name: damp heat
+    duration: 1000 h
+    temperature: 85 °C
+    relative_humidity: 85 %
+    irradiance: dark
+    electrical_load: open_circuit
+steps:
+- name: initial J–V
+  kind: jv
+  file: 01_jv_initial.csv
+  start: '2026-08-10T09:00:00+01:00'
+- name: ageing
+  kind: stability_series
+  file: 02_stability_series.csv
+  start: '2026-08-10T09:12:00+01:00'
+- name: final J–V
+  kind: jv
+  file: 03_jv_final.csv
+  start: '2026-08-17T09:22:00+01:00'

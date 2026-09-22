@@ -6,8 +6,10 @@ Run it from anywhere with the plugin's Python:
 
 It simulates one run of each protocol file in `isos/`, written to `simulated_data/`,
 and in `custom_protocols/`, written beside the protocols. Of a file with options it
-takes the first variant, the first alternative of every option. Each run is a folder
-named after the standard, or else after the protocol file:
+takes the first variant, the first alternative of every option. The runs in
+`protocols_in_run_files/` follow no protocol file: their run files describe the test
+under `test conditions`, taken from `TEST_CONDITIONS`. Each run is a folder named after
+the standard, or else after the protocol file or the test:
 
     ISOS-L-2/
       ISOS-L-2.run.yaml         who ran what, when, on which samples, and the steps
@@ -42,6 +44,9 @@ import numpy as np
 import yaml
 from nomad.datamodel import EntryArchive
 
+from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
+    protocol_from_phases,
+)
 from nomad_pv_stability_measurements.parsers.options import expand
 from nomad_pv_stability_measurements.parsers.parser import stem
 from nomad_pv_stability_measurements.parsers.translate import translate
@@ -62,6 +67,47 @@ SOURCES = (
     (HERE / 'isos', HERE / 'simulated_data', 'isos/'),
     (HERE / 'custom_protocols', HERE / 'custom_protocols', ''),
 )
+#: Where the runs of `TEST_CONDITIONS` are written.
+IN_RUN_FILES = HERE / 'protocols_in_run_files'
+#: Tests described in the run file instead of a protocol file, by the run's folder, as
+#: SIM writes them under `test conditions`: phases run one after another, `repeat`
+#: times, and what each holds. The first quantity of a phase sets how long it lasts.
+TEST_CONDITIONS = {
+    'damp-heat-at-open-circuit': {
+        'name': 'Damp heat at open circuit',
+        'repeat': 1,
+        'phases': [
+            {
+                'name': 'damp heat',
+                'duration': '1000 h',
+                'temperature': '85 °C',
+                'relative_humidity': '85 %',
+                'irradiance': 'dark',
+                'electrical_load': 'open_circuit',
+            }
+        ],
+    },
+    'day-and-night-at-45C': {
+        'name': 'Day and night at 45 °C',
+        'repeat': 7,
+        'phases': [
+            {
+                'name': 'day',
+                'duration': '12 h',
+                'irradiance': '1000 W/m^2',
+                'temperature': '45 °C',
+                'electrical_load': 'mpp',
+            },
+            {
+                'name': 'night',
+                'duration': '12 h',
+                'irradiance': 'dark',
+                'temperature': '45 °C',
+                'electrical_load': 'open_circuit',
+            },
+        ],
+    },
+}
 
 #: How long a run lasts where the protocol does not end sooner.
 RUN_LENGTH = 168.0  # h: one week
@@ -129,18 +175,51 @@ class _Quiet:
     warning = info = debug = error
 
 
-def first_variant(path: Path) -> tuple[str, StabilityProtocol]:
-    """The first variant of the protocol file `path`, by its entry name, loaded and
-    normalized, so that every block knows its duration."""
+@dataclass
+class Source:
+    """A protocol to simulate a run of, and how the run file tells of it."""
+
+    protocol: StabilityProtocol
+    key: str  # the protocol's entry name
+    designation: str  # the run's folder, and its file's name
+    refers: dict  # what the run file says of it under `run`
+    describes: dict | None = None  # the test conditions, if the run file has them
+
+
+def loaded(document: dict) -> StabilityProtocol:
+    """The protocol of `document`, what a protocol file without options holds, loaded
+    and normalized, so that every block knows its duration."""
+    protocol = StabilityProtocol.m_from_dict(translate(document).archive['data'])
+    for section in protocol.m_all_contents(depth_first=True, include_self=True):
+        section.normalize(EntryArchive(), _Quiet())
+    return protocol
+
+
+def first_variant(path: Path, in_upload: str) -> Source:
+    """The first variant of the protocol file `path`, which the upload holds at
+    `in_upload`."""
     expansion = expand(yaml.safe_load(path.read_text(encoding='utf-8')))
     variant = expansion.variants[0]
     key = variant.key(stem(str(path))) if expansion.has_options else stem(str(path))
-    protocol = StabilityProtocol.m_from_dict(
-        translate(variant.document).archive['data']
+    protocol = loaded(variant.document)
+    return Source(
+        protocol=protocol,
+        key=key,
+        designation=protocol.standard or stem(str(path)),
+        refers={'protocol': f'{in_upload}{path.name}', 'variant': key},
     )
-    for section in protocol.m_all_contents(depth_first=True, include_self=True):
-        section.normalize(EntryArchive(), _Quiet())
-    return key, protocol
+
+
+def described(designation: str, conditions: dict) -> Source:
+    """The test a run file describes under `test conditions`."""
+    protocol = loaded(protocol_from_phases(**conditions))
+    return Source(
+        protocol=protocol,
+        key=protocol.name,
+        designation=designation,
+        refers={},
+        describes=conditions,
+    )
 
 
 def quantity_of(instruction) -> str | None:
@@ -474,11 +553,9 @@ def slug(text: str) -> str:
     return re.sub(r'\W+', '_', text.lower()).strip('_')
 
 
-def simulate(path: Path, index: int, output: Path, in_upload: str) -> str:
-    """Write the run of the first variant of the protocol file `path` into `output`;
-    returns the variant's entry name."""
-    key, protocol = first_variant(path)
-    designation = protocol.standard or stem(str(path))
+def simulate(source: Source, index: int, output: Path) -> str:
+    """Write the run of `source` into `output`; returns the protocol's entry name."""
+    key, protocol, designation = source.key, source.protocol, source.designation
     length = min(RUN_LENGTH, hours(protocol))
     started = START + timedelta(days=7 * index)
     ageing_start = started + JV_LENGTH + CHANGEOVER
@@ -527,8 +604,7 @@ def simulate(path: Path, index: int, output: Path, in_upload: str) -> str:
     run = {
         'institution': INSTITUTION,
         'name': f'{key if protocol.standard else protocol.name or key}, cell A',
-        'protocol': f'{in_upload}{path.name}',
-        'variant': key,
+        **source.refers,
         'standard': protocol.standard,
         'operator': OPERATOR,
         'start': started.isoformat(),
@@ -542,6 +618,7 @@ def simulate(path: Path, index: int, output: Path, in_upload: str) -> str:
     }
     document = {
         'run': {name: value for name, value in run.items() if value is not None},
+        **({'test conditions': source.describes} if source.describes else {}),
         'steps': [
             {'name': name, 'kind': kind, 'file': file, 'start': start.isoformat()}
             for name, kind, file, start in steps
@@ -555,11 +632,17 @@ def simulate(path: Path, index: int, output: Path, in_upload: str) -> str:
 
 
 def main() -> None:
-    index = 0
-    for protocols, output, in_upload in SOURCES:
-        for path in sorted(protocols.glob('*.stability.yaml')):
-            print(simulate(path, index, output, in_upload))
-            index += 1
+    runs = [
+        (first_variant(path, in_upload), output)
+        for protocols, output, in_upload in SOURCES
+        for path in sorted(protocols.glob('*.stability.yaml'))
+    ]
+    runs += [
+        (described(designation, conditions), IN_RUN_FILES)
+        for designation, conditions in TEST_CONDITIONS.items()
+    ]
+    for index, (source, output) in enumerate(runs):
+        print(simulate(source, index, output))
 
 
 if __name__ == '__main__':

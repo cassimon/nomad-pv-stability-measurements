@@ -12,6 +12,16 @@ SIM writes a run as a folder:
 A run recorded in phases has one stability series per phase and a J–V sweep after
 each: `02_stability_series_burn_in.csv`, `03_jv_after_burn_in.csv`, and so on.
 
+A run file either names the protocol file the run followed, as `protocol` and `variant`
+under `run`, or describes the test itself under `test conditions`: the phases run one
+after another, `repeat` times, and what each holds:
+
+    test conditions:
+      name: Damp heat at open circuit
+      repeat: 1
+      phases:
+      - {name: damp heat, duration: 1000 h, temperature: 85 °C, ...}
+
 Each CSV names a column and its unit in the header, as `temperature (°C)`. What
 another institution could share is in `file_reading_utils.py`.
 """
@@ -24,6 +34,7 @@ import yaml
 
 from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
     as_datetime,
+    protocol_from_phases,
     read_csv_with_units_in_header,
 )
 
@@ -75,6 +86,13 @@ def read_protocol(path: str | Path) -> dict:
         if 'file' in step:
             step['file'] = str(path.parent / step['file'])
     return {'run': run, 'steps': steps}
+
+
+def read_embedded_protocol(path: str | Path) -> dict | None:
+    """The protocol of the run file's `test conditions`, or `None` if it has none."""
+    document = yaml.safe_load(Path(path).read_text(encoding='utf-8')) or {}
+    conditions = document.get('test conditions')
+    return None if conditions is None else protocol_from_phases(**conditions)
 
 
 def read_stability_series(path: str | Path) -> dict[str, pint.Quantity]:

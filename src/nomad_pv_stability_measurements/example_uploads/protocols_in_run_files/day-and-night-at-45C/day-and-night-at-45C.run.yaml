@@ -1,0 +1,43 @@
+run:
+  institution: SIM
+  name: Day and night at 45 °C, cell A
+  operator: A. Researcher
+  start: '2026-08-17T09:00:00+01:00'
+  end: '2026-08-24T09:24:00+01:00'
+  location: Berlin, lab 2.14
+  samples:
+  - name: cell A
+  instruments:
+  - name: solar simulator
+  - name: oven
+  - name: MPP tracker
+  - name: temperature and humidity logger
+  - name: J–V station
+  notes: 'Simulated data: nothing was measured.'
+test conditions:
+  name: Day and night at 45 °C
+  repeat: 7
+  phases:
+  - name: day
+    duration: 12 h
+    irradiance: 1000 W/m^2
+    temperature: 45 °C
+    electrical_load: mpp
+  - name: night
+    duration: 12 h
+    irradiance: dark
+    temperature: 45 °C
+    electrical_load: open_circuit
+steps:
+- name: initial J–V
+  kind: jv
+  file: 01_jv_initial.csv
+  start: '2026-08-17T09:00:00+01:00'
+- name: ageing
+  kind: stability_series
+  file: 02_stability_series.csv
+  start: '2026-08-17T09:12:00+01:00'
+- name: final J–V
+  kind: jv
+  file: 03_jv_final.csv
+  start: '2026-08-24T09:22:00+01:00'

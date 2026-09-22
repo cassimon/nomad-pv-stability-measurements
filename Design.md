@@ -3759,6 +3759,7 @@ with the same interface, written out in `file_reading/file_reading_TEMPLATE.py`.
 | `read_protocol(path)` | `{'run': {...}, 'steps': [{name, kind, file, start}, ...]}`, dates as datetimes, each `file` a path that opens as it is |
 | `read_stability_series(path)` | one quantity array per column, by the name of the quantity it fills |
 | `read_jv_file(path)` | `voltage`, `current_density`, `direction` |
+| `read_embedded_protocol(path)` | the protocol the run file describes itself, as a `*.stability.yaml` holds it (`{'data': {...}}`), or `None` where it names a protocol file (§34.4a) |
 
 - Plain functions, plain data (dicts, datetimes, pint quantities): an institution only fills in
   one file. `tests/file_reading/test_file_reading_interface.py` holds every `file_reading_<X>.py` to the
@@ -3766,7 +3767,11 @@ with the same interface, written out in `file_reading/file_reading_TEMPLATE.py`.
 - What more than one format shares is in `file_reading/file_reading_utils.py`:
   `read_csv_with_units_in_header` (a header `temperature (°C)` gives a quantity column, one
   without a unit a text column; unit strings through `units.split_match_convert`, so `h` is an
-  hour) and `as_datetime`.
+  hour), `as_datetime`, and `protocol_from_phases(name, phases, repeat=1, **fields)`: for a run
+  file that only lists phases and what each holds, the protocol file it amounts to — the phases
+  as parallel blocks in a routine repeated `repeat` times, the first quantity of a phase stating
+  its duration and the others `whole block`, every quantity held and monitored except the light
+  in the dark. A quantity it does not know, or a phase without a duration, raises `ValueError`.
 - "Protocol" in `read_protocol` is the run's record of the protocol it followed, not a
   `StabilityProtocol`: the name the institutions' side uses.
 
@@ -3791,6 +3796,26 @@ Every CSV names each column's unit in its header.
 - The sample's `lab_id` is left out of the simulated runs: `EntityReference.normalize` searches
   Elasticsearch by it, which a run needs no part of.
 
+### 34.4a A protocol described in the run file
+
+Some institutions keep no protocol files; their run file says what the test was. Such a file
+makes **two entries**, through NOMAD's child entries (as options do, §24): the run is the main
+entry, and the protocol a child keyed `PROTOCOL_KEY = 'protocol'`.
+
+- `creates_children = True`. `is_mainfile` returns `['protocol']` where the institution's
+  `read_embedded_protocol` gives a protocol, `True` otherwise (**verified**: the main entry is
+  always made, children beside it). `is_mainfile` is handed the file's full path, so it reads
+  the whole file, as the protocol parser does for options.
+- The protocol is read as a protocol file is (`parser.load_protocol`: `translate` →
+  `StabilityProtocol`), so an institution only rewrites its words into the authored form, and
+  the translator's units, defaults and messages apply unchanged.
+- `plan` refers to the child: `generate_entry_id(upload_id, metadata.mainfile, 'protocol')`.
+- An institution's reader failing is logged, not raised; the run is still read, with no `plan`.
+- Rejected: writing a `.stability.yaml` into the upload from the parser — files the lab never
+  wrote, dependent on processing order, and a second copy that can drift from the run file.
+- The protocol is what the file says was **planned**, never inferred from the recorded data,
+  which would merge the plan into what happened and leave no deviation to find.
+
 ### 34.5 Example uploads
 
 | Entry point | `resources` | |
@@ -3798,6 +3823,7 @@ Every CSV names each column's unit in its header.
 | `example_upload_entry_point` | `isos` | the protocols (§16), unchanged |
 | `simulated_runs_example_upload_entry_point` | `isos`, `simulated_data/*` | a run of the first variant of every ISOS file, beside a copy of the protocols |
 | `custom_protocols_example_upload_entry_point` | `custom_protocols/*` | three protocols that follow no standard, each beside its run |
+| `protocols_in_run_files_example_upload_entry_point` | `protocols_in_run_files/*` | two runs whose run files describe their test under `test conditions` (damp heat at open circuit; seven days and nights at 45 °C), each making a run and a protocol entry (§34.4a) |
 
 The ISOS protocols are copied into the upload by `resources`, not duplicated in the repository.
 The custom protocols show what the schema holds beyond ISOS Table 1:
@@ -3810,7 +3836,8 @@ The custom protocols show what the schema holds beyond ISOS Table 1:
 
 ### 34.6 Simulating — `example_uploads/simulate_runs.py`
 
-Not shipped in any upload; writes `simulated_data/` and the run folders in `custom_protocols/`.
+Not shipped in any upload; writes `simulated_data/`, the run folders in `custom_protocols/`,
+and `protocols_in_run_files/` from its `TEST_CONDITIONS` through `protocol_from_phases`.
 Seeded per run, so the files are reproduced exactly.
 
 - It loads the first variant through the plugin's own path (`expand` → `translate` →
@@ -3841,6 +3868,8 @@ Seeded per run, so the files are reproduced exactly.
 7. The regression over every run of both uploads through NOMAD's own `parse` and `normalize_all`
    (each loads without an error and follows a protocol entry that exists in its upload), this
    section, CLAUDE.md, READMEs. *Built.*
+8. A protocol described in the run file (§34.4a): `read_embedded_protocol` in the interface,
+   `protocol_from_phases`, the child entry, the third run upload. *Built.*
 
 Not done, on purpose: figures of the steps, figures of merit from the J–V sweeps (V_oc, J_sc, FF,
 PCE, T80), J–V scans as instructions of a protocol, and `deviations_from_plan` worked out from a
