@@ -1,0 +1,33 @@
+run:
+  name: ISOS-LT-2 (MPP), cell A
+  protocol: isos/ISOS-LT-2.stability.yaml
+  variant: ISOS-LT-2 (MPP)
+  standard: ISOS-LT-2
+  operator: A. Researcher
+  start: '2026-05-04T09:00:00+01:00'
+  end: '2026-05-11T09:24:00+01:00'
+  location: Berlin, lab 2.14
+  samples:
+  - name: cell A
+    lab_id: SIM-ISOS-LT-2-A
+  instruments:
+  - name: solar simulator
+  - name: thermal cycling chamber
+  - name: MPP tracker
+  - name: temperature and humidity logger
+  - name: J–V station
+  notes: 'Simulated data: nothing was measured. The protocol states no rate for the temperature
+    cycle: one cycle is assumed to take 6 h.'
+steps:
+- name: initial J–V
+  kind: jv
+  file: 01_jv_initial.csv
+  start: '2026-05-04T09:00:00+01:00'
+- name: ageing
+  kind: time_series
+  file: 02_ageing.csv
+  start: '2026-05-04T09:12:00+01:00'
+- name: final J–V
+  kind: jv
+  file: 03_jv_final.csv
+  start: '2026-05-11T09:22:00+01:00'
