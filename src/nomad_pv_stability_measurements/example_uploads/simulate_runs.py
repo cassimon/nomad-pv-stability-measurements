@@ -8,12 +8,13 @@ For each file in `isos/` it takes the first variant (the first alternative of ev
 option) and writes a folder named after the standard:
 
     ISOS-L-2/
-      ISOS-L-2.run.yaml      who ran what, when, on which samples, and the steps
-      01_jv_initial.csv      J–V sweep of the fresh device, reverse then forward
-      02_ageing.csv          every monitored quantity in one table, one row per sample
-      03_jv_final.csv        J–V sweep after the ageing
+      ISOS-L-2.run.yaml         who ran what, when, on which samples, and the steps
+      01_jv_initial.csv         J–V sweep of the fresh device, reverse then forward
+      02_stability_series.csv   every monitored quantity in one table, one row per sample
+      03_jv_final.csv           J–V sweep after the ageing
 
-The ageing table has a `time` column and one column per quantity the protocol
+This is the format of the institution SIM, which `parsers/file_reading_SIM.py` reads.
+The stability series has a `time` column and one column per quantity the protocol
 monitors, the unit in the header. What is simulated follows what the protocol states:
 held values with noise, the band a solar simulator is kept in, light-dark cycles,
 temperature cycles, an ambient room and an outdoor day. What the protocol leaves open
@@ -60,10 +61,11 @@ CYCLE_PERIOD = 6.0  # h
 #: A stepped cycle (`cycle`) spends this of each half period moving between its ends.
 STEP_TRANSITION = 1.0  # h
 
+INSTITUTION = 'SIM'
 OPERATOR = 'A. Researcher'
 SIMULATED = 'Simulated data: nothing was measured.'
 
-#: Column name and unit of each quantity in the ageing table, in the order written.
+#: Column name and unit of each quantity in the stability series, in the order written.
 COLUMNS = {
     'time': 'h',
     'temperature': '°C',
@@ -107,7 +109,7 @@ def first_variant(path: Path) -> tuple[str, StabilityProtocol]:
 
 
 def quantity_of(instruction) -> str | None:
-    """Which column of the ageing table an instruction is about, if any."""
+    """Which column of the stability series an instruction is about, if any."""
     name = type(instruction).__name__
     if name == 'MPPTracking':
         return 'mpp'
@@ -394,7 +396,7 @@ def simulate(path: Path, index: int) -> str:
     final_start = ageing_start + timedelta(hours=RUN_LENGTH) + CHANGEOVER
     steps = [
         ('initial J–V', 'jv', '01_jv_initial.csv', started),
-        ('ageing', 'time_series', '02_ageing.csv', ageing_start),
+        ('ageing', 'stability_series', '02_stability_series.csv', ageing_start),
         ('final J–V', 'jv', '03_jv_final.csv', final_start),
     ]
     write_jv(folder / steps[0][2], 1.0)
@@ -403,6 +405,7 @@ def simulate(path: Path, index: int) -> str:
 
     run = {
         'run': {
+            'institution': INSTITUTION,
             'name': f'{key}, cell A',
             'protocol': f'{PROTOCOLS_IN_UPLOAD}/{path.name}',
             'variant': key,

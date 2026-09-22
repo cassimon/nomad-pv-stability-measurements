@@ -1,4 +1,5 @@
 run:
+  institution: SIM
   name: ISOS-LC-2 (65 °C, MPP, 2 h, 1:1), cell A
   protocol: isos/ISOS-LC-2.stability.yaml
   variant: ISOS-LC-2 (65 °C, MPP, 2 h, 1:1)
@@ -23,8 +24,8 @@ steps:
   file: 01_jv_initial.csv
   start: '2026-04-20T09:00:00+01:00'
 - name: ageing
-  kind: time_series
-  file: 02_ageing.csv
+  kind: stability_series
+  file: 02_stability_series.csv
   start: '2026-04-20T09:12:00+01:00'
 - name: final J–V
   kind: jv

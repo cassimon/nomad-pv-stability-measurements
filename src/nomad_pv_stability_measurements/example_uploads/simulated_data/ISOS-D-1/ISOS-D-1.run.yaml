@@ -1,4 +1,5 @@
 run:
+  institution: SIM
   name: ISOS-D-1, cell A
   protocol: isos/ISOS-D-1.stability.yaml
   variant: ISOS-D-1
@@ -20,8 +21,8 @@ steps:
   file: 01_jv_initial.csv
   start: '2026-03-02T09:00:00+01:00'
 - name: ageing
-  kind: time_series
-  file: 02_ageing.csv
+  kind: stability_series
+  file: 02_stability_series.csv
   start: '2026-03-02T09:12:00+01:00'
 - name: final J–V
   kind: jv
