@@ -3204,7 +3204,8 @@ Plan (EntryData)                name, description, estimated_duration, instructi
 
 - **An instruction is completed after its `estimated_duration`. Empty means it never finishes.**
   There is no "condition lasting as long as its block" any more: a setting without a duration
-  simply never ends.
+  simply never ends. *(Superseded by §32: in a parallel block, it does last as long as its
+  block.)*
 - **Instructions are consistent on their own.** A block's `estimated_duration` is always derived,
   never authored. `InstructionBlock`, the parent of both repeating blocks, runs its
   sub-instructions once (`sequential` sum, `parallel` maximum); a `CountingRepeatingBlock` lasts
@@ -3226,7 +3227,8 @@ Plan (EntryData)                name, description, estimated_duration, instructi
 
 `StabilityProtocol.instruction_execution_mode = 'parallel'`: the settings, which never finish,
 and the routine start together, so the routine is not left waiting behind them. With settings in
-every file, a protocol claims no length unless it writes `duration`.
+every file, a protocol claims no length unless it writes `duration`. *(Since §32: or its routine
+finishes.)*
 
 **No cross-instruction checks.** R4 (two instructions on one quantity at once), R5 (an
 instruction that never runs) and the level-3 MPP rule are dropped, with `utils.py`. They
@@ -3484,3 +3486,38 @@ a reader of the timeline (§29) could use. ISOS-L 22 → 11, ISOS-LC 108 → 54,
   a mid grey (`AXIS_COLOR`). The page shows through (`paper_bgcolor` transparent), and the rows
   sit on a translucent grey with a translucent grid. The role colours are of middle lightness.
   Text colour is left to the GUI's theme.
+
+## 32. A condition lasts as long as its parallel block
+
+Supersedes the first bullet of §23.1 for parallel blocks. Under §23.1 a single instruction
+without a `duration` never finished, and that passed up to every parent. A phase could therefore
+not hold a condition: *hold 65 °C while cycling light and dark five times, then recover at
+25 °C* made the phase endless, and the recovery never ran — silently, since R5 is gone. The
+workarounds wrote one fact twice: the phase length again on the hold (and a hold shorter or
+longer than the phase is not reported), or a `TimedRepeatingBlock` whose "repeat" never
+completes a pass.
+
+**The rule.**
+
+- In a **parallel** block, or a plan run in parallel, a **single instruction** without a
+  `duration` is a *condition*: it lasts as long as the block. The block lasts as long as its
+  longest other sub-instruction; with nothing else there, it never finishes.
+- A **block** without a duration still never finishes, and keeps its parent going: *keep going
+  forever* is said by a block (`IndefiniteRepeatingBlock`), *for as long as this phase* by a
+  bare instruction. The class says which (`Instruction.lasts_as_long_as_its_block`).
+- In a **sequential** block nothing changes: an instruction without a duration never finishes,
+  and what follows it never runs. "Until the end of the block" would contradict *one after
+  another*.
+- In a repeating parallel block, a condition lasts one pass, and is drawn once per iteration.
+- A condition's `duration` stays empty: it is not derived, only drawn to its block's end.
+
+**What it costs.** An instruction's extent now depends on its siblings — but only on those of
+one parallel block, never on the tree, so no second pass and no interval arithmetic.
+
+**The protocol** runs in parallel (§23.2), so its settings last as long as its routine: a
+protocol with a routine that finishes has that length without writing `duration`
+(`tests/data/channels.stability.yaml`: 725 h, formerly none). Every ISOS routine is indefinite,
+so all 117 variants are unchanged — durations, messages and figures compared before and after.
+
+The meaning is written into `sub_instruction_execution_mode`'s and `instruction_execution_mode`'s
+descriptions, where an author choosing the mode reads it.

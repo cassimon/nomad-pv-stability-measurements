@@ -35,7 +35,9 @@ class Instruction(ArchiveSection):
     """Something to be done, which is completed after its `duration`.
 
     Instructions are consistent on their own: a block's duration is always derived from
-    what it contains. Only a `Plan` stops its instructions early.
+    what it contains. Only a `Plan`, or a timed block, stops its instructions early. The
+    one thing a sibling decides is how long a single instruction without a duration lasts
+    in a parallel block (Design.md §32).
     """
 
     m_def = Section(
@@ -60,7 +62,8 @@ class Instruction(ArchiveSection):
         type=np.float64,
         unit='s',
         description='How long the whole instruction is going to take, including any '
-        'sub-instructions. Must be positive. Empty means the end is indefinite.',
+        'sub-instructions. Must be positive. Empty: a single instruction run in parallel '
+        'with others lasts as long as they do; anywhere else, it never finishes.',
     )
 
     sub_instructions = SubSection(
@@ -85,9 +88,22 @@ class Instruction(ArchiveSection):
         what `normalize` derives, so the label does not change when normalized again."""
         return words(type(self).__name__)
 
+    def lasts_as_long_as_its_block(self) -> bool:
+        """Whether, run in parallel with others, it ends when they do rather than
+        deciding when that is. A block never does: without a duration, it never
+        finishes."""
+        return False
+
 
 class SingleInstruction(Instruction):
-    """One instruction that contains no others."""
+    """One instruction that contains no others.
+
+    Without a `duration` it is a condition: in a parallel block, or a plan run in
+    parallel, it lasts as long as the rest of it; anywhere else it never finishes.
+    """
+
+    def lasts_as_long_as_its_block(self) -> bool:
+        return self.duration is None
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
@@ -161,14 +177,21 @@ class InstructionBlock(Instruction):
     """Instructions run one after another or simultaneously — once.
 
     The parent of the blocks that repeat. Its `duration` is always derived
-    from its sub-instructions, and empty if any of them never finishes.
+    from its sub-instructions, and empty where it never finishes: see
+    `sub_instruction_execution_mode`.
     """
 
     sub_instruction_execution_mode = Quantity(
         type=MEnum('sequential', 'parallel'),
         default='sequential',
-        description='Whether the sub-instructions are executed one after another or all '
-        'at once.',
+        description='Whether the sub-instructions are executed one after another '
+        '(`sequential`) or all at once (`parallel`). This also decides what an instruction '
+        'without a `duration` means. `parallel`: a single instruction without one is a '
+        'condition, held for as long as the others run, so the block lasts as long as its '
+        'longest other sub-instruction; it never finishes only if a sub-block never does, '
+        'or if nothing else is there. `sequential`: an instruction without a duration never '
+        'finishes, so the block never does and whatever follows it never runs. To hold a '
+        'condition during a phase, put it in a parallel block beside what the phase does.',
     )
 
     def normalize(self, archive, logger):
@@ -198,8 +221,7 @@ class InstructionBlock(Instruction):
     def one_iteration(self):
         """How long the sub-instructions take once; `None` if they never finish."""
         return combined_duration(
-            [each.duration for each in self.sub_instructions],
-            self.sub_instruction_execution_mode,
+            self.sub_instructions, self.sub_instruction_execution_mode
         )
 
     def derive_duration(self):
@@ -221,7 +243,8 @@ class InstructionBlock(Instruction):
         for _ in range(min(self.repetitions(), ITERATIONS_FOR_PLOTTING)):
             if time >= min(stop, end):
                 break
-            series.extend(self.iteration_for_plotting(time, min(stop, end)))
+            # A condition in a parallel pass ends with the pass.
+            series.extend(self.iteration_for_plotting(time, min(stop, end, time + one)))
             time += one
         # At `stop` too: the drawing may end exactly where the block breaks off.
         if time < end and time <= stop:
@@ -499,16 +522,15 @@ class TimePlan(Plan):
         default='sequential',
         description='How the instructions are supposed to be executed: `sequential` '
         'means one after another, `parallel` means they all start at once, but may '
-        'finish at different times.',
+        'finish at different times. In parallel, a single instruction without a '
+        '`duration` lasts as long as the plan; one after another, it never finishes and '
+        'what follows never runs.',
     )
 
     def combine_instruction_durations(self):
         """How long the instructions last together, run as `instruction_execution_mode`
         says; `None` if one of them never finishes. Override it for any other rule."""
-        return combined_duration(
-            [instruction.duration for instruction in self.instructions],
-            self.instruction_execution_mode,
-        )
+        return combined_duration(self.instructions, self.instruction_execution_mode)
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)

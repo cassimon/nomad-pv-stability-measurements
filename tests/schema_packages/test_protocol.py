@@ -46,7 +46,7 @@ def test_a_protocol_is_a_plan_whose_instructions_all_start_together(normalized):
     assert protocol.duration.to('s').magnitude == pytest.approx(3600)
 
 
-def test_settings_that_never_finish_give_the_protocol_no_end(normalized):
+def test_settings_last_as_long_as_what_finishes_beside_them(normalized):
     protocol = normalized(
         StabilityProtocol(
             instructions=[
@@ -54,6 +54,14 @@ def test_settings_that_never_finish_give_the_protocol_no_end(normalized):
                 HoldTemperature(duration=1800 * ureg.second),
             ]
         )
+    )
+
+    assert protocol.duration.to('s').magnitude == pytest.approx(1800)
+
+
+def test_settings_alone_give_the_protocol_no_end(normalized):
+    protocol = normalized(
+        StabilityProtocol(instructions=[HoldIrradiance(monitor=True)])
     )
 
     assert protocol.duration is None

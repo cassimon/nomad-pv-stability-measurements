@@ -76,8 +76,9 @@ class StabilityProtocol(PlotSection, TimePlan):
         type=MEnum('sequential', 'parallel'),
         default='parallel',
         description='How the instructions are executed. `parallel` by default: the '
-        'settings, which never finish, and the routine all start together (Design.md '
-        '§23.2).',
+        'settings and the routine all start together, and the settings last as long as '
+        "the protocol: its `duration` where written, else the routine's (Design.md "
+        '§23.2, §32).',
     )
 
     standard = Quantity(

@@ -84,9 +84,18 @@ class TimePlotSeries:
         self.breaks += other.breaks
 
 
-def combined_duration(durations, mode: str):
-    """How long instructions with these `durations` last together: one after another
-    (`sequential`) or all at once (`parallel`). `None` if any of them never finishes."""
+def combined_duration(instructions, mode: str):
+    """How long `instructions` last together: one after another (`sequential`) or all at
+    once (`parallel`). `None` if any of them never finishes. All at once, one that lasts
+    as long as its block decides nothing: `None` only if nothing else is there."""
+    if mode == 'parallel':
+        deciding = [
+            each for each in instructions if not each.lasts_as_long_as_its_block()
+        ]
+        if instructions and not deciding:
+            return None
+        instructions = deciding
+    durations = [each.duration for each in instructions]
     if any(duration is None for duration in durations):
         return None
     seconds = [duration.to('s').magnitude for duration in durations]
