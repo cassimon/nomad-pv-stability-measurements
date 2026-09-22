@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.parsers.file_reading_utils import (
+from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
     as_datetime,
     read_csv_with_units_in_header,
 )

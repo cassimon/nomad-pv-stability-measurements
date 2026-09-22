@@ -14,3 +14,22 @@ parser_entry_point = StabilityYamlParserEntryPoint(
     'StabilityProtocol entry.',
     mainfile_name_re=r'.*\.stability\.ya?ml$',
 )
+
+
+class StabilityMeasurementParserEntryPoint(ParserEntryPoint):
+    def load(self):
+        from nomad_pv_stability_measurements.parsers.measurement_parser import (
+            StabilityMeasurementParser,
+        )
+
+        return StabilityMeasurementParser(**self.model_dump())
+
+
+measurement_parser_entry_point = StabilityMeasurementParserEntryPoint(
+    name='StabilityMeasurementParser',
+    description='Reads a PV stability run, the file that says how a stability test '
+    'went and the files of its steps, into a StabilityMeasurement entry. Recognizes '
+    'which institution wrote it.',
+    # Every institution's run file names; the parser then asks which one it is.
+    mainfile_name_re=r'.*\.run\.ya?ml$',
+)

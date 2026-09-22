@@ -131,9 +131,12 @@ where = ["src"]
 
 [project.entry-points.'nomad.plugin']
 parser_entry_point = "nomad_pv_stability_measurements.parsers:parser_entry_point"
+measurement_parser_entry_point = "nomad_pv_stability_measurements.parsers:measurement_parser_entry_point"
 schema_package_entry_point = "nomad_pv_stability_measurements.schema_packages:schema_package_entry_point"
 normalizer_entry_point = "nomad_pv_stability_measurements.normalizers:normalizer_entry_point"
 example_upload_entry_point = "nomad_pv_stability_measurements.example_uploads:example_upload_entry_point"
+simulated_runs_example_upload_entry_point = "nomad_pv_stability_measurements.example_uploads:simulated_runs_example_upload_entry_point"
+custom_protocols_example_upload_entry_point = "nomad_pv_stability_measurements.example_uploads:custom_protocols_example_upload_entry_point"
 
 [tool.cruft]
 # Avoid updating workflow files, this leads to permissions issues

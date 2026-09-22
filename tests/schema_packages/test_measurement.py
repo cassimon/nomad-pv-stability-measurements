@@ -8,7 +8,7 @@ import pytest
 from nomad.units import ureg
 
 import nomad_pv_stability_measurements
-from nomad_pv_stability_measurements.parsers import file_reading_SIM
+from nomad_pv_stability_measurements.file_reading import file_reading_SIM
 from nomad_pv_stability_measurements.schema_packages.measurement import (
     JVSweepStep,
     StabilityMeasurement,

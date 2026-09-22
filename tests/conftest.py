@@ -26,6 +26,10 @@ class RecordingLogger:
 
     debug = info
 
+    def bind(self, **kwargs):
+        """NOMAD binds context to its logger before parsing; kept here as the same."""
+        return self
+
 
 @pytest.fixture
 def log():

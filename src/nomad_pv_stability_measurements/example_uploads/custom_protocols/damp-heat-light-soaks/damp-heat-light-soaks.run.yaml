@@ -1,0 +1,31 @@
+run:
+  institution: SIM
+  name: Damp heat with light soaks, cell A
+  protocol: damp-heat-light-soaks.stability.yaml
+  variant: damp-heat-light-soaks
+  operator: A. Researcher
+  start: '2026-07-20T09:00:00+01:00'
+  end: '2026-07-24T09:24:00+01:00'
+  location: Berlin, lab 2.14
+  samples:
+  - name: cell A
+  instruments:
+  - name: solar simulator
+  - name: climate chamber
+  - name: MPP tracker
+  - name: temperature and humidity logger
+  - name: J–V station
+  notes: 'Simulated data: nothing was measured.'
+steps:
+- name: initial J–V
+  kind: jv
+  file: 01_jv_initial.csv
+  start: '2026-07-20T09:00:00+01:00'
+- name: ageing
+  kind: stability_series
+  file: 02_stability_series.csv
+  start: '2026-07-20T09:12:00+01:00'
+- name: final J–V
+  kind: jv
+  file: 03_jv_final.csv
+  start: '2026-07-24T09:22:00+01:00'

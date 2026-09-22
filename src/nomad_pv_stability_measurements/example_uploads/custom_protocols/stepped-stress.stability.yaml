@@ -1,0 +1,44 @@
+data:
+  m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
+  name: Stepped stress
+  environment: indoor
+  notes: >-
+    A lab's own stress sequence, not a standard: a burn-in under light, three
+    temperature cycles under light, then recovery in the dark. Shows phases run one
+    after another, a counted repetition, and a condition held beside a nested sequence.
+  channel_settings:
+    atmosphere:
+      - {variable: relative_humidity, control: false, monitor: true}
+      - {variable: oxygen, reference_point: ambient air}
+    electrical_load: {hold: mpp, monitor: true}
+  routine:
+    name: phases
+    repeat: 1
+    instructions:
+      - name: burn-in
+        repeat: 1
+        mode: parallel
+        instructions:
+          - {channel: irradiation, hold: 1000 W/m^2, control: true, monitor: true, duration: 24 h}
+          - {channel: temperature, hold: 25 °C, control: true, monitor: true, duration: whole block}
+      - name: temperature cycles under light
+        repeat: 3
+        instructions:
+          - name: one cycle
+            repeat: 1
+            mode: parallel
+            instructions:
+              - {channel: irradiation, hold: 1000 W/m^2, control: true, monitor: true, duration: whole block}
+              - name: temperature profile
+                repeat: 1
+                instructions:
+                  - {channel: temperature, ramp: {from: 25 °C, to: 85 °C, rate: 1 K/min}, control: true, monitor: true}
+                  - {channel: temperature, hold: 85 °C, control: true, monitor: true, duration: 6 h}
+                  - {channel: temperature, ramp: {from: 85 °C, to: 25 °C, rate: 1 K/min}, control: true, monitor: true}
+                  - {channel: temperature, hold: 25 °C, control: true, monitor: true, duration: 4 h}
+      - name: recovery in the dark
+        repeat: 1
+        mode: parallel
+        instructions:
+          - {channel: irradiation, hold: dark, duration: 24 h}
+          - {channel: temperature, hold: 25 °C, control: true, monitor: true, duration: whole block}

@@ -9,6 +9,9 @@ SIM writes a run as a folder:
     02_stability_series.csv     read_stability_series
     03_jv_final.csv             read_jv_file
 
+A run recorded in phases has one stability series per phase and a J–V sweep after
+each: `02_stability_series_burn_in.csv`, `03_jv_after_burn_in.csv`, and so on.
+
 Each CSV names a column and its unit in the header, as `temperature (°C)`. What
 another institution could share is in `file_reading_utils.py`.
 """
@@ -19,7 +22,7 @@ from pathlib import Path
 import pint
 import yaml
 
-from nomad_pv_stability_measurements.parsers.file_reading_utils import (
+from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
     as_datetime,
     read_csv_with_units_in_header,
 )
@@ -30,7 +33,7 @@ _PROTOCOL_FILE_NAME = re.compile(r'.*\.run\.ya?ml')
 _SAYS_INSTITUTION = re.compile(
     rf'^\s*institution:\s*[\'"]?{INSTITUTION}[\'"]?\s*$', re.M
 )
-_STABILITY_SERIES_FILE_NAME = re.compile(r'\d+_stability_series\.csv')
+_STABILITY_SERIES_FILE_NAME = re.compile(r'\d+_stability_series(_\w+)?\.csv')
 _JV_FILE_NAME = re.compile(r'\d+_jv_\w+\.csv')
 
 
@@ -43,7 +46,8 @@ def is_protocol_file(path: str | Path, content: str) -> bool:
 
 
 def is_stability_series_file(path: str | Path) -> bool:
-    """A SIM stability series, by its name: `02_stability_series.csv`."""
+    """A SIM stability series, by its name: `02_stability_series.csv`, or with its
+    phase, `02_stability_series_burn_in.csv`."""
     return bool(_STABILITY_SERIES_FILE_NAME.fullmatch(Path(path).name))
 
 

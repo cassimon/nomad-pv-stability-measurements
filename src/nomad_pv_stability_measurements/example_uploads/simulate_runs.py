@@ -1,11 +1,13 @@
-"""Writes `simulated_data/`: one simulated run of every ISOS protocol.
+"""Writes simulated runs of the example protocols, as the institution SIM writes them.
 
 Run it from anywhere with the plugin's Python:
 
     python -m nomad_pv_stability_measurements.example_uploads.simulate_runs
 
-For each file in `isos/` it takes the first variant (the first alternative of every
-option) and writes a folder named after the standard:
+It simulates one run of each protocol file in `isos/`, written to `simulated_data/`,
+and in `custom_protocols/`, written beside the protocols. Of a file with options it
+takes the first variant, the first alternative of every option. Each run is a folder
+named after the standard, or else after the protocol file:
 
     ISOS-L-2/
       ISOS-L-2.run.yaml         who ran what, when, on which samples, and the steps
@@ -13,42 +15,55 @@ option) and writes a folder named after the standard:
       02_stability_series.csv   every monitored quantity in one table, one row per sample
       03_jv_final.csv           J–V sweep after the ageing
 
-This is the format of the institution SIM, which `parsers/file_reading_SIM.py` reads.
-The stability series has a `time` column and one column per quantity the protocol
-monitors, the unit in the header. What is simulated follows what the protocol states:
-held values with noise, the band a solar simulator is kept in, light-dark cycles,
-temperature cycles, an ambient room and an outdoor day. What the protocol leaves open
-is assumed and written into the run's `notes`.
+A protocol whose routine is a sequence of phases, run once, gets one stability series
+per phase and a J–V sweep between them. `file_reading/file_reading_SIM.py` reads the format.
 
-Nothing here is measured. The output is fixed by a seed per standard, so running the
-script again reproduces the same files.
+The stability series has a `time` column and one column per quantity the protocol
+monitors, the unit in the header. What is simulated follows the protocol's instruction
+tree: phases one after another, conditions side by side, blocks repeated a number of
+times, for a time or indefinitely, held values with noise, ramps, the band a solar
+simulator is kept in, an ambient room and an outdoor day. MPP tracking reads the cell's
+output; where the protocol does not track, a lit cell sits at open circuit. What the
+protocol leaves open is assumed and written into the run's `notes`.
+
+Nothing here is measured. The output is fixed by a seed per run, so running the script
+again reproduces the same files.
 """
 
 import csv
+import re
 import zlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from math import inf
 from pathlib import Path
 
 import numpy as np
 import yaml
+from nomad.datamodel import EntryArchive
 
 from nomad_pv_stability_measurements.parsers.options import expand
 from nomad_pv_stability_measurements.parsers.parser import stem
 from nomad_pv_stability_measurements.parsers.translate import translate
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     MonitorControlInstruction,
+    RampInstruction,
 )
-from nomad_pv_stability_measurements.schema_packages.general import RepeatingBlock
+from nomad_pv_stability_measurements.schema_packages.general import (
+    InstructionBlock,
+    seconds_of,
+)
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 
 HERE = Path(__file__).parent
-PROTOCOLS = HERE / 'isos'
-OUTPUT = HERE / 'simulated_data'
+#: Each folder of protocol files, where their runs are written, and where the protocols
+#: are in the example upload, from its root.
+SOURCES = (
+    (HERE / 'isos', HERE / 'simulated_data', 'isos/'),
+    (HERE / 'custom_protocols', HERE / 'custom_protocols', ''),
+)
 
-#: Where the protocols are in the example upload, which copies `isos/` beside the runs.
-PROTOCOLS_IN_UPLOAD = 'isos'
-
+#: How long a run lasts where the protocol does not end sooner.
 RUN_LENGTH = 168.0  # h: one week
 SAMPLE_EVERY = 10 / 60  # h
 START = datetime(2026, 3, 2, 9, 0, tzinfo=timezone(timedelta(hours=1)))
@@ -56,7 +71,7 @@ START = datetime(2026, 3, 2, 9, 0, tzinfo=timezone(timedelta(hours=1)))
 CHANGEOVER = timedelta(minutes=10)
 JV_LENGTH = timedelta(minutes=2)
 
-#: A temperature cycle whose rate the protocol does not state is assumed to take this.
+#: A cycling ramp whose rate the protocol does not state is assumed to take this.
 CYCLE_PERIOD = 6.0  # h
 #: A stepped cycle (`cycle`) spends this of each half period moving between its ends.
 STEP_TRANSITION = 1.0  # h
@@ -84,6 +99,12 @@ DECIMALS = {
     'current_density': 3,
     'power_density': 3,
 }
+#: The unit each condition is simulated in, and how much it scatters around its value.
+CONDITIONS = {
+    'irradiance': ('W/m^2', 2.0),
+    'temperature': ('degC', 0.3),
+    'relative_humidity': ('percent', 0.5),
+}
 
 # The simulated cell: efficiency, J–V shape and how fast it ages.
 EFFICIENCY = 0.20
@@ -99,17 +120,31 @@ BOLTZMANN = 8.617e-5  # eV/K
 # --- Reading the protocol ---------------------------------------------------------
 
 
+class _Quiet:
+    """A logger for normalizing the example protocols, which are known to be sound."""
+
+    def error(self, *args, **kwargs):
+        pass
+
+    warning = info = debug = error
+
+
 def first_variant(path: Path) -> tuple[str, StabilityProtocol]:
-    """The first variant of the protocol file `path`, by its entry name and loaded."""
+    """The first variant of the protocol file `path`, by its entry name, loaded and
+    normalized, so that every block knows its duration."""
     expansion = expand(yaml.safe_load(path.read_text(encoding='utf-8')))
     variant = expansion.variants[0]
     key = variant.key(stem(str(path))) if expansion.has_options else stem(str(path))
-    data = translate(variant.document).archive['data']
-    return key, StabilityProtocol.m_from_dict(data)
+    protocol = StabilityProtocol.m_from_dict(
+        translate(variant.document).archive['data']
+    )
+    for section in protocol.m_all_contents(depth_first=True, include_self=True):
+        section.normalize(EntryArchive(), _Quiet())
+    return key, protocol
 
 
 def quantity_of(instruction) -> str | None:
-    """Which column of the stability series an instruction is about, if any."""
+    """Which quantity an instruction is about, if one the simulation knows."""
     name = type(instruction).__name__
     if name == 'MPPTracking':
         return 'mpp'
@@ -123,23 +158,40 @@ def quantity_of(instruction) -> str | None:
     return None
 
 
-def schedules(protocol) -> dict[str, list[tuple[float, object]]]:
-    """Every quantity the protocol sets, as `(hours, instruction)` pieces repeated one
-    after another; a single piece of `inf` hours for what holds throughout."""
-    found = {}
-    for instruction in protocol.instructions:
-        if isinstance(instruction, RepeatingBlock):
-            for sub in instruction.sub_instructions:
-                duration = sub.duration
-                hours = (
-                    duration.value.to('hour').magnitude
-                    if duration is not None and duration.kind == 'fixed'
-                    else np.inf
-                )
-                found.setdefault(quantity_of(sub), []).append((hours, sub))
-        elif isinstance(instruction, MonitorControlInstruction):
-            found.setdefault(quantity_of(instruction), []).append((np.inf, instruction))
-    found.pop(None, None)
+def hours(instruction) -> float:
+    return instruction.seconds() / 3600
+
+
+def segments(instruction, start: float, stop: float) -> list[tuple]:
+    """When each single instruction in `instruction` is in force, as
+    `(start, end, instruction)` in hours, up to `stop` where its container ends."""
+    if not isinstance(instruction, InstructionBlock):
+        return [(start, min(stop, start + hours(instruction)), instruction)]
+    one = seconds_of(instruction.one_iteration()) / 3600
+    end = min(stop, start + hours(instruction))
+    found, time, count = [], start, 0
+    while time < end and count < instruction.repetitions():
+        found += run_together(
+            instruction.sub_instructions,
+            instruction.sub_instruction_execution_mode,
+            time,
+            min(end, time + one),
+        )
+        if one in (0, inf):
+            break
+        time, count = time + one, count + 1
+    return found
+
+
+def run_together(instructions, mode: str, start: float, stop: float) -> list[tuple]:
+    """`instructions` one after another (`sequential`) or all from `start`."""
+    found, time = [], start
+    for each in instructions:
+        if time >= stop:
+            break
+        found += segments(each, time, stop)
+        if mode == 'sequential':
+            time += hours(each)
     return found
 
 
@@ -149,6 +201,26 @@ def monitored(protocol) -> set[str]:
         for each in protocol.m_all_contents()
         if isinstance(each, MonitorControlInstruction) and each.monitor
     } - {None}
+
+
+def phases(protocol, length: float) -> list[tuple[str, float, float]]:
+    """The phases the run is recorded in, as `(name, start, end)` in hours: those of a
+    routine that runs a sequence once, each with a length; else the whole run."""
+    for block in protocol.instructions:
+        if not (
+            isinstance(block, InstructionBlock)
+            and block.repetitions() == 1
+            and block.sub_instruction_execution_mode == 'sequential'
+            and len(block.sub_instructions) > 1
+            and all(hours(each) < inf for each in block.sub_instructions)
+        ):
+            continue
+        found, time = [], 0.0
+        for each in block.sub_instructions:
+            found.append((each.name or each.describe(), time, time + hours(each)))
+            time += hours(each)
+        return found
+    return [('ageing', 0.0, length)]
 
 
 # --- Simulating the conditions -------------------------------------------------------
@@ -180,37 +252,46 @@ def daily(clock: np.ndarray, peak: float = 15.0) -> np.ndarray:
     return np.cos(2 * np.pi * (clock - peak) / 24)
 
 
-def active_piece(t: np.ndarray, pieces) -> list[tuple[np.ndarray, object]]:
-    """For pieces repeated one after another, where each one is in force."""
-    if len(pieces) == 1:
-        return [(np.ones_like(t, dtype=bool), pieces[0][1])]
-    period = sum(hours for hours, _ in pieces)
-    phase = t % period
-    masks, start = [], 0.0
-    for hours, instruction in pieces:
-        masks.append(((phase >= start) & (phase < start + hours), instruction))
-        start += hours
-    return masks
-
-
-def triangle(t: np.ndarray, low: float, high: float) -> np.ndarray:
-    phase = (t % CYCLE_PERIOD) / CYCLE_PERIOD
-    return low + (high - low) * (1 - np.abs(2 * phase - 1))
-
-
-def stepped(t: np.ndarray, low: float, high: float) -> np.ndarray:
+def stepped(u: np.ndarray, low: float, high: float, period: float) -> np.ndarray:
     """Up, dwell, down, dwell: the ends stated, the path between them assumed."""
-    half = CYCLE_PERIOD / 2
-    phase = t % CYCLE_PERIOD
+    phase = u % period
     rising = np.clip(phase / STEP_TRANSITION, 0, 1)
-    falling = np.clip((phase - half) / STEP_TRANSITION, 0, 1)
+    falling = np.clip((phase - period / 2) / STEP_TRANSITION, 0, 1)
     return low + (high - low) * (rising - falling)
+
+
+def ramp(instruction, quantity: str, clock: Clock, since: np.ndarray) -> np.ndarray:
+    """A ramp of any quantity, `since` hours after it started: by its rate, else
+    over its own duration; one that cycles with neither, over an assumed period."""
+    unit, spread = CONDITIONS[quantity]
+    low = instruction.start_point.to(unit).magnitude
+    high = instruction.end_point.to(unit).magnitude
+    behavior = instruction.end_of_ramp_behavior or 'hold'
+    if instruction.ramp_rate is not None:
+        span = abs(instruction.end_point - instruction.start_point)
+        length = (span / instruction.ramp_rate).to('hour').magnitude
+    elif behavior == 'hold' and hours(instruction) < inf:
+        length = hours(instruction)
+    else:
+        length = CYCLE_PERIOD / 2
+        clock.notes.add(
+            f'The protocol states no rate for the {quantity.replace("_", " ")} '
+            f'cycle: one cycle is assumed to take {CYCLE_PERIOD:g} h.'
+        )
+    if behavior == 'hold':
+        shape = np.clip(since / length, 0, 1)
+    elif behavior == 'sawtooth':
+        shape = (since % length) / length
+    elif behavior == 'triangle':
+        shape = 1 - np.abs(2 * ((since % (2 * length)) / (2 * length)) - 1)
+    else:
+        return stepped(since, low, high, 2 * length) + clock.noise(spread)
+    return low + (high - low) * shape + clock.noise(spread)
 
 
 def irradiance(instruction, clock: Clock) -> np.ndarray:
     t = clock.t
-    kind = type(instruction).__name__
-    if kind == 'HoldBetweenIrradiance':
+    if type(instruction).__name__ == 'HoldBetweenIrradiance':
         low = instruction.lower_bound.to('W/m^2').magnitude
         high = instruction.upper_bound.to('W/m^2').magnitude
         drift = 0.4 * (high - low) / 2 * np.sin(2 * np.pi * t / 50)
@@ -228,16 +309,6 @@ def irradiance(instruction, clock: Clock) -> np.ndarray:
 
 
 def temperature(instruction, clock: Clock, light: np.ndarray) -> np.ndarray:
-    kind = type(instruction).__name__
-    if kind == 'RampTemperature':
-        low = instruction.start_point.to('degC').magnitude
-        high = instruction.end_point.to('degC').magnitude
-        clock.notes.add(
-            f'The protocol states no rate for the temperature cycle: one cycle is '
-            f'assumed to take {CYCLE_PERIOD:g} h.'
-        )
-        shape = stepped if instruction.end_of_ramp_behavior == 'cycle' else triangle
-        return shape(clock.t, low, high) + clock.noise(0.3)
     if instruction.set_point is None:
         # Outdoors: the day, and the sun heating the cell.
         return 8 + 6 * daily(clock.of_day) + 0.025 * light + clock.noise(0.3)
@@ -252,35 +323,54 @@ def relative_humidity(instruction, clock: Clock, temp: np.ndarray) -> np.ndarray
     if instruction.set_point is not None:
         value = instruction.set_point.to('percent').magnitude
         return value + clock.noise(0.5)
-    if _outdoor(instruction):
+    if instruction.m_root().environment == 'outdoor':
         return np.clip(70 - 1.5 * (temp - 15) + clock.noise(1), 15, 100)
+    return ambient_humidity(clock)
+
+
+def ambient_humidity(clock: Clock) -> np.ndarray:
     drift = 3 * np.sin(2 * np.pi * clock.t / 70)
     return 40 - 5 * daily(clock.of_day) + drift + clock.noise(0.8)
 
 
-def _outdoor(instruction) -> bool:
-    protocol = instruction.m_root()
-    return getattr(protocol, 'environment', None) == 'outdoor'
-
-
-def conditions(protocol, clock: Clock) -> dict[str, np.ndarray]:
+def conditions(protocol, clock: Clock, length: float) -> dict[str, np.ndarray]:
     """Irradiance, temperature and relative humidity over the run, whether monitored
-    or not: the cell ages under all of them."""
+    or not, since the cell ages under all of them; and `mpp`, where it is tracked.
+    Where instructions overlap, the one written later holds."""
     t = clock.t
-    found = schedules(protocol)
+    found = run_together(protocol.instructions, 'parallel', 0.0, length)
 
-    def over_time(quantity, simulate, default):
-        values = np.full(t.size, default, dtype=float)
-        for mask, instruction in active_piece(t, found.get(quantity, [])):
-            values[mask] = simulate(instruction)[mask]
+    def over_time(quantity, held, default):
+        values = np.array(default, dtype=float)
+        for start, end, instruction in found:
+            if quantity_of(instruction) != quantity:
+                continue
+            mask = (t >= start) & ((t < end) | (end >= length))
+            if isinstance(instruction, RampInstruction):
+                simulated = ramp(instruction, quantity, clock, t - start)
+            else:
+                simulated = held(instruction)
+            values[mask] = simulated[mask]
         return values
 
-    light = over_time('irradiance', lambda each: irradiance(each, clock), 0.0)
-    temp = over_time('temperature', lambda each: temperature(each, clock, light), 23.0)
-    humidity = over_time(
-        'relative_humidity', lambda each: relative_humidity(each, clock, temp), 40.0
+    light = over_time('irradiance', lambda each: irradiance(each, clock), 0 * t)
+    temp = over_time(
+        'temperature',
+        lambda each: temperature(each, clock, light),
+        23 + daily(clock.of_day) + clock.noise(0.2),
     )
-    return {'irradiance': light, 'temperature': temp, 'relative_humidity': humidity}
+    humidity = over_time(
+        'relative_humidity',
+        lambda each: relative_humidity(each, clock, temp),
+        ambient_humidity(clock),
+    )
+    tracked = over_time('mpp', lambda each: np.ones_like(t), 0 * t) > 0
+    return {
+        'irradiance': light,
+        'temperature': temp,
+        'relative_humidity': humidity,
+        'mpp': tracked,
+    }
 
 
 # --- Simulating the cell ---------------------------------------------------------------
@@ -291,23 +381,27 @@ def remaining(values: dict[str, np.ndarray]) -> np.ndarray:
     steady loss, faster when hotter, lit and humid."""
     kelvin = values['temperature'] + 273.15
     heat = np.exp(ACTIVATION / BOLTZMANN * (1 / 298.15 - 1 / kelvin))
-    light = 0.2 + 0.8 * values['irradiance'] / 1000
+    light = 0.2 + 0.8 * np.clip(values['irradiance'], 0, None) / 1000
     damp = 1 + values['relative_humidity'] / 100
     stress = np.cumsum(heat * light * damp * SAMPLE_EVERY)
     return np.clip(1 - 0.04 * (1 - np.exp(-stress / 20)) - 0.0003 * stress, 0, 1)
 
 
-def at_mpp(values, kept, clock: Clock) -> dict[str, np.ndarray]:
-    """What an MPP tracker reads; nothing in the dark."""
+def electrical(values, kept, clock: Clock) -> dict[str, np.ndarray]:
+    """What the load reads: the maximum power point where it is tracked, open circuit
+    where it is not, and nothing in the dark."""
     light = values['irradiance']
     lit = light > 1
+    tracked = lit & values['mpp']
     suns = np.where(lit, light, 1000) / 1000
     heat = 1 - 0.002 * (values['temperature'] - 25)
+    at_mpp = 0.95 * kept**0.3 * (1 + 0.026 * np.log(suns)) * heat
+    open_circuit = (VOC + IDEALITY * THERMAL_VOLTAGE * np.log(kept**0.6 * suns)) * heat
+    voltage = np.where(tracked, at_mpp, open_circuit) + clock.noise(0.002)
+    voltage = np.where(lit, voltage, 0)
     power = EFFICIENCY * kept * heat * light / 10  # W/m^2 → mW/cm^2
-    voltage = 0.95 * kept**0.3 * (1 + 0.026 * np.log(suns)) * heat
-    voltage = np.where(lit, voltage + clock.noise(0.002), 0)
-    power = np.where(lit, power * (1 + clock.noise(0.005)), 0)
-    current = np.divide(power, voltage, out=np.zeros_like(power), where=lit)
+    power = np.where(tracked, power * (1 + clock.noise(0.005)), 0)
+    current = np.divide(power, voltage, out=np.zeros_like(power), where=tracked)
     return {'voltage': voltage, 'current_density': current, 'power_density': power}
 
 
@@ -332,18 +426,25 @@ def jv_sweep(kept: float) -> list[tuple[float, float, str]]:
 
 
 def instruments(protocol, quantities: set[str]) -> list[dict]:
-    found = schedules(protocol)
+    kinds = [
+        (quantity_of(each), each)
+        for each in protocol.m_all_contents()
+        if isinstance(each, MonitorControlInstruction)
+    ]
     names = []
     if protocol.environment == 'outdoor':
         names += ['outdoor test rack', 'pyranometer']
     elif 'irradiance' in quantities:
         names.append('solar simulator')
-    held = [each for _, each in found.get('temperature', [])]
-    if any(type(each).__name__ == 'RampTemperature' for each in held):
+    if any(kind == 'relative_humidity' and each.control for kind, each in kinds):
+        names.append('climate chamber')
+    elif any(
+        kind == 'temperature' and isinstance(each, RampInstruction)
+        for kind, each in kinds
+    ):
         names.append('thermal cycling chamber')
-    elif any(each.control for each in held):
-        humid = any(each.control for _, each in found.get('relative_humidity', []))
-        names.append('climate chamber' if humid else 'oven')
+    elif any(kind == 'temperature' and each.control for kind, each in kinds):
+        names.append('oven')
     if 'mpp' in quantities:
         names.append('MPP tracker')
     names += ['temperature and humidity logger', 'J–V station']
@@ -369,72 +470,96 @@ def write_jv(path: Path, kept: float) -> None:
             writer.writerow([f'{voltage:.3f}', f'{current:.4f}', direction])
 
 
-def simulate(path: Path, index: int) -> str:
-    """Write the run of the first variant of the protocol file `path`; returns the
-    variant's entry name."""
+def slug(text: str) -> str:
+    return re.sub(r'\W+', '_', text.lower()).strip('_')
+
+
+def simulate(path: Path, index: int, output: Path, in_upload: str) -> str:
+    """Write the run of the first variant of the protocol file `path` into `output`;
+    returns the variant's entry name."""
     key, protocol = first_variant(path)
-    designation = protocol.standard
+    designation = protocol.standard or stem(str(path))
+    length = min(RUN_LENGTH, hours(protocol))
     started = START + timedelta(days=7 * index)
     ageing_start = started + JV_LENGTH + CHANGEOVER
     clock = Clock(
-        t=np.round(np.arange(0, RUN_LENGTH + SAMPLE_EVERY / 2, SAMPLE_EVERY), 6),
+        t=np.round(np.arange(0, length + SAMPLE_EVERY / 2, SAMPLE_EVERY), 6),
         hour=ageing_start.hour + ageing_start.minute / 60,
         rng=np.random.default_rng(zlib.crc32(designation.encode())),
     )
-    values = conditions(protocol, clock)
+    values = conditions(protocol, clock, length)
     kept = remaining(values)
     quantities = monitored(protocol)
 
     columns = {'time': clock.t}
-    columns.update({name: values[name] for name in values if name in quantities})
+    columns.update({name: values[name] for name in CONDITIONS if name in quantities})
     if 'mpp' in quantities:
-        columns.update(at_mpp(values, kept, clock))
+        columns.update(electrical(values, kept, clock))
     columns = {name: columns[name] for name in COLUMNS if name in columns}
 
-    folder = OUTPUT / designation
+    folder = output / designation
     folder.mkdir(parents=True, exist_ok=True)
-    final_start = ageing_start + timedelta(hours=RUN_LENGTH) + CHANGEOVER
-    steps = [
-        ('initial J–V', 'jv', '01_jv_initial.csv', started),
-        ('ageing', 'stability_series', '02_stability_series.csv', ageing_start),
-        ('final J–V', 'jv', '03_jv_final.csv', final_start),
-    ]
+    recorded = phases(protocol, length)
+    number = iter(range(1, 2 * len(recorded) + 2))
+    steps = [('initial J–V', 'jv', f'{next(number):02d}_jv_initial.csv', started)]
     write_jv(folder / steps[0][2], 1.0)
-    write_table(folder / steps[1][2], columns)
-    write_jv(folder / steps[2][2], float(kept[-1]))
+    begins = ageing_start
+    for position, (name, start, end) in enumerate(recorded):
+        last = position == len(recorded) - 1
+        rows = (clock.t >= start) & ((clock.t < end) | last)
+        series = {column: values[rows] for column, values in columns.items()}
+        series['time'] = series['time'] - start
+        suffix = '' if len(recorded) == 1 else f'_{slug(name)}'
+        file = f'{next(number):02d}_stability_series{suffix}.csv'
+        write_table(folder / file, series)
+        steps.append((name, 'stability_series', file, begins))
+        after = begins + timedelta(hours=end - start) + CHANGEOVER
+        jv_name, jv_file = (
+            ('final J–V', 'jv_final')
+            if last
+            else (f'J–V after {name}', f'jv_after{suffix}')
+        )
+        jv_file = f'{next(number):02d}_{jv_file}.csv'
+        write_jv(folder / jv_file, float(kept[rows][-1]))
+        steps.append((jv_name, 'jv', jv_file, after))
+        begins = after + JV_LENGTH + CHANGEOVER
 
     run = {
-        'run': {
-            'institution': INSTITUTION,
-            'name': f'{key}, cell A',
-            'protocol': f'{PROTOCOLS_IN_UPLOAD}/{path.name}',
-            'variant': key,
-            'standard': designation,
-            'operator': OPERATOR,
-            'start': started.isoformat(),
-            'end': (final_start + JV_LENGTH).isoformat(),
-            'location': 'Berlin, rooftop test site'
-            if protocol.environment == 'outdoor'
-            else 'Berlin, lab 2.14',
-            'samples': [{'name': 'cell A'}],
-            'instruments': instruments(protocol, quantities),
-            'notes': ' '.join([SIMULATED, *sorted(clock.notes)]),
-        },
+        'institution': INSTITUTION,
+        'name': f'{key if protocol.standard else protocol.name or key}, cell A',
+        'protocol': f'{in_upload}{path.name}',
+        'variant': key,
+        'standard': protocol.standard,
+        'operator': OPERATOR,
+        'start': started.isoformat(),
+        'end': (steps[-1][3] + JV_LENGTH).isoformat(),
+        'location': 'Berlin, rooftop test site'
+        if protocol.environment == 'outdoor'
+        else 'Berlin, lab 2.14',
+        'samples': [{'name': 'cell A'}],
+        'instruments': instruments(protocol, quantities),
+        'notes': ' '.join([SIMULATED, *sorted(clock.notes)]),
+    }
+    document = {
+        'run': {name: value for name, value in run.items() if value is not None},
         'steps': [
             {'name': name, 'kind': kind, 'file': file, 'start': start.isoformat()}
             for name, kind, file, start in steps
         ],
     }
     (folder / f'{designation}.run.yaml').write_text(
-        yaml.safe_dump(run, sort_keys=False, allow_unicode=True, width=88),
+        yaml.safe_dump(document, sort_keys=False, allow_unicode=True, width=88),
         encoding='utf-8',
     )
     return key
 
 
 def main() -> None:
-    for index, path in enumerate(sorted(PROTOCOLS.glob('*.stability.yaml'))):
-        print(simulate(path, index))
+    index = 0
+    for protocols, output, in_upload in SOURCES:
+        for path in sorted(protocols.glob('*.stability.yaml')):
+            print(simulate(path, index, output, in_upload))
+            index += 1
 
 
 if __name__ == '__main__':

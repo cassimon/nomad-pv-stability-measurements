@@ -8,7 +8,7 @@ import pytest
 from nomad.units import ureg
 
 import nomad_pv_stability_measurements
-from nomad_pv_stability_measurements.parsers.file_reading_SIM import (
+from nomad_pv_stability_measurements.file_reading.file_reading_SIM import (
     is_jv_file,
     is_protocol_file,
     is_stability_series_file,
@@ -52,6 +52,8 @@ def test_a_protocol_file_is_recognized_by_its_name_and_institution(
     ('name', 'series', 'jv'),
     [
         ('02_stability_series.csv', True, False),
+        ('04_stability_series_burn_in.csv', True, False),
+        ('05_jv_after_burn_in.csv', False, True),
         ('01_jv_initial.csv', False, True),
         ('03_jv_final.csv', False, True),
         ('notes.csv', False, False),

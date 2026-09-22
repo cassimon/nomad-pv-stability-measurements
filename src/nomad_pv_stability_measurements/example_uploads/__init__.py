@@ -8,3 +8,24 @@ example_upload_entry_point = ExampleUploadEntryPoint(
     'outdoor exposure, thermal cycling, light cycling and solar-thermal cycling.',
     path='example_uploads/isos',
 )
+
+simulated_runs_example_upload_entry_point = ExampleUploadEntryPoint(
+    title='Simulated ISOS stability runs',
+    category='Examples',
+    description='A simulated run of every ISOS protocol, taking the first of its '
+    'options, beside a copy of the protocols it follows. Each run is a folder: a run '
+    'file saying who ran what, when and on which cell, a J–V sweep before and after, '
+    'and one table of every monitored quantity over a week. Nothing was measured.',
+    resources=['example_uploads/isos', 'example_uploads/simulated_data/*'],
+)
+
+custom_protocols_example_upload_entry_point = ExampleUploadEntryPoint(
+    title='Custom stability protocols with simulated runs',
+    category='Examples',
+    description='Three stability protocols that follow no standard, each with a '
+    'simulated run: a stepped stress test in phases with counted temperature cycles, '
+    'an emulated outdoor day repeated for five days, and damp heat interrupted by '
+    'light soaks at the maximum power point. They show nested blocks, repetition by '
+    'count and by time, and conditions held side by side. Nothing was measured.',
+    resources=['example_uploads/custom_protocols/*'],
+)

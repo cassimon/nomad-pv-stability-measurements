@@ -3704,3 +3704,144 @@ instruction already states a fixed duration. `tests/data/tree.stability.yaml` ge
    each class's `derive_duration()` is one line naming its kind.
    *Done instead:* `IndefiniteRepeatingBlock` is its own subclass rather than an alias of the
    base, which says not how it ends and is reported where written (`tree.archive.yaml` follows).
+
+## 34. Stability runs — what a test recorded, read from an institution's files
+
+**Status: built, steps 1–7 of §34.7.** The first measured side of the plugin: until now only
+`StabilityActivity` bridged plan and activity (§23). Nothing here changes the protocol schema.
+
+### 34.1 What a run is
+
+A run is **one file that says how the test went** and **one file per step** holding the step's
+data. The run file names the protocol it followed (file and variant), the standard, who ran it,
+when, where, on which samples and instruments, and its steps in the order they ran. A step is
+either a **stability series** — every quantity recorded over time in one table, as many channels
+as there are — or a **J–V sweep**, whose shape does not fit that table. Several phases give
+several series; a J–V sweep between them is its own step.
+
+### 34.2 Schema — `schema_packages/measurement.py`
+
+| Class | |
+|---|---|
+| `StabilitySeriesStep(ActivityStep)` | `time` (from the step's `start_time`), `temperature`, `irradiance`, `relative_humidity`, `voltage`, `current_density`, `power_density`, each `shape=['*']`; only what was recorded is filled in |
+| `JVSweepStep(ActivityStep)` | `voltage`, `current_density`, `direction` (`MEnum('forward', 'reverse')` per point); a reverse and a forward sweep listed together |
+| `StabilityMeasurement(StabilityActivity)` | `operator`, and `read_files(path, read_protocol, read_stability_series, read_jv_file)` |
+
+- Each step checks only itself (the dividing test, §13): arrays as long as `time`, `time` never
+  going backwards, a sweep's three arrays equally long. Reported, never raised.
+- Current density is positive where the cell delivers power, as solar-cell data is written.
+- `read_files` is **handed the functions that read files** and never opens one: the schema stays
+  independent of any format, and `test_separation.py` still holds. It maps the run file onto
+  existing fields (`start` → `datetime`, `standard` → `method`, `notes` → `description`, samples
+  and instruments as references), builds one step per listed step by its `kind`, and puts each
+  column into the quantity of its name. What has no place — an unknown kind, a column no
+  quantity takes — is **returned as a message**, the rest still read, like the translator's
+  problems (§13).
+- *Verified:* an `MEnum` array takes a list, not a numpy array of strings (shape error), so
+  `read_files` passes text columns as lists. Steps of these subclasses survive `m_to_dict` /
+  `m_from_dict` inside `StabilityActivity.steps` as what they are.
+- The module is its own `SchemaPackage`; the schema entry point imports it in `load()`. Importing
+  it from `protocol.py` would be circular.
+- `plan` is set by the parser, never by `read_files`: which entry is the protocol is a question of
+  the upload, not of the files.
+
+### 34.3 Reading — one module per institution
+
+Institutions write runs in formats of their own. Each gets `file_reading/file_reading_<INSTITUTION>.py`
+with the same interface, written out in `file_reading/file_reading_TEMPLATE.py`. The folder
+`file_reading/` sits beside `parsers/` and `schema_packages/`: an institution works only there.
+
+| Name | |
+|---|---|
+| `INSTITUTION` | the short name in the module's name |
+| `is_protocol_file(path, content)` | is this the institution's run file — from its name, its content, or both |
+| `is_stability_series_file(path)`, `is_jv_file(path)` | which kind of step file |
+| `read_protocol(path)` | `{'run': {...}, 'steps': [{name, kind, file, start}, ...]}`, dates as datetimes, each `file` a path that opens as it is |
+| `read_stability_series(path)` | one quantity array per column, by the name of the quantity it fills |
+| `read_jv_file(path)` | `voltage`, `current_density`, `direction` |
+
+- Plain functions, plain data (dicts, datetimes, pint quantities): an institution only fills in
+  one file. `tests/file_reading/test_file_reading_interface.py` holds every `file_reading_<X>.py` to the
+  template's names and parameters and to `INSTITUTION == '<X>'`.
+- What more than one format shares is in `file_reading/file_reading_utils.py`:
+  `read_csv_with_units_in_header` (a header `temperature (°C)` gives a quantity column, one
+  without a unit a text column; unit strings through `units.split_match_convert`, so `h` is an
+  hour) and `as_datetime`.
+- "Protocol" in `read_protocol` is the run's record of the protocol it followed, not a
+  `StabilityProtocol`: the name the institutions' side uses.
+
+**SIM**, the simulated examples, writes a run as a folder: `<name>.run.yaml` (saying
+`institution: SIM`), `01_jv_initial.csv`, `02_stability_series.csv` (or one per phase,
+`02_stability_series_burn_in.csv`, with `03_jv_after_burn_in.csv` between), `…_jv_final.csv`.
+Every CSV names each column's unit in its header.
+
+### 34.4 Parsing — one parser for every institution
+
+`parsers/measurement_parser.py`, `StabilityMeasurementParser(MatchingParser)`, entry point
+`measurement_parser_entry_point`, `mainfile_name_re=r'.*\.run\.ya?ml$'`:
+
+- `is_mainfile` asks each module in `INSTITUTIONS` whether the file is its run file
+  (`is_protocol_file`), and takes it if one does. An institution is added by writing its module
+  and listing it; the name pattern is widened if its run files are named otherwise.
+- `parse` creates a `StabilityMeasurement`, calls `read_files` with that institution's three
+  readers, logs every returned message as an error, and sets `plan`.
+- `plan` refers to the protocol entry in the same upload: `../upload/archive/<entry id>#/data`,
+  the id from `generate_entry_id(upload_id, protocol, key)`, where `key` is the variant for a
+  file with options and none for a file without (its variant is the file's stem, §24).
+- The sample's `lab_id` is left out of the simulated runs: `EntityReference.normalize` searches
+  Elasticsearch by it, which a run needs no part of.
+
+### 34.5 Example uploads
+
+| Entry point | `resources` | |
+|---|---|---|
+| `example_upload_entry_point` | `isos` | the protocols (§16), unchanged |
+| `simulated_runs_example_upload_entry_point` | `isos`, `simulated_data/*` | a run of the first variant of every ISOS file, beside a copy of the protocols |
+| `custom_protocols_example_upload_entry_point` | `custom_protocols/*` | three protocols that follow no standard, each beside its run |
+
+The ISOS protocols are copied into the upload by `resources`, not duplicated in the repository.
+The custom protocols show what the schema holds beyond ISOS Table 1:
+
+| Protocol | Shows |
+|---|---|
+| Stepped stress | phases one after another (run once), a counted repetition (3 cycles), a condition held beside a nested sequence (light `whole block` beside a temperature profile), ramps with a rate; recorded as one series per phase with a J–V sweep between |
+| Diurnal emulation | a timed repetition (`repeat_for: 120 h`) of a parallel block of two sequences, light and temperature ramped over fixed durations |
+| Damp heat with light soaks | a counted repetition whose phases hold different electrical loads: MPP only while lit, open circuit in the dark |
+
+### 34.6 Simulating — `example_uploads/simulate_runs.py`
+
+Not shipped in any upload; writes `simulated_data/` and the run folders in `custom_protocols/`.
+Seeded per run, so the files are reproduced exactly.
+
+- It loads the first variant through the plugin's own path (`expand` → `translate` →
+  `StabilityProtocol`, normalized so blocks know their durations) and **walks the instruction
+  tree**: sequential sums, parallel starts together, blocks repeated by count, by time or
+  indefinitely, `whole_block` bounded by its pass, later instructions overriding earlier ones.
+  Each single instruction becomes a stretch of time in which it holds.
+- Columns are what the protocol monitors; the electrical columns where MPP tracking is monitored.
+- Conditions: holds with noise, the 800–1000 W/m² band drifting inside it, ramps by rate or over
+  their duration, cycling ramps (`triangle`, `cycle`, `sawtooth`), an ambient room, an outdoor
+  day. A ramp that cycles without a rate is assumed to take 6 h per cycle, and says so in the
+  run's `notes`.
+- The cell: 20 % at one sun, losing efficiency faster when hotter (0.3 eV), lit and humid. MPP
+  tracking reads its output; a lit cell not tracked sits at open circuit; the dark reads nothing.
+  J–V sweeps at one sun and 25 °C, the forward one slightly lower (hysteresis).
+- A run lasts one week, or the protocol's length if shorter; one sample every 10 min.
+
+### 34.7 Order of building
+
+1. The generator and the SIM format, the 20 ISOS runs. *Built.*
+2. The file reading: `file_reading_SIM.py`, `file_reading_utils.py`. *Built.*
+3. `StabilitySeriesStep`, `JVSweepStep`. *Built.*
+4. `StabilityMeasurement.read_files`, the schema entry point importing the module. *Built.*
+5. `file_reading_TEMPLATE.py` and the interface test; `StabilityMeasurementParser` recognizing
+   SIM, left for further institutions. *Built.*
+6. The two example uploads, the custom protocols, the generator walking any instruction tree.
+   *Built.*
+7. The regression over every run of both uploads through NOMAD's own `parse` and `normalize_all`
+   (each loads without an error and follows a protocol entry that exists in its upload), this
+   section, CLAUDE.md, READMEs. *Built.*
+
+Not done, on purpose: figures of the steps, figures of merit from the J–V sweeps (V_oc, J_sc, FF,
+PCE, T80), J–V scans as instructions of a protocol, and `deviations_from_plan` worked out from a
+run. Each is a step of its own.

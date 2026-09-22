@@ -1,0 +1,47 @@
+run:
+  institution: SIM
+  name: Stepped stress, cell A
+  protocol: stepped-stress.stability.yaml
+  variant: stepped-stress
+  operator: A. Researcher
+  start: '2026-08-03T09:00:00+01:00'
+  end: '2026-08-06T22:08:00+01:00'
+  location: Berlin, lab 2.14
+  samples:
+  - name: cell A
+  instruments:
+  - name: solar simulator
+  - name: thermal cycling chamber
+  - name: MPP tracker
+  - name: temperature and humidity logger
+  - name: J–V station
+  notes: 'Simulated data: nothing was measured.'
+steps:
+- name: initial J–V
+  kind: jv
+  file: 01_jv_initial.csv
+  start: '2026-08-03T09:00:00+01:00'
+- name: burn-in
+  kind: stability_series
+  file: 02_stability_series_burn_in.csv
+  start: '2026-08-03T09:12:00+01:00'
+- name: J–V after burn-in
+  kind: jv
+  file: 03_jv_after_burn_in.csv
+  start: '2026-08-04T09:22:00+01:00'
+- name: temperature cycles under light
+  kind: stability_series
+  file: 04_stability_series_temperature_cycles_under_light.csv
+  start: '2026-08-04T09:34:00+01:00'
+- name: J–V after temperature cycles under light
+  kind: jv
+  file: 05_jv_after_temperature_cycles_under_light.csv
+  start: '2026-08-05T21:44:00+01:00'
+- name: recovery in the dark
+  kind: stability_series
+  file: 06_stability_series_recovery_in_the_dark.csv
+  start: '2026-08-05T21:56:00+01:00'
+- name: final J–V
+  kind: jv
+  file: 07_jv_final.csv
+  start: '2026-08-06T22:06:00+01:00'
