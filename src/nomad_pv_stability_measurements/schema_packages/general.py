@@ -66,9 +66,9 @@ class Instruction(ArchiveSection):
     sub_instructions = SubSection(
         section_def=SectionProxy('Instruction'),
         repeats=True,
-        description='An Instruction can contain others. The idea is that a specialized '
-        'instruction can be a block of more general instructions (length of sub_instructions greater 1) or a single Instruction.'
-        '(This field is None and the specialized class describes instruction behavior)',
+        description='The instructions a block runs. A block of one instruction is how '
+        'that instruction is repeated. Empty for a single instruction, whose class '
+        'describes what it does.',
     )
 
     def normalize(self, archive, logger):
@@ -181,6 +181,9 @@ class InstructionBlock(Instruction):
 
     def describe(self) -> str:
         count = len(self.sub_instructions)
+        if count == 1:
+            [only] = self.sub_instructions
+            return f'{self.describe_repetition()}: {only.name or only.describe()}'
         parallel = (
             ', in parallel' if self.sub_instruction_execution_mode == 'parallel' else ''
         )

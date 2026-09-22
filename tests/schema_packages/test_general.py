@@ -157,7 +157,20 @@ def test_an_impossible_instruction_is_reported(normalized, log, section, reporte
 @pytest.mark.parametrize(
     ('block', 'label'),
     [
-        (InstructionBlock(sub_instructions=[single(60)]), 'Run once (1 instruction)'),
+        (
+            InstructionBlock(sub_instructions=[single(60)]),
+            'Run once: Single instruction',
+        ),
+        # A block of one instruction is how that instruction is repeated.
+        (
+            CountingRepeatingBlock(
+                repeat_n=5,
+                sub_instructions=[
+                    SingleInstruction(name='JV scan', duration=60 * ureg.second)
+                ],
+            ),
+            'Repeat 5 times: JV scan',
+        ),
         (
             CountingRepeatingBlock(
                 repeat_n=3,
@@ -170,11 +183,11 @@ def test_an_impossible_instruction_is_reported(normalized, log, section, reporte
             TimedRepeatingBlock(
                 repeat_duration=43200 * ureg.second, sub_instructions=[single(60)]
             ),
-            'Repeat for 12 h (1 instruction)',
+            'Repeat for 12 h: Single instruction',
         ),
         (
             IndefiniteRepeatingBlock(sub_instructions=[single(60)]),
-            'Repeat indefinitely (1 instruction)',
+            'Repeat indefinitely: Single instruction',
         ),
         # A name, where one is written, is the label.
         (
