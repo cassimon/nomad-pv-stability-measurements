@@ -32,8 +32,11 @@ from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     VOCTracking,
 )
 from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
+    RampCurrent,
     RampRelativeHumidity,
+    RampResistance,
     RampTemperature,
+    RampVoltage,
 )
 from nomad_pv_stability_measurements.schema_packages.standard_values import (
     Dark,
@@ -416,3 +419,29 @@ def test_a_ramp_without_a_pace_or_a_plausible_one_is_drawn_as_its_range():
     assert ramp.set_values_for_plotting(1 * ureg.hour) is None
     assert ramp.bounds_for_plotting() == (pytest.approx(0.3), pytest.approx(0.85))
     assert ramp.annotation_for_plotting() == '85 % → 30 % (triangle), rate not stated'
+
+
+@pytest.mark.parametrize(
+    ('cls', 'controlled', 'monitored'),
+    [
+        # The cell's terminals are one port: what is set, and what the device answers.
+        (HoldVoltage, ('voltage',), ('current',)),
+        (RampVoltage, ('voltage',), ('current',)),
+        (HoldCurrent, ('current',), ('voltage',)),
+        (RampCurrent, ('current',), ('voltage',)),
+        (HoldResistance, ('resistance',), ('voltage', 'current')),
+        (RampResistance, ('resistance',), ('voltage', 'current')),
+        (MPPTracking, ('voltage',), ('current',)),
+        (VOCTracking, ('current',), ('voltage',)),
+        # Independent quantities: control and monitor act on the quantity itself.
+        (HoldTemperature, ('temperature',), ('temperature',)),
+        (RampRelativeHumidity, ('relative humidity',), ('relative humidity',)),
+    ],
+)
+def test_control_regulates_what_is_set_and_monitor_logs_what_follows(
+    cls, controlled, monitored
+):
+    instruction = cls(control=True, monitor=True)
+
+    assert instruction.controlled_quantities() == controlled
+    assert instruction.monitored_quantities() == monitored

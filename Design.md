@@ -3989,3 +3989,86 @@ and the run parser gets `level=1` (step 3), since nothing reads a run's protocol
 6. A check against a running NOMAD: the derived upload root, the search syntax for the plugin's
    own quantity, references across uploads, deletion on reprocessing.
 7. The admin action "harmonize published results" (§35.2a), dry run first.
+
+## 36. The electrical load is one port — dependent quantities
+
+**Status:** step 1 of §36.4 built. Step 2 (plotting) planned, not built.
+
+### 36.1 Why
+
+Humidity and oxygen were split (§20.6) because they are independent: two partial pressures, both
+settable at once. Voltage, current and resistance are not: the cell's terminals are one port with
+one degree of freedom. A protocol sets one of them, or a point on the J–V curve (MPP, open
+circuit), and the device answers with the rest. The answer is always worth logging and every
+source-measure unit logs it, so a protocol rarely says so.
+
+Splitting the electrical channel into one channel per quantity would make "control voltage and
+control current at once" writable. That is physically impossible, and we don't check across
+instructions (§23.2). So the model keeps one electrical instruction at a time. The class states
+the pair, as physics and not as data.
+
+### 36.2 Schema — a mixin, not new fields
+
+`DependentMonitorControl(MSection)` in `base_instructions.py` is mixed in **before** the kind:
+`class HoldVoltage(ElectricalLoad, HoldInstruction)`. The mixin cuts across the kinds (hold, ramp,
+tracking), which is why it can't be one more level in the hierarchy. Each concrete class states two
+class attributes. They are **not Quantities**: they are not authored and don't vary per instance,
+so nothing new reaches the archive.
+
+- `controlled`: what `control: true` regulates.
+- `dependent`: what follows it, and what `monitor: true` logs, **all** of them.
+
+`MonitorControlInstruction` gets two readouts that every instruction answers:
+`controlled_quantities()` and `monitored_quantities()`. For an ordinary instruction both are its
+own quantity. The mixin answers from the class attributes.
+
+`ElectricalLoad(DependentMonitorControl)` names the port.
+
+| Class | `controlled` | `dependent` |
+|---|---|---|
+| `HoldVoltage`, `RampVoltage` | voltage | current |
+| `HoldCurrent`, `RampCurrent` | current | voltage |
+| `HoldResistance`, `RampResistance` | resistance | voltage, current |
+| `MPPTracking` | voltage (the tracker perturbs it: `perturbation_voltage`) | current |
+| `VOCTracking` | current (zero: the terminals are disconnected) | voltage |
+
+**The rule behind the table:** `controlled` names what the hardware sets, and `dependent` names
+what the instrument measures. At the port only voltage and current are measured, so `dependent`
+only ever holds those two. Resistance is a setting of a passive load: a resistor fixes the operating
+point where its load line meets the J–V curve, as MPP or open circuit do. So it appears only as
+`controlled`, never as `dependent`. Values computed from what is measured, such as the cell's
+resistance V/I or the power V·I, are never listed as dependents.
+
+`role_for_plotting` is unchanged: open circuit stays `specified`.
+
+**Verified in `nomad-FAIR`:**
+- Every base of a section class must itself be a section (`metainfo.py`: "Section defining
+  classes must have MSection or a descendant of base classes"). So the mixin is an `MSection`
+  even though it has no fields. Plain class attributes and methods then work through the MRO,
+  and archives round-trip unchanged.
+- A Quantity redefined in a mixin does **not** override the kind's own definition (the kind's
+  description wins). A concrete class can override it. Rather than repeat `monitor` in 8
+  classes, the shared descriptions of `monitor` and `control` on `MonitorControlInstruction`
+  point to the readouts.
+
+### 36.3 Plotting (step 2, planned)
+
+- **One row, `electrical load`,** for every `ElectricalLoad` instruction (`row_for_plotting`).
+  `BOTTOM_ROWS` loses `voltage`, `current` and `resistance`. The variants of one ISOS file
+  (open circuit / MPP / fixed V) then share their row label, and a protocol that switches from
+  open circuit to a fixed voltage draws one continuous row instead of two rows with gaps.
+- **Controlled side** as today: a line at the value, or a bar with `V_MPP`, `MPP`,
+  `open circuit`. The row's unit (V, A, Ω) says which quantity a line is. Where pieces of one
+  row carry **different units**, their values can't share an axis, so each is drawn as a bar
+  with its label instead (`Hold current 20 mA`).
+- **Monitored side:** where `monitor: true`, a sub-row `monitored` right under the row, a green
+  bar with `monitored_quantities()` (`current`; `voltage, current`). It is derived from the one
+  instruction, never authored as a second one. A sub-row rather than a strip inside the bar,
+  so it never overlaps a value line.
+
+### 36.4 Order of building
+
+1. The mixin, `ElectricalLoad`, the readouts on `MonitorControlInstruction`, the eight
+   electrical classes; one parametrized test over the table in §36.2.
+2. Plotting per §36.3; a test that open circuit followed by a fixed voltage draws one row; the
+   monitored sub-row.

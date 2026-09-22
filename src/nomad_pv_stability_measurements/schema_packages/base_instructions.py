@@ -1,7 +1,7 @@
 from math import inf, isclose
 
 import numpy as np
-from nomad.metainfo import MEnum, Quantity, SchemaPackage
+from nomad.metainfo import MEnum, MSection, Quantity, SchemaPackage
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
@@ -28,11 +28,12 @@ class MonitorControlInstruction(SingleInstruction):
 
     monitor = Quantity(
         type=bool,
-        description='Log data from this quantity.',
+        description='Log data from this quantity. Where setting it leaves others to the '
+        'device, as on the electrical load, log all of those others.',
     )
     control = Quantity(
         type=bool,
-        description='Regulate this quantity.',
+        description='Regulate this quantity: the one the instruction sets.',
     )
     sample_every = Quantity(
         type=np.float64,
@@ -75,6 +76,14 @@ class MonitorControlInstruction(SingleInstruction):
         if self.reference_point is not None:
             return f' at {self.reference_point}'
         return ''
+
+    def controlled_quantities(self) -> tuple[str, ...]:
+        """What `control` regulates, in words: the quantity itself."""
+        return (self.quantity_name(),)
+
+    def monitored_quantities(self) -> tuple[str, ...]:
+        """What `monitor` logs, in words: the quantity itself."""
+        return (self.quantity_name(),)
 
     def set_values_for_plotting(self, length):
         """What the protocol sets the quantity to over `length` of this instruction, as
@@ -127,6 +136,39 @@ class MonitorControlInstruction(SingleInstruction):
                 f'instruction classes in `hold_instructions.py`, `hold_below_instructions.py` or '
                 f'`ramp_instructions.py`.'
             )
+
+
+class DependentMonitorControl(MSection):
+    """A quantity whose partners follow it: setting it leaves them to the device, which
+    answers with them. `control` regulates what the class sets; `monitor` logs every
+    partner that follows.
+
+    Mixed in before the kind, which it cuts across:
+    `class HoldVoltage(ElectricalLoad, HoldInstruction)`. A section only because NOMAD
+    takes nothing else as the base of a section; it adds no fields. What is set and what
+    follows is physics, so each class states it and no archive does.
+    """
+
+    #: What `control` regulates, in words.
+    controlled: tuple[str, ...] = ()
+    #: What follows it, in words; `monitor` logs all of it.
+    dependent: tuple[str, ...] = ()
+
+    def controlled_quantities(self) -> tuple[str, ...]:
+        return self.controlled
+
+    def monitored_quantities(self) -> tuple[str, ...]:
+        return self.dependent
+
+
+class ElectricalLoad(DependentMonitorControl):
+    """The load on the cell's terminals. One port: one of voltage, current, resistance
+    or a point on the J–V curve is set, and the device answers with the rest.
+
+    `controlled` is what the hardware sets; `dependent` is what the instrument measures,
+    and at the port that is only ever voltage and current. A resistance is a setting of
+    the load, never measured, and what is computed from the measurements (V/I, V·I) is
+    never listed."""
 
 
 class HoldInstruction(MonitorControlInstruction):

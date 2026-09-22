@@ -3,6 +3,7 @@ from nomad.metainfo import Quantity, SchemaPackage
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
+    ElectricalLoad,
     RampInstruction,
 )
 
@@ -44,8 +45,11 @@ class RampIrradiance(RampInstruction):
     )
 
 
-class RampVoltage(RampInstruction):
+class RampVoltage(ElectricalLoad, RampInstruction):
     """The voltage at the cell's terminals, moving."""
+
+    controlled = ('voltage',)
+    dependent = ('current',)
 
     start_point = Quantity(
         type=np.float64, unit='V', description='Where the ramp starts.'
@@ -56,8 +60,11 @@ class RampVoltage(RampInstruction):
     )
 
 
-class RampCurrent(RampInstruction):
+class RampCurrent(ElectricalLoad, RampInstruction):
     """The current through the cell, moving."""
+
+    controlled = ('current',)
+    dependent = ('voltage',)
 
     start_point = Quantity(
         type=np.float64, unit='A', description='Where the ramp starts.'
@@ -68,8 +75,11 @@ class RampCurrent(RampInstruction):
     )
 
 
-class RampResistance(RampInstruction):
+class RampResistance(ElectricalLoad, RampInstruction):
     """The load across the cell's terminals, moving."""
+
+    controlled = ('resistance',)
+    dependent = ('voltage', 'current')
 
     start_point = Quantity(
         type=np.float64, unit='ohm', description='Where the ramp starts.'

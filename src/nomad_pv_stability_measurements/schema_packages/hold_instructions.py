@@ -2,6 +2,7 @@ import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage
 
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
+    ElectricalLoad,
     HoldInstruction,
     MonitorControlInstruction,
 )
@@ -44,8 +45,11 @@ class HoldIrradiance(HoldInstruction):
         return super().role_for_plotting()
 
 
-class HoldVoltage(HoldInstruction):
+class HoldVoltage(ElectricalLoad, HoldInstruction):
     """The voltage at the cell's terminals."""
+
+    controlled = ('voltage',)
+    dependent = ('current',)
 
     set_point = Quantity(type=np.float64, unit='V', description='Voltage to hold.')
     reference_point = Quantity(
@@ -61,8 +65,11 @@ class HoldVoltage(HoldInstruction):
     )
 
 
-class HoldCurrent(HoldInstruction):
+class HoldCurrent(ElectricalLoad, HoldInstruction):
     """The current through the cell."""
+
+    controlled = ('current',)
+    dependent = ('voltage',)
 
     set_point = Quantity(type=np.float64, unit='A', description='Current to hold.')
     reference_point = Quantity(
@@ -78,8 +85,11 @@ class HoldCurrent(HoldInstruction):
     )
 
 
-class HoldResistance(HoldInstruction):
+class HoldResistance(ElectricalLoad, HoldInstruction):
     """The load across the cell's terminals."""
+
+    controlled = ('resistance',)
+    dependent = ('voltage', 'current')
 
     set_point = Quantity(
         type=np.float64, unit='ohm', description='Load resistance to connect.'

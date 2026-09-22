@@ -2,18 +2,23 @@ import numpy as np
 from nomad.metainfo import Quantity, SchemaPackage
 
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
+    ElectricalLoad,
     MonitorControlInstruction,
 )
 
 m_package = SchemaPackage()
 
 
-class MPPTracking(MonitorControlInstruction):
+class MPPTracking(ElectricalLoad, MonitorControlInstruction):
     """The load held at the cell's maximum power point, which the tracker finds.
 
     The parameters are what an operator sets before the run: how far the tracker
     perturbs, how often, and how long it waits before reading back.
     """
+
+    #: The tracker moves the voltage, and the current follows.
+    controlled = ('voltage',)
+    dependent = ('current',)
 
     perturbation_voltage = Quantity(
         type=np.float64,
@@ -54,12 +59,16 @@ class MPPTracking(MonitorControlInstruction):
         return 'electrical load'
 
 
-class VOCTracking(MonitorControlInstruction):
+class VOCTracking(ElectricalLoad, MonitorControlInstruction):
     """The load at open circuit, where the voltage settles with no current drawn.
 
     No parameters and no set_point: open circuit is a state of the terminals, and the
     voltage there is the cell's answer. ISOS Table 1 writes it `OC`.
     """
+
+    #: No current, by disconnecting the terminals; the voltage follows.
+    controlled = ('current',)
+    dependent = ('voltage',)
 
     def annotation_for_plotting(self) -> str:
         return 'open circuit'
