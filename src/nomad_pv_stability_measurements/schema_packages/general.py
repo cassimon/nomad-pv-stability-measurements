@@ -137,8 +137,9 @@ def length_for_plotting(duration) -> str:
     only typical; empty where it is open-ended."""
     if seconds_of(duration) == inf:
         return ''
-    about = '≈ ' if is_typical(duration) else ''
-    return f'{about}{shown(duration.value)}'
+    if is_typical(duration):
+        return f'≈ {shown(duration.value, exact=False)}'
+    return shown(duration.value)
 
 
 def titled_for_plotting(title: str, duration) -> str:
@@ -440,18 +441,40 @@ class RepeatingBlock(InstructionBlock):
     """Instructions repeated — a block that may or may not finish.
 
     Its kind says which: a timed block always finishes, an indefinite one never does, and
-    a counting one should. On its own it is not known to finish, so its
-    `duration` is open-ended.
+    a counting one should. The base itself says none, and so is reported where it is
+    written; it is not known to finish, so its `duration` is open-ended.
     """
 
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        if type(self) is RepeatingBlock:
+            logger.error(
+                f'{self.name or "<unnamed>"} is a bare `RepeatingBlock`, which does not '
+                f'say how it ends: write an IndefiniteRepeatingBlock, a '
+                f'TimedRepeatingBlock or a CountingRepeatingBlock.'
+            )
+
     def describe_repetition(self) -> str:
-        return 'Repeat indefinitely'
+        return 'Repeat'
 
     def derive_duration(self) -> Duration:
         return Duration(kind=OPEN_ENDED)
 
     def repetitions(self) -> float:
         return inf
+
+    def break_label_for_plotting(self) -> str:
+        return ''
+
+
+class IndefiniteRepeatingBlock(RepeatingBlock):
+    """Instructions repeated until something outside stops them — it never finishes.
+
+    Its `duration` is always open-ended; only the plan it belongs to ends it.
+    """
+
+    def describe_repetition(self) -> str:
+        return 'Repeat indefinitely'
 
     def break_label_for_plotting(self) -> str:
         return 'indefinitely'
@@ -491,13 +514,6 @@ class TimedRepeatingBlock(RepeatingBlock):
 
     def break_label_for_plotting(self) -> str:
         return f'until t+{shown(self.repeat_duration)}'
-
-
-IndefiniteRepeatingBlock = RepeatingBlock
-"""Instructions repeated until something outside stops them — it never finishes.
-
-Its `duration` is always open-ended; only the plan it belongs to ends it.
-"""
 
 
 class CountingRepeatingBlock(RepeatingBlock):
@@ -555,7 +571,7 @@ class CountingRepeatingBlock(RepeatingBlock):
 
     def break_label_for_plotting(self) -> str:
         if self.repeat_n is None:
-            return super().break_label_for_plotting()
+            return 'indefinitely'  # it counts nothing, so it does not end
         return f'n={self.repeat_n} repetitions'
 
 

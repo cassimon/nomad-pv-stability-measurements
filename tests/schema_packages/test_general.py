@@ -20,6 +20,7 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     IndefiniteRepeatingBlock,
     InstructionBlock,
     Objective,
+    RepeatingBlock,
     ScheduledPlan,
     SingleInstruction,
     TimedRepeatingBlock,
@@ -241,6 +242,8 @@ def test_a_scheduled_plan_ends_its_duration_after_it_starts(
             'at least once',
         ),
         (TimedRepeatingBlock(sub_instructions=[fixed(60)]), 'no `repeat_duration`'),
+        # The base says not how it ends; its kinds do.
+        (RepeatingBlock(sub_instructions=[fixed(60)]), 'bare `RepeatingBlock`'),
         (
             TimePlan(duration=Duration(kind='whole_block'), instructions=[fixed(60)]),
             'in no block',

@@ -3632,7 +3632,8 @@ some of it is only typical, nothing where it is open-ended (every ISOS timeline)
 is ` · ` because a variant's name already ends in its choices in brackets. The iteration figures
 say their pass's length the same way (`… · 2 h`). Lengths are written in the largest of h, min
 and s that counts them whole in under five digits, else rounded in the largest unit they reach
-(`1217 h`, never `7.3e+04 min`).
+(`1217 h`, never `7.3e+04 min`). An approximate length is only ever rounded: `≈ 12.02 h`, not
+`≈ 721 min`.
 
 ### 33.6 Authoring
 
@@ -3687,4 +3688,11 @@ instruction already states a fixed duration. `tests/data/tree.stability.yaml` ge
    each. CLAUDE.md updated. The server upload itself waits for a restart of the running
    services, which still hold the code from before §33.*
 6. Later, separately: one `RepeatingBlock` instead of three, now that timed is `fixed` and
-   indefinite `open_ended`.
+   indefinite `open_ended`. *Evaluated, not done.* One class would carry `repeat_n` and
+   `repeat_duration` both optional: "both" becomes a new cross-field rule, "neither" an empty
+   field meaning *indefinitely* — what §27 removed — and the four overridden methods become
+   branches on which field is set. Letting a timed block state `duration: fixed` instead of
+   `repeat_duration` breaks "a block's duration is always derived". The kinds confirm the split:
+   each class's `derive_duration()` is one line naming its kind.
+   *Done instead:* `IndefiniteRepeatingBlock` is its own subclass rather than an alias of the
+   base, which says not how it ends and is reported where written (`tree.archive.yaml` follows).

@@ -9,10 +9,11 @@ import numpy as np
 ITERATIONS_FOR_PLOTTING = 3
 
 
-def shown(quantity) -> str:
+def shown(quantity, exact: bool = True) -> str:
     """A quantity the way a person reads it: a temperature in °C, a fraction in %, a
     time in the largest of h, min and s that counts it whole in a few digits, else in
-    the largest it reaches, rounded."""
+    the largest it reaches, rounded. A time that is not `exact` is only ever rounded:
+    `12.02 h`, not `721 min`."""
     if quantity.check('[temperature]'):
         quantity = quantity.to('degC')
     elif quantity.check('[time]'):
@@ -20,7 +21,7 @@ def shown(quantity) -> str:
         units = (('h', 3600), ('min', 60), ('s', 1))
         for unit, size in units:
             count = seconds / size
-            if 1 <= count < 10**4 and float(count).is_integer():
+            if exact and 1 <= count < 10**4 and float(count).is_integer():
                 return f'{count:.4g} {unit}'
         unit, size = next((each for each in units if seconds >= each[1]), units[-1])
         return f'{seconds / size:.4g} {unit}'

@@ -2,18 +2,18 @@ data:
   m_def: nomad_pv_stability_measurements.schema_packages.protocol.StabilityProtocol
   name: my protocol
   instructions:
-  - m_def: nomad_pv_stability_measurements.schema_packages.general.RepeatingBlock
+  - m_def: nomad_pv_stability_measurements.schema_packages.general.IndefiniteRepeatingBlock
     name: example
     sub_instructions:
-    - m_def: nomad_pv_stability_measurements.schema_packages.general.RepeatingBlock
+    - m_def: nomad_pv_stability_measurements.schema_packages.general.IndefiniteRepeatingBlock
       name: A
-    - m_def: nomad_pv_stability_measurements.schema_packages.general.RepeatingBlock
+    - m_def: nomad_pv_stability_measurements.schema_packages.general.IndefiniteRepeatingBlock
       name: fork
       sub_instruction_execution_mode: parallel
       sub_instructions:
-      - m_def: nomad_pv_stability_measurements.schema_packages.general.RepeatingBlock
+      - m_def: nomad_pv_stability_measurements.schema_packages.general.IndefiniteRepeatingBlock
         name: B
-      - m_def: nomad_pv_stability_measurements.schema_packages.general.RepeatingBlock
+      - m_def: nomad_pv_stability_measurements.schema_packages.general.IndefiniteRepeatingBlock
         name: C
-    - m_def: nomad_pv_stability_measurements.schema_packages.general.RepeatingBlock
+    - m_def: nomad_pv_stability_measurements.schema_packages.general.IndefiniteRepeatingBlock
       name: D
