@@ -12,21 +12,29 @@ from nomad.datamodel.metainfo.basesections.v2 import (
     InstrumentReference,
     SystemReference,
 )
+from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
 from nomad.metainfo import MEnum, Quantity, SchemaPackage
 
 from nomad_pv_stability_measurements.schema_packages.protocol import (
     StabilityActivity,
 )
+from nomad_pv_stability_measurements.schema_packages.step_figures import (
+    ELECTRICAL_ROWS,
+    ROWS,
+    jv_figure_for_plotting,
+    over_time_figure_for_plotting,
+)
 
 m_package = SchemaPackage()
 
 
-class StabilitySeriesStep(ActivityStep):
+class StabilitySeriesStep(PlotSection, ActivityStep):
     """A step that records conditions and output over time, all sampled together.
 
     One array per quantity, one value per sample, each as long as `time`. Only what
     was recorded is filled in: a test in the dark has no `irradiance`, one without
-    MPP tracking no `voltage`, `current_density` or `power_density`.
+    MPP tracking no `voltage`, `current_density` or `power_density`. It shows what the
+    electrical load read over time, where it read anything.
     """
 
     time = Quantity(
@@ -105,13 +113,40 @@ class StabilitySeriesStep(ActivityStep):
             logger.error(
                 '`time` goes backwards: samples are listed as they were taken.'
             )
+        self.figures = self.figures_for_plotting()
+
+    def figures_for_plotting(self) -> list[PlotlyFigure]:
+        """The electrical output over time; nothing where the load read nothing."""
+        recorded = self.recorded_for_plotting(ELECTRICAL_ROWS)
+        if not recorded:
+            return []
+        hours = self.time.to('hour').magnitude.tolist()
+        figure = over_time_figure_for_plotting(
+            [(self.name, hours, recorded)], self.name or ''
+        )
+        return [
+            PlotlyFigure(label='Electrical output', index=0, open=True, figure=figure)
+        ]
+
+    def recorded_for_plotting(self, names) -> dict:
+        """Of the quantities `names`, those recorded with one value per sample, by
+        name: what can be drawn against `time`."""
+        if self.time is None:
+            return {}
+        return {
+            name: getattr(self, name)
+            for name in names
+            if getattr(self, name) is not None
+            and len(getattr(self, name)) == len(self.time)
+        }
 
 
-class JVSweepStep(ActivityStep):
+class JVSweepStep(PlotSection, ActivityStep):
     """A step that sweeps the voltage across the cell and records the current density.
 
     One row per point: `voltage`, `current_density` and `direction` are equally long.
-    A reverse and a forward sweep are listed together, `direction` telling them apart.
+    A reverse and a forward sweep are listed together, `direction` telling them apart,
+    and are shown as one curve each.
     """
 
     voltage = Quantity(
@@ -147,13 +182,23 @@ class JVSweepStep(ActivityStep):
                 + ', '.join(f'{count} `{name}`' for name, count in lengths.items())
                 + ': each point needs one of each.'
             )
+            return
+        if self.voltage is not None and self.current_density is not None:
+            figure = jv_figure_for_plotting(
+                self.voltage, self.current_density, self.direction, self.name or ''
+            )
+            self.figures = [
+                PlotlyFigure(label='J–V', index=0, open=True, figure=figure)
+            ]
 
 
-class StabilityMeasurement(StabilityActivity):
+class StabilityMeasurement(PlotSection, StabilityActivity):
     """A stability test as it ran, read from the files an institution writes.
 
     Each institution writes its runs in a format of its own. `read_files` is handed
-    the functions that read that format, and never opens a file itself.
+    the functions that read that format, and never opens a file itself. It shows the
+    whole test over time: every series where it ran, every J–V sweep where it was
+    taken.
     """
 
     operator = Quantity(
@@ -171,6 +216,51 @@ class StabilityMeasurement(StabilityActivity):
         'operator': 'operator',
         'notes': 'description',
     }
+
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        self.figures = self.figures_for_plotting(logger)
+
+    def figures_for_plotting(self, logger) -> list[PlotlyFigure]:
+        """Everything the series recorded, on one time axis in hours since the test
+        started, with a dashed line where each J–V sweep was taken; nothing where no
+        series recorded anything. A step with no `start_time` has no place on the axis
+        and is left out, with a warning."""
+        placed = [step for step in self.steps if step.start_time is not None]
+        for step in self.steps:
+            if step.start_time is None and isinstance(
+                step, StabilitySeriesStep | JVSweepStep
+            ):
+                logger.warning(
+                    f'step `{step.name}` has no `start_time`, so the overview over '
+                    'time leaves it out.'
+                )
+        if not placed:
+            return []
+        start = self.datetime or min(step.start_time for step in placed)
+
+        def since_start(step) -> float:
+            return (step.start_time - start).total_seconds() / 3600
+
+        pieces = [
+            (
+                step.name,
+                (since_start(step) + step.time.to('hour').magnitude).tolist(),
+                step.recorded_for_plotting(ROWS),
+            )
+            for step in placed
+            if isinstance(step, StabilitySeriesStep)
+        ]
+        pieces = [piece for piece in pieces if piece[2]]
+        if not pieces:
+            return []
+        marks = [
+            (since_start(step), 'J–V')
+            for step in placed
+            if isinstance(step, JVSweepStep)
+        ]
+        figure = over_time_figure_for_plotting(pieces, self.name or '', marks)
+        return [PlotlyFigure(label='Over time', index=0, open=True, figure=figure)]
 
     def read_files(
         self, path, read_protocol, read_stability_series, read_jv_file

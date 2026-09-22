@@ -3707,7 +3707,7 @@ instruction already states a fixed duration. `tests/data/tree.stability.yaml` ge
 
 ## 34. Stability runs — what a test recorded, read from an institution's files
 
-**Status: built, steps 1–7 of §34.7.** The first measured side of the plugin: until now only
+**Status: built, steps 1–9 of §34.7.** The first measured side of the plugin: until now only
 `StabilityActivity` bridged plan and activity (§23). Nothing here changes the protocol schema.
 
 ### 34.1 What a run is
@@ -3871,9 +3871,42 @@ Seeded per run, so the files are reproduced exactly.
 8. A protocol described in the run file (§34.4a): `read_embedded_protocol` in the interface,
    `protocol_from_phases`, the child entry, the third run upload. *Built.*
 
-Not done, on purpose: figures of the steps, figures of merit from the J–V sweeps (V_oc, J_sc, FF,
-PCE, T80), J–V scans as instructions of a protocol, and `deviations_from_plan` worked out from a
-run. Each is a step of its own.
+9. The figures of the steps (§34.8). *Built.*
+
+Not done, on purpose: the J–V sweeps of a run overlaid in one figure, figures of merit from the J–V sweeps (V_oc, J_sc, FF, PCE, T80), J–V scans as
+instructions of a protocol, and `deviations_from_plan` worked out from a run. Each is a step of
+its own.
+
+### 34.8 Figures of the steps
+
+**Status: built.** Each step draws itself, as the protocol does: `JVSweepStep` and
+`StabilitySeriesStep` are `PlotSection`s and set `figures` in `normalize`. The Plotly JSON is in
+`schema_packages/step_figures.py`, written directly as in `plan_timeline.py`, sharing its font,
+grid and background so both read on a light and a dark page.
+
+- **J–V sweep:** one figure, `J–V`, current density (mA/cm²) against voltage (V), one curve per
+  `direction` in the order swept, a legend naming them. A sweep without `direction` is one curve.
+- **Series:** one figure, `Electrical output`, one row per electrical quantity recorded
+  (power density, current density, voltage, top to bottom, power first as what a stability test
+  follows), on one shared time axis in hours since the step started. It serves MPP tracking and a
+  held voltage alike: the figure shows what was recorded and **never infers which load was
+  applied** — that is the plan's to say, not the data's. A series without electrical quantities
+  (a test in the dark, not tracked) has no figure; the conditions (temperature, irradiance,
+  humidity) are not drawn yet.
+- A figure is drawn only from arrays that pass the step's own checks: a sweep whose arrays
+  differ in length has none, and a series draws only quantities with one value per sample.
+- **The whole run:** `StabilityMeasurement` is a `PlotSection` too, with one figure, `Over time`:
+  every quantity any series recorded, one row each (electrical output, then irradiance,
+  temperature, humidity), on one axis in hours since the run's `datetime` (else its earliest
+  step). Each series is drawn where its `start_time` puts it, as a line of its own, so nothing is
+  drawn across the time between two. Each J–V sweep is a dashed line at its `start_time`, marked
+  `J–V`. A step without `start_time` has no place on the axis: it is left out, with a warning.
+  The step's `Electrical output` figure and this one are drawn by the same function
+  (`over_time_figure_for_plotting`).
+- Every recorded value goes into the figure, without thinning. A long, densely sampled run would
+  store its data a second time, in the figures; thinning is left until such a run exists.
+- *Not verified:* how GUI v2 shows figures of a subsection (the steps sit in
+  `StabilityMeasurement.steps`); the archive holds them either way.
 
 ## 35. Open question — one entry per protocol
 

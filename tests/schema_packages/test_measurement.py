@@ -1,6 +1,6 @@
 """The steps a stability test records: series over time and J–V sweeps."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -80,6 +80,98 @@ def test_a_sweep_has_one_voltage_current_and_direction_per_point(normalized, log
 def test_a_sweep_goes_forward_or_reverse_only():
     with pytest.raises(ValueError, match='sideways'):
         JVSweepStep(direction=['sideways'])
+
+
+def test_a_sweep_shows_one_curve_per_direction_in_the_order_swept(normalized):
+    step = normalized(
+        JVSweepStep(
+            name='initial J–V',
+            voltage=[1.1, 0.0, 0.0, 1.1] * ureg.volt,
+            current_density=[0.0, 230.0, 228.0, 0.0] * ureg('A/m^2'),
+            direction=['reverse', 'reverse', 'forward', 'forward'],
+        )
+    )
+
+    [figure] = step.figures
+    curves = figure.figure['data']
+    assert [curve['name'] for curve in curves] == ['reverse', 'forward']
+    assert curves[0]['x'] == [1.1, 0.0]
+    assert curves[1]['y'] == pytest.approx([22.8, 0.0])  # mA/cm²
+
+
+ELECTRICAL = {
+    'voltage': [0.95, 0.94, 0.93] * ureg.volt,
+    'current_density': [200.0, 199.0, 197.0] * ureg('A/m^2'),
+    'power_density': [190.0, 187.1, 183.2] * ureg('W/m^2'),
+}
+
+
+@pytest.mark.parametrize(
+    ('recorded', 'rows'),
+    [
+        (
+            ['voltage', 'current_density', 'power_density'],
+            ['power density', 'current density', 'voltage'],
+        ),
+        (['current_density'], ['current density']),
+        ([], None),
+    ],
+    ids=['maximum power point', 'fixed voltage', 'dark'],
+)
+def test_a_series_shows_the_electrical_output_it_recorded_over_time(
+    normalized, recorded, rows
+):
+    step = normalized(
+        StabilitySeriesStep(
+            time=HOURS,
+            temperature=[338.0] * 3 * ureg.kelvin,
+            **{name: ELECTRICAL[name] for name in recorded},
+        )
+    )
+
+    if rows is None:
+        assert not step.figures
+        return
+    [figure] = step.figures
+    assert [trace['name'] for trace in figure.figure['data']] == rows
+    assert all(trace['x'] == [0.0, 1.0, 2.0] for trace in figure.figure['data'])
+
+
+def test_a_measurement_shows_its_series_over_time_since_it_started(normalized):
+    """Each series where it ran, a J–V sweep as a mark where it was taken."""
+    measurement = normalized(
+        StabilityMeasurement(
+            datetime=START,
+            steps=[
+                JVSweepStep(name='initial J–V', start_time=START),
+                StabilitySeriesStep(
+                    name='ageing',
+                    start_time=START + timedelta(hours=1),
+                    time=HOURS,
+                    temperature=[338.0] * 3 * ureg.kelvin,
+                    power_density=ELECTRICAL['power_density'],
+                ),
+            ],
+        )
+    )
+
+    [figure] = measurement.figures
+    power, temperature = figure.figure['data']
+    assert (power['name'], power['x']) == ('ageing', [1.0, 2.0, 3.0])
+    assert temperature['y'] == pytest.approx([64.85] * 3)  # °C
+    assert [mark['x0'] for mark in figure.figure['layout']['shapes']] == [0.0]
+
+
+def test_a_step_without_a_start_is_left_out_of_the_overview(normalized, log):
+    normalized(
+        StabilityMeasurement(
+            datetime=START,
+            steps=[StabilitySeriesStep(name='ageing', time=HOURS)],
+        )
+    )
+
+    [message] = log.warnings
+    assert 'step `ageing` has no `start_time`' in message
 
 
 def test_the_steps_are_kept_as_what_they_are_in_an_activity():

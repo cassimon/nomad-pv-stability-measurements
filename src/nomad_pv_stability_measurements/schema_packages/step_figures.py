@@ -1,0 +1,175 @@
+"""The figures of a stability run, as Plotly JSON: a J–V sweep as its curves, and what
+was recorded over time, of one series or of the whole run.
+
+Values are shown in the units solar-cell data is read in: current density in mA/cm²,
+power density in mW/cm², temperature in °C, humidity in %, time in hours.
+"""
+
+import numpy as np
+
+from nomad_pv_stability_measurements.schema_packages.plan_timeline import (
+    AXIS_COLOR,
+    FONT_SIZE,
+    GRID_COLOR,
+    ROW_BACKGROUND,
+)
+
+#: One colour per sweep direction, of middle lightness, for a light and a dark page.
+DIRECTION_COLORS = {'reverse': '#3b8fe0', 'forward': '#e5534b'}
+#: What a series records, as rows top to bottom: the electrical output first, the
+#: power leading as what a stability test follows, then the conditions. Each with its
+#: label, the unit it is shown in, that unit as written, and its colour.
+ROWS = {
+    'power_density': ('power density', 'mW/cm^2', 'mW/cm²', '#35b06a'),
+    'current_density': ('current density', 'mA/cm^2', 'mA/cm²', '#3b8fe0'),
+    'voltage': ('voltage', 'V', 'V', '#a77ee0'),
+    'irradiance': ('irradiance', 'W/m^2', 'W/m²', '#d9a032'),
+    'temperature': ('temperature', 'degC', '°C', '#e5534b'),
+    'relative_humidity': ('relative humidity', 'percent', '%', '#3bb3c3'),
+}
+ELECTRICAL_ROWS = ('power_density', 'current_density', 'voltage')
+
+#: px: the height of one row over time, and of everything around the rows.
+ROW_HEIGHT = 160
+FRAME_HEIGHT = 150
+#: Of the figure's height: the gap between two rows.
+ROW_GAP = 0.06
+JV_HEIGHT = 500
+
+
+def jv_figure_for_plotting(voltage, current_density, direction, title: str) -> dict:
+    """The J–V curves of one sweep, one per direction, in the order they were swept.
+    A sweep that names no direction is drawn as one curve."""
+    volts = voltage.to('V').magnitude
+    milliamps = current_density.to('mA/cm^2').magnitude
+    directions = list(direction) if direction is not None else [None] * len(volts)
+    traces = []
+    for each in dict.fromkeys(directions):
+        chosen = np.array([name == each for name in directions])
+        trace = {
+            'type': 'scatter',
+            'mode': 'lines+markers',
+            'x': volts[chosen].tolist(),
+            'y': milliamps[chosen].tolist(),
+            'marker': {'size': 4},
+        }
+        if each is not None:
+            trace.update(
+                name=each,
+                line={'color': DIRECTION_COLORS[each]},
+                marker={'size': 4, 'color': DIRECTION_COLORS[each]},
+            )
+        traces.append(trace)
+    return {
+        'data': traces,
+        'layout': {
+            **_frame(title),
+            'height': JV_HEIGHT,
+            'showlegend': any(each is not None for each in directions),
+            'xaxis': _axis('voltage (V)'),
+            'yaxis': _axis('current density (mA/cm²)'),
+        },
+    }
+
+
+def over_time_figure_for_plotting(
+    pieces: list[tuple[str, list[float], dict]],
+    title: str,
+    marks: list[tuple[float, str]] = (),
+) -> dict:
+    """Quantities over time, one row each, all on one time axis in hours.
+
+    `pieces` are `(name, hours, recorded)`, one per stretch recorded together; each
+    is drawn apart, so that nothing is drawn across the time between two. `marks` are
+    `(hours, text)`: moments marked by a dashed line through every row."""
+    rows = [name for name in ROWS if any(name in each[2] for each in pieces)]
+    height = (1 - ROW_GAP * (len(rows) - 1)) / len(rows)
+    traces = []
+    layout = {
+        **_frame(title),
+        'height': ROW_HEIGHT * len(rows) + FRAME_HEIGHT,
+        'showlegend': False,
+    }
+    for index, row in enumerate(rows):
+        label, unit, written, color = ROWS[row]
+        top = 1 - index * (height + ROW_GAP)
+        suffix = '' if index == 0 else str(index + 1)
+        for name, hours, recorded in pieces:
+            if row in recorded:
+                traces.append(
+                    {
+                        'type': 'scatter',
+                        'mode': 'lines',
+                        'name': name or label,
+                        'x': hours,
+                        'y': recorded[row].to(unit).magnitude.tolist(),
+                        'line': {'color': color},
+                        'xaxis': f'x{suffix}',
+                        'yaxis': f'y{suffix}',
+                    }
+                )
+        last = index == len(rows) - 1
+        layout[f'xaxis{suffix}'] = {
+            **_axis('time (h)' if last else ''),
+            'anchor': f'y{suffix}',
+            'showticklabels': last,
+            **({'matches': 'x'} if index else {}),
+        }
+        layout[f'yaxis{suffix}'] = {
+            **_axis(f'{label}<br>({written})'),
+            'anchor': f'x{suffix}',
+            'domain': [top - height, top],
+        }
+    layout['shapes'] = [
+        {
+            'type': 'line',
+            'xref': 'x',
+            'yref': 'paper',
+            'x0': at,
+            'x1': at,
+            'y0': 0,
+            'y1': 1,
+            'line': {'color': AXIS_COLOR, 'width': 1, 'dash': 'dash'},
+        }
+        for at, _ in marks
+    ]
+    layout['annotations'] = [
+        {
+            'text': text,
+            'xref': 'x',
+            'yref': 'paper',
+            'x': at,
+            'y': 1,
+            'yanchor': 'bottom',
+            'showarrow': False,
+            'font': {'size': FONT_SIZE - 3, 'color': AXIS_COLOR},
+        }
+        for at, text in marks
+    ]
+    return {'data': traces, 'layout': layout}
+
+
+def _frame(title: str) -> dict:
+    """What every figure of a step shares: its title, its font, and a background the
+    page shows through, light or dark."""
+    return {
+        'title': {
+            'text': f'<b>{title}</b>' if title else '',
+            'font': {'size': FONT_SIZE + 2},
+        },
+        'font': {'size': FONT_SIZE},
+        'margin': {'l': 90, 'r': 30, 't': 70, 'b': 70},
+        'paper_bgcolor': 'rgba(0, 0, 0, 0)',
+        'plot_bgcolor': ROW_BACKGROUND,
+    }
+
+
+def _axis(title: str) -> dict:
+    """An axis with its title, a grid and a line at zero."""
+    return {
+        'title': {'text': title},
+        'gridcolor': GRID_COLOR,
+        'zeroline': True,
+        'zerolinecolor': AXIS_COLOR,
+        'linecolor': AXIS_COLOR,
+    }
