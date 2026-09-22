@@ -11,8 +11,7 @@ data:
       # "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied" (p.43)
       hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}
     atmosphere:
-      - variable: relative_humidity
-        monitor: true
+      - {variable: relative_humidity, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
       - {variable: oxygen, reference_point: ambient air}
     electrical_load:

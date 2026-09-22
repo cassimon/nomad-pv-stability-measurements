@@ -13,8 +13,7 @@ data:
         - hold: 65 °C
         - hold: 85 °C
     atmosphere:
-      - relative_humidity: 85 %
-        monitor: true
+      - {relative_humidity: 85 %, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
       - {variable: oxygen, reference_point: ambient air}
     electrical_load:
