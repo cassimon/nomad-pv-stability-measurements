@@ -3528,7 +3528,7 @@ descriptions, where an author choosing the mode reads it.
 
 ## 33. Durations say what kind they are
 
-**Status: settled in review; steps 1–2 of §33.8 built.** Supersedes §32 and the first bullet
+**Status: settled in review; steps 1–3 of §33.8 built.** Supersedes §32 and the first bullet
 of §23.1.
 
 ### 33.1 Why
@@ -3622,10 +3622,17 @@ discrete action (a JV scan, a photograph), which completes by itself and so is `
 
 ### 33.5 Drawing
 
-A `typical` piece is drawn at its typical length and marked through the red assumption text
-("typical duration"). An `open_ended` one is drawn to the edge, as a never-ending one was. A
-`whole_block` one is drawn to its block's end, as a condition was. A plan whose derived
-duration includes a typical value shows "≈" before its length.
+A `typical` piece is drawn at its typical length, with its line solid — its values are stated,
+only its length is not — and `typically 10 min` in red above it, once per piece drawn (so once
+per iteration shown). An `open_ended` one is drawn to the edge, as a never-ending one was. A
+`whole_block` one is drawn to its block's end, as a condition was.
+
+A figure's title gives the length where there is one: `soak · 725 h`, `soak · ≈ 1217 h` where
+some of it is only typical, nothing where it is open-ended (every ISOS timeline). The separator
+is ` · ` because a variant's name already ends in its choices in brackets. The iteration figures
+say their pass's length the same way (`… · 2 h`). Lengths are written in the largest of h, min
+and s that counts them whole in under five digits, else rounded in the largest unit they reach
+(`1217 h`, never `7.3e+04 min`).
 
 ### 33.6 Authoring
 
@@ -3665,6 +3672,8 @@ instruction already states a fixed duration. `tests/data/tree.stability.yaml` ge
    only in the shape of `duration`. *Built: all 117 variants and `channels` draw the same
    figures and labels as before, compared figure by figure.*
 3. Instruction classes and drawing: a ramp with a rate is `derived`, typical pieces marked, "≈".
+   *Built: only the titles of the ISOS figures changed — the 54 LC iteration figures now end in
+   their pass's length.*
 4. The YAML words, the rule for the routine, and the tags in the six T/LT files. The expected
    archives must not change.
 5. A server upload of all ISOS variants, and CLAUDE.md's rules brought up to date.

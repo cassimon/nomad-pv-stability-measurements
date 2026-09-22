@@ -11,15 +11,19 @@ ITERATIONS_FOR_PLOTTING = 3
 
 def shown(quantity) -> str:
     """A quantity the way a person reads it: a temperature in °C, a fraction in %, a
-    time in the largest of h, min and s that counts it whole."""
+    time in the largest of h, min and s that counts it whole in a few digits, else in
+    the largest it reaches, rounded."""
     if quantity.check('[temperature]'):
         quantity = quantity.to('degC')
     elif quantity.check('[time]'):
         seconds = quantity.to('s').magnitude
-        for unit, size in (('h', 3600), ('min', 60)):
-            if seconds >= size and float(seconds / size).is_integer():
-                return f'{seconds / size:.4g} {unit}'
-        return f'{seconds:.4g} s'
+        units = (('h', 3600), ('min', 60), ('s', 1))
+        for unit, size in units:
+            count = seconds / size
+            if 1 <= count < 10**4 and float(count).is_integer():
+                return f'{count:.4g} {unit}'
+        unit, size = next((each for each in units if seconds >= each[1]), units[-1])
+        return f'{seconds / size:.4g} {unit}'
     elif quantity.dimensionless:
         quantity = quantity.to('percent')
     # pint writes an hour `hr`; the SI symbol is `h`.
@@ -57,6 +61,8 @@ class PlotPiece:
     cycle: float | None = None
     #: What the drawing assumes and the protocol does not state, written in red.
     assumption: str | None = None
+    #: What it typically lasts, where the protocol fixes no length, written in red.
+    typical: str | None = None
 
 
 @dataclass

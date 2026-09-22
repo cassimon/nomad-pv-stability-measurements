@@ -240,7 +240,7 @@ class _Drawing:
         row's unit, empty where it only has text."""
         unit = ''
         self.lowest = self.highest = 0.0
-        assumed = set()
+        noted = set()
         self.size = text_size(pieces, self.sections, self.x_domains)
         for k, (a, b) in enumerate(self.sections):
             axes = _axis('x', k), _axis('y', i)
@@ -264,13 +264,15 @@ class _Drawing:
                         self.line(axes, times, values, piece, line=width)
                     else:
                         self.line(axes, times, values, piece)
-                    if piece.assumption and id(piece) not in assumed:
-                        assumed.add(id(piece))
-                        self.assumption(axes, span, piece.assumption)
                 elif piece.bounds is not None:
                     unit = self.band(axes, span, piece, edges=True)
                 else:
                     self.text_bar(axes, span, piece.text)
+                # Once per piece, where it is first drawn.
+                notes = [note for note in (piece.assumption, piece.typical) if note]
+                if notes and id(piece) not in noted:
+                    noted.add(id(piece))
+                    self.assumption(axes, span, '; '.join(notes))
         return unit
 
     def line(self, axes, times, values, piece, **extra) -> None:
@@ -327,7 +329,7 @@ class _Drawing:
         return [low - VALUE_MARGIN * span, low + (1 + VALUE_MARGIN) * span]
 
     def assumption(self, axes, span, text: str) -> None:
-        """In red, just above the row: what is drawn but not stated."""
+        """In red, just above the row: what is drawn but not stated, or not fixed."""
         start, end = span[0] / HOUR, span[1] / HOUR
         note = self.text(text, axes[0], f'{axes[1]} domain', (start + end) / 2)
         note.update(y=1, yanchor='bottom', font={'size': TEXT_SIZES[0] + 1})

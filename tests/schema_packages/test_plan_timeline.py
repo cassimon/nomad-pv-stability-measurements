@@ -7,6 +7,7 @@ import pytest
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
+    CountingRepeatingBlock,
     Duration,
     IndefiniteRepeatingBlock,
 )
@@ -34,6 +35,18 @@ K = ureg.kelvin
 SUN = 1000  # W/m²
 #: °: a row label reads bottom to top.
 UPRIGHT = -90
+
+
+def whole_block() -> Duration:
+    return Duration(kind='whole_block')
+
+
+def red_notes(layout) -> list[str]:
+    return [
+        note['text']
+        for note in layout['annotations']
+        if note['font'].get('color') == ASSUMPTION_COLOR
+    ]
 
 
 def row_labels(layout) -> list[dict]:
@@ -103,7 +116,9 @@ def test_a_protocol_shows_its_timeline(normalized):
 
 
 def test_a_block_whose_iteration_never_ends_gets_no_figure_of_its_own(normalized):
-    cycling = IndefiniteRepeatingBlock(sub_instructions=[MPPTracking()])
+    cycling = IndefiniteRepeatingBlock(
+        sub_instructions=[MPPTracking(duration=Duration(kind='open_ended'))]
+    )
     protocol = normalized(StabilityProtocol(instructions=[cycling]))
 
     assert [figure.label for figure in protocol.figures] == ['Timeline']
@@ -114,7 +129,9 @@ def test_bounds_are_a_band_and_a_protocol_without_end_goes_on(normalized):
         StabilityProtocol(
             instructions=[
                 HoldBetweenIrradiance(
-                    lower_bound=800 * ureg('W/m^2'), upper_bound=SUN * ureg('W/m^2')
+                    lower_bound=800 * ureg('W/m^2'),
+                    upper_bound=SUN * ureg('W/m^2'),
+                    duration=whole_block(),
                 )
             ]
         )
@@ -130,7 +147,11 @@ def test_bounds_are_a_band_and_a_protocol_without_end_goes_on(normalized):
 
 
 def test_a_set_point_is_drawn_with_its_tolerance_around_it(normalized):
-    room = HoldTemperature(set_point=296.15 * ureg.kelvin, set_point_tolerance=4 * K)
+    room = HoldTemperature(
+        set_point=296.15 * ureg.kelvin,
+        set_point_tolerance=4 * K,
+        duration=whole_block(),
+    )
     protocol = normalized(StabilityProtocol(instructions=[room]))
 
     [timeline] = protocol.figures
@@ -145,7 +166,10 @@ def test_a_pace_the_protocol_does_not_state_is_drawn_dashed_and_said_in_red(
     normalized,
 ):
     cycling = RampTemperature(
-        start_point=296.15 * K, end_point=338.15 * K, end_of_ramp_behavior='cycle'
+        start_point=296.15 * K,
+        end_point=338.15 * K,
+        end_of_ramp_behavior='cycle',
+        duration=whole_block(),
     )
     protocol = normalized(StabilityProtocol(instructions=[cycling]))
 
@@ -161,3 +185,28 @@ def test_a_pace_the_protocol_does_not_state_is_drawn_dashed_and_said_in_red(
     assert said['text'] == 'path and rate not specified: drawn linear at 100 K/h'
     # A few cycles of it: 42 K up and down at 100 K/h, three times.
     assert timeline.figure['layout']['xaxis']['range'][1] > 3 * 2 * 0.42
+
+
+@pytest.mark.parametrize(
+    ('kind', 'about', 'said'),
+    [('fixed', '', []), ('typical', '≈ ', ['typically 1 h', 'typically 1 h'])],
+)
+def test_a_typical_length_is_drawn_as_its_length_and_said_in_red_and_in_the_title(
+    normalized, kind, about, said
+):
+    light = HoldIrradiance(
+        set_point=SUN * ureg('W/m^2'), duration=Duration(kind=kind, value=1 * ureg.hour)
+    )
+    routine = CountingRepeatingBlock(repeat_n=2, sub_instructions=[light])
+    protocol = normalized(StabilityProtocol(name='soak', instructions=[routine]))
+
+    timeline, iteration = protocol.figures
+    layout = timeline.figure['layout']
+    lines = [t for t in timeline.figure['data'] if t['y'][0] is not None]
+
+    assert layout['title']['text'] == f'<b>soak · {about}2 h</b>'
+    assert iteration.figure['layout']['title']['text'].endswith(f' · {about}1 h</b>')
+    # Once per iteration drawn; the line is solid: its values are stated.
+    assert red_notes(layout) == said
+    assert [line['x'] for line in lines] == [[0, 1], [1, 2]]
+    assert all('dash' not in line.get('line', {}) for line in lines)

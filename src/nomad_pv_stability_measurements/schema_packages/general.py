@@ -132,6 +132,22 @@ def is_typical(duration) -> bool:
     )
 
 
+def length_for_plotting(duration) -> str:
+    """A length as a figure's title gives it: `725 h`, `≈ 725 h` where some of it is
+    only typical; empty where it is open-ended."""
+    if seconds_of(duration) == inf:
+        return ''
+    about = '≈ ' if is_typical(duration) else ''
+    return f'{about}{shown(duration.value)}'
+
+
+def titled_for_plotting(title: str, duration) -> str:
+    """`title`, and its length where it has one: `soak · ≈ 725 h`. A variant's name
+    has its choices in brackets already."""
+    length = length_for_plotting(duration)
+    return f'{title} · {length}' if length and title else title or length
+
+
 def kind_of(instruction) -> str | None:
     duration = instruction.duration
     return None if duration is None else duration.kind
@@ -281,6 +297,8 @@ class SingleInstruction(Instruction):
             piece.assumption = self.assumption_for_plotting()
         if endless:
             piece.cycle = self.cycle_for_plotting()
+        if kind_of(self) == TYPICAL:
+            piece.typical = f'typically {shown(self.duration.value)}'
         return TimePlotSeries([piece])
 
     def row_for_plotting(self) -> str:

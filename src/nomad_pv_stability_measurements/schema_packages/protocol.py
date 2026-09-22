@@ -19,6 +19,7 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     Planned,
     RepeatingBlock,
     TimePlan,
+    titled_for_plotting,
 )
 from nomad_pv_stability_measurements.schema_packages.plan_timeline import (
     figure_for_plotting,
@@ -137,7 +138,7 @@ class StabilityProtocol(PlotSection, TimePlan):
         drawn = [
             (
                 'Timeline',
-                self.name,
+                titled_for_plotting(self.name, self.duration),
                 self.time_series_for_plotting(),
                 self.seconds() == inf,
             )
@@ -152,7 +153,9 @@ class StabilityProtocol(PlotSection, TimePlan):
                 drawn.append(
                     (
                         f'One iteration: {block.name or block.describe()}',
-                        f'One iteration — {title}',
+                        titled_for_plotting(
+                            f'One iteration — {title}', block.one_iteration()
+                        ),
                         block.one_iteration_for_plotting(),
                         False,
                     )
