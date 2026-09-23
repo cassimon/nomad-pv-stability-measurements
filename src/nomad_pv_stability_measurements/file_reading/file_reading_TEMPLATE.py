@@ -26,8 +26,6 @@ the rest as its own steps (`read_collection`).
 
 from pathlib import Path
 
-import pint
-
 #: The institution's short name, as in the module's name: `SIM` in
 #: `file_reading_SIM.py`.
 INSTITUTION = 'TEMPLATE'
@@ -103,7 +101,12 @@ def read_protocol(path: str | Path) -> dict:
     Leave out what the file does not say. List the steps in the order they ran, and
     give each step's `file` as a path that can be opened as it is. A series' optional
     `controlled` names the recorded quantities that were controlled, by their names in
-    a `StabilitySeriesStep`; every other recorded quantity was only monitored.
+    a `StabilitySeriesStep`; every other recorded quantity was only monitored. A step's
+    optional `settings` say how it was set up, by the names of the step's quantities,
+    as `{'scan_rate': 0.2 * ureg('V/s'), 'scan_order': 'forward then reverse'}`.
+    A J–V step whose curve was not kept but whose figures of merit were logged, for
+    example in a file of figures over time, carries them as `figures_of_merit`, a table
+    as `read_jv_file` hands back, and needs no `file`.
     """
     raise NotImplementedError
 
@@ -124,7 +127,7 @@ def read_embedded_protocol(path: str | Path) -> dict | None:
     raise NotImplementedError
 
 
-def read_stability_series(path: str | Path) -> dict[str, pint.Quantity]:
+def read_stability_series(path: str | Path) -> dict[str, object]:
     """The stability series at `path`, one quantity array per column, by the name of
     the quantity it fills in a `StabilitySeriesStep`: `time` (from the step's start),
     and whichever of `temperature`, `irradiance`, `relative_humidity`, `voltage`,
@@ -132,6 +135,9 @@ def read_stability_series(path: str | Path) -> dict[str, pint.Quantity]:
     as `time`.
 
     A column with another name is reported when the measurement is read, not stored.
+
+    Where the file says how the electrical load was tracked, also `settings`, as in the
+    steps of `read_protocol`: `tracking_algorithm`, `tracking_step` and `tracking_delay`.
     """
     raise NotImplementedError
 
@@ -144,7 +150,11 @@ def read_jv_file(path: str | Path) -> dict[str, object]:
     Where the file holds what the J–V station reported of each scan, also
     `figures_of_merit`: a table of one row per scan, one array per column by the name
     of the `JVFiguresOfMerit` quantity it fills (`direction`, `efficiency`,
-    `open_circuit_voltage`, ...). They are taken as reported, never worked out again."""
+    `open_circuit_voltage`, ...). They are taken as reported, never worked out again.
+
+    Where the file says how the sweep was set up, also `settings`, as in the steps of
+    `read_protocol`: `voltage_start`, `voltage_stop`, `voltage_step`, `scan_rate` and
+    `scan_order`."""
     raise NotImplementedError
 
 

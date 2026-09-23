@@ -9,7 +9,7 @@ marked **(decided)**. Open points are in the last section.
 
 `example_uploads/institutes/UNITOV/example_batch/<device>/<device>_<pixel>/<HH.MM.SS>/`
 
-- **One timestamp folder is one run of one pixel.** There are 18 runs over 6 pixels:
+- **One timestamp folder is one run of one pixel.** There are 17 runs over 6 pixels:
   AI14-1A/1B/1C and AI22-1A/1B/1C. The folders `1D` are empty. Pixels of one device start
   at the same second, each on its own SMU channel (`Note: SMU 1A`).
 - A run folder holds these files:
@@ -200,7 +200,7 @@ Every run file describes its test, so each run also makes a `'protocol'` child e
 - `ASSUMED_CONDITIONS` is generic. `protocol_from_phases` fills in only what a phase
   leaves out, so any institution can declare its own, or none.
 
-The 18 protocol entries are identical. Keeping one entry per protocol is Design.md §35,
+The 17 protocol entries are identical. Keeping one entry per protocol is Design.md §35,
 which is still open.
 
 ## 7. Parser: which entries one anchor file makes
@@ -244,16 +244,26 @@ Each step ends with the full test suite and ruff passing, and a stop for review.
 3. **Placeholder sample** *(done)* (§5.0): `SolarCellSample` in `sample.py`, registered in the
    entry point. *Test:* it loads and normalizes.
 4. **P_MPP** *(done)* (§5.1): the field and its markers on the power-density row.
-5. **Sweep settings** (§5.2): the five `JVSweepStep` fields, filled through the step dict.
-6. **Tracker settings** (§5.2): the three flat `StabilitySeriesStep` fields.
-7. **Inline figures of merit** in `read_files`, and the template's `read_protocol` says a
+5. **Sweep settings** *(done)* (§5.2): the five `JVSweepStep` fields, filled through
+   `settings`, from the step dict or from the reader's result.
+6. **Tracker settings** *(done)* (§5.2): the three flat `StabilitySeriesStep` fields.
+7. **Inline figures of merit** *(done)* in `read_files`, and the template's `read_protocol` says a
    step may carry `figures_of_merit` without `file`. *Test:* a step with FOMs and no file.
 
 **B. UNITOV's readers**
-8. **Shared helpers** in utils: `encoding` for the readers, `rename_columns`,
-   `jv_from_side_by_side`.
-9. **UNITOV header and table reader**, and `read_jv_file`. *Test:* one real J–V file.
-10. **`read_stability_series`.** *Test:* one real Tracking file.
+8. **Shared helpers** *(done)* in utils: `read_text` (UTF-8, else Latin-1; the CSV
+   readers use it, so no `encoding` parameter is needed), `rename_columns`,
+   `jv_from_side_by_side`; an empty numeric cell reads as NaN.
+9. **UNITOV header and table reader**, and `read_jv_file` *(done)*. *Test:* one real J–V
+   file. All 25 J–V files read and normalize without problems. The instrument settings
+   `Auto-detect Voc`, `Voltage Range`, `Current Range`, `Inverted`, `Auto-range` are left
+   out knowingly (listed in the module); any other unknown setting is reported.
+   *Found for step 11:* the Parameters table has 20 data columns but 19 titles: the time
+   is written again before the RV figures, without a title.
+10. **`read_stability_series`** *(done)*. *Test:* one real Tracking file. All 17 read and
+    normalize without problems. The columns are mapped by title with their units, since
+    the station writes `Hours`, which is no unit; `JV interval`, `Test duration` and
+    `Start-up Time` are left to `read_protocol`.
 11. **`read_protocol`**: the folder as the run, Parameters rows without a file as FOM-only
     scans, `is_protocol_file`, and UNITOV listed in `INSTITUTIONS`. *Test:* the run with a
     missing J–V file still has two scans.

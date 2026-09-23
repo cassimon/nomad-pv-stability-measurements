@@ -36,8 +36,10 @@ class StabilitySeriesStep(PlotSection, ActivityStep):
     One array per quantity, one value per sample, each as long as `time`. Only what
     was recorded is filled in: a test in the dark has no `irradiance`, one without
     MPP tracking no `voltage`, `current_density` or `power_density`. `controlled` says
-    which of them were controlled; the rest were only monitored. It shows what the
-    electrical load read over time, where it read anything.
+    which of them were controlled; the rest were only monitored. How the electrical
+    load was tracked, as set, is in `tracking_algorithm`, `tracking_step` and
+    `tracking_delay`. It shows what the electrical load read over time, where it read
+    anything.
     """
 
     time = Quantity(
@@ -108,6 +110,22 @@ class StabilitySeriesStep(PlotSection, ActivityStep):
         'or driven to a value, not only logged. Every other recorded quantity was only '
         'monitored. Under MPP tracking the voltage is controlled and the current '
         'follows; the power is never controlled, so it cannot be named here.',
+    )
+    tracking_algorithm = Quantity(
+        type=str,
+        description='How the electrical load was set during the step, as the tracker '
+        'names it: `fixed voltage`, `perturb and observe`, ...',
+    )
+    tracking_step = Quantity(
+        type=np.float64,
+        unit='V',
+        description='How far the tracker moves the voltage in one step, as set.',
+    )
+    tracking_delay = Quantity(
+        type=np.float64,
+        unit='s',
+        description='How long the tracker waits after moving the voltage before it '
+        'reads the current, as set.',
     )
 
     def normalize(self, archive, logger):
@@ -231,8 +249,39 @@ class JVSweepStep(PlotSection, ActivityStep):
     One row per point: `voltage`, `current_density` and `direction` are equally long.
     A reverse and a forward sweep are listed together, `direction` telling them apart,
     and are shown as one curve each. What the J–V station worked out of each scan is in
-    `figures_of_merit`.
+    `figures_of_merit`, and how the sweep was set up in its settings, `voltage_start`
+    to `scan_order`.
     """
+
+    voltage_start = Quantity(
+        type=np.float64,
+        unit='V',
+        description='The voltage the forward scan was set to start from, the lower end '
+        'of the range swept.',
+    )
+    voltage_stop = Quantity(
+        type=np.float64,
+        unit='V',
+        description='The voltage the forward scan was set to end at, the upper end of '
+        'the range swept. The data can end before it, where the station stops a scan '
+        'once it has found the open circuit voltage.',
+    )
+    voltage_step = Quantity(
+        type=np.float64,
+        unit='V',
+        description='The voltage between two points of a scan, as set.',
+    )
+    scan_rate = Quantity(
+        type=np.float64,
+        unit='V/s',
+        description='How fast the voltage was swept, as set.',
+    )
+    scan_order = Quantity(
+        type=MEnum(
+            'forward', 'reverse', 'forward then reverse', 'reverse then forward'
+        ),
+        description='Which scans the sweep was set to take, in the order taken.',
+    )
 
     voltage = Quantity(
         type=np.float64,
@@ -391,7 +440,11 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         names its `kind`, `stability_series` or `jv`, and the `file` the matching
         function reads into one array per column. A J–V file may also hand back
         `figures_of_merit`, a table of what the station reported, one row per scan. A
-        series step may say which of its quantities were `controlled`.
+        series step may say which of its quantities were `controlled`. How a step was
+        set up, such as a sweep's `scan_rate`, is its `settings`, one value per name of
+        the quantity it fills, given in the step or handed back by its reader.
+        A J–V step may carry its `figures_of_merit` itself, with or without a `file`:
+        a scan whose curve was not kept but whose figures the station logged.
         Returns what had no place here, one message each, so that nothing is left out
         unsaid.
         """
@@ -427,23 +480,43 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
                         f'step `{step.get("name")}` says what was controlled, which '
                         'only a stability series has a place for.'
                     )
-            columns = dict(read(step['file']))
-            reported = columns.pop('figures_of_merit', None)
-            problems += _fill_columns(section, columns, step.get('name'))
-            if reported is not None and isinstance(section, JVSweepStep):
-                scans = []
-                for row in _rows(reported):
-                    scans.append(JVFiguresOfMerit())
-                    problems += _fill_columns(scans[-1], row, step.get('name'))
-                section.figures_of_merit = scans
-            elif reported is not None:
-                problems.append(
-                    f'step `{step.get("name")}` has figures of merit, which only a '
-                    'J–V sweep has a place for.'
-                )
+            problems += _read_step(section, step, read)
             steps.append(section)
         self.steps = steps
         return problems
+
+
+def _read_step(section, step: dict, read) -> list[str]:
+    """Fill `section` in from `step` of a run and the file it names, read by `read`;
+    returns what had no place, one message each."""
+    problems = []
+    if step.get('file') is None and step.get('figures_of_merit') is None:
+        problems.append(f'step `{step.get("name")}` names no file to read.')
+    columns = dict(read(step['file'])) if step.get('file') else {}
+    reported = columns.pop('figures_of_merit', None)
+    if step.get('figures_of_merit') is not None:
+        if reported is not None:
+            problems.append(
+                f'step `{step.get("name")}` has figures of merit both in its '
+                'file and in the run; those of its file are kept.'
+            )
+        else:
+            reported = step['figures_of_merit']
+    settings = {**step.get('settings', {}), **columns.pop('settings', {})}
+    problems += _fill_columns(section, columns, step.get('name'))
+    problems += _fill_columns(section, settings, step.get('name'), 'setting')
+    if reported is not None and isinstance(section, JVSweepStep):
+        scans = []
+        for row in _rows(reported):
+            scans.append(JVFiguresOfMerit())
+            problems += _fill_columns(scans[-1], row, step.get('name'))
+        section.figures_of_merit = scans
+    elif reported is not None:
+        problems.append(
+            f'step `{step.get("name")}` has figures of merit, which only a '
+            'J–V sweep has a place for.'
+        )
+    return problems
 
 
 def _rows(table: dict) -> list[dict]:
@@ -460,15 +533,16 @@ def _rows(table: dict) -> list[dict]:
     ]
 
 
-def _fill_columns(section, columns: dict, step_name) -> list[str]:
+def _fill_columns(section, columns: dict, step_name, what='column') -> list[str]:
     """Each column into the quantity of its name; a column with no such quantity is
-    reported, not dropped unsaid. A column is an array, or one value of a row."""
+    reported, not dropped unsaid. A column is an array, or one value of a row or of
+    the settings."""
     own = set(section.m_def.all_quantities) - set(ActivityStep.m_def.all_quantities)
     problems = []
     for name, values in columns.items():
         if name not in own:
             problems.append(
-                f'step `{step_name}` has a column `{name}`, which '
+                f'step `{step_name}` has a {what} `{name}`, which '
                 f'`{type(section).__name__}` has no place for.'
             )
             continue

@@ -4275,6 +4275,11 @@ said**:
 
 ### 37.4 Schema additions
 
+How a step was set up reaches it as its **`settings`**: a dict by quantity name, given in the
+step of `read_protocol` or handed back by the step's reader (a J–V file often states its own
+settings), the reader's winning. `read_files` fills them like columns; a setting the step has no
+quantity for is reported.
+
 | Where | What |
 |---|---|
 | `JVFiguresOfMerit` | `power_density_at_maximum_power_point` (P_MPP), taken as reported; drawn as markers on the power density row of the overview, beside the tracked power |

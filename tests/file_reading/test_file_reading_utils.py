@@ -3,14 +3,18 @@
 import re
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 import pytest
 from nomad.datamodel import EntryArchive
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
     as_datetime,
+    jv_from_side_by_side,
     protocol_from_phases,
     read_csv_with_units_in_header,
+    read_text,
+    rename_columns,
 )
 from nomad_pv_stability_measurements.parsers.translate import translate
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
@@ -71,6 +75,47 @@ def test_a_header_without_unit_makes_a_column_of_text(tmp_path):
 def test_an_unreadable_unit_names_its_column(tmp_path, header, fragment):
     with pytest.raises(ValueError, match=re.escape(fragment)):
         read_csv_with_units_in_header(written(tmp_path, 'step.csv', f'{header}\n1\n'))
+
+
+@pytest.mark.parametrize('encoding', ['utf-8', 'latin-1'])
+def test_a_file_is_read_in_utf8_or_else_latin1(tmp_path, encoding):
+    path = tmp_path / 'series.txt'
+    path.write_bytes('J (mA/cm²)'.encode(encoding))
+
+    assert read_text(path) == 'J (mA/cm²)'
+
+
+def test_columns_are_renamed_to_the_schema_and_read_in_the_unit_stated():
+    table = {
+        'Rs': np.array(['12.5', '13.0']),
+        'Voc': [1.1, 1.09] * ureg.volt,
+        'Remark': np.array(['ok', 'ok']),
+    }
+
+    renamed = rename_columns(
+        table,
+        {'Rs': 'series_resistance', 'Voc': 'open_circuit_voltage'},
+        units={'series_resistance': 'ohm*cm^2'},
+    )
+
+    assert list(renamed) == ['series_resistance', 'open_circuit_voltage', 'Remark']
+    assert renamed['series_resistance'].to('ohm*m^2').magnitude == pytest.approx(
+        [12.5e-4, 13.0e-4]
+    )
+    # A column the lab named otherwise keeps its name, to be reported, not dropped.
+    assert renamed['Remark'].tolist() == ['ok', 'ok']
+
+
+def test_a_sweep_written_side_by_side_is_one_row_per_point_in_the_order_swept():
+    forward = [-0.1, 0.5, 0.7] * ureg.volt, [20.0, 18.0, 1.0] * ureg('mA/cm^2')
+    # The shorter scan's column ends in empty cells.
+    reverse = [0.7, 0.5, np.nan] * ureg.volt, [1.0, 18.5, np.nan] * ureg('mA/cm^2')
+
+    sweep = jv_from_side_by_side({'forward': forward, 'reverse': reverse})
+
+    assert sweep['direction'].tolist() == ['forward'] * 3 + ['reverse'] * 2
+    assert sweep['voltage'].to('V').magnitude.tolist() == [-0.1, 0.5, 0.7, 0.7, 0.5]
+    assert sweep['current_density'].to('mA/cm^2').magnitude[-1] == pytest.approx(18.5)
 
 
 @pytest.mark.parametrize(

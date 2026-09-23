@@ -28,12 +28,86 @@ SET_POINTS = {
 }
 
 
+#: The encodings a text file is tried in, in order. Latin-1 decodes any bytes, so it
+#: comes last: a file that is not UTF-8 is read as the Latin-1 that older measurement
+#: software writes, where `²` is one byte.
+ENCODINGS = ('utf-8', 'latin-1')
+
+
+def read_text(path: str | Path) -> str:
+    """The text of the file at `path`, in the first of `ENCODINGS` that decodes it.
+
+    NOMAD rewrites the file an entry is made from as UTF-8 when it is not, but not the
+    other files of a run, so one run can hold both."""
+    data = Path(path).read_bytes()
+    for encoding in ENCODINGS:
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(f'{path} is in none of the encodings {", ".join(ENCODINGS)}.')
+
+
+def rename_columns(
+    table: dict[str, object],
+    names: dict[str, str],
+    units: dict[str, str] | None = None,
+) -> dict[str, object]:
+    """`table` with its columns renamed from the lab's names to the schema's, as
+    `names` maps them; a column `names` does not name keeps its own, so that reading
+    the measurement reports it rather than dropping it.
+
+    `units` gives, by the schema's name, the unit a column of text or plain numbers is
+    in, as text: `{'series_resistance': 'ohm*cm^2', 'efficiency': '%'}`; that column is
+    read as numbers in it. A lab whose files label a unit wrongly states the right one
+    here. An unreadable unit or number raises a `ValueError` naming the column.
+    """
+    units = units or {}
+    renamed = {}
+    for title, values in table.items():
+        name = names.get(title, title)
+        if name in units and not isinstance(values, pint.Quantity):
+            renamed[name] = _quantity(title, values, units[name])
+        else:
+            renamed[name] = values
+    return renamed
+
+
+def jv_from_side_by_side(
+    scans: dict[str, tuple[pint.Quantity, pint.Quantity]],
+) -> dict[str, object]:
+    """A J–V sweep written as one pair of columns per scan, side by side, as
+    `read_jv_file` hands it back: one row per point, the scans one after another in
+    the order of `scans`, `direction` telling them apart.
+
+    `scans` are `{direction: (voltage, current_density)}`, each a quantity array. The
+    scans of a sweep have different lengths, so the shorter columns of such a file end
+    in empty cells: points without a number (NaN) are left out."""
+    voltages, densities, directions = [], [], []
+    for direction, (voltage, density) in scans.items():
+        kept = ~(np.isnan(voltage.magnitude) | np.isnan(density.magnitude))
+        voltages.append(voltage[kept])
+        densities.append(density[kept])
+        directions += [direction] * int(kept.sum())
+    return {
+        'voltage': _joined(voltages, 'V'),
+        'current_density': _joined(densities, 'A/m^2'),
+        'direction': np.array(directions, dtype=str),
+    }
+
+
+def _joined(parts: list[pint.Quantity], unit: str) -> pint.Quantity:
+    return ureg.Quantity(
+        np.concatenate([part.to(unit).magnitude for part in parts] or [[]]), unit
+    )
+
+
 def read_csv_with_units_in_header(path: str | Path) -> dict[str, object]:
     """A CSV whose header names each column and its unit, as `temperature (°C)`.
 
     One entry per column in the order written, by the column's name: a quantity array
-    where the header states a unit, an array of text where it does not. A unit that
-    cannot be read raises a `ValueError` naming the column.
+    where the header states a unit, with NaN for an empty cell, an array of text where
+    it does not. A unit that cannot be read raises a `ValueError` naming the column.
     """
     [table] = read_csv_tables_with_units_in_header(path)
     return table
@@ -43,19 +117,20 @@ def read_csv_tables_with_units_in_header(path: str | Path) -> list[dict[str, obj
     """A CSV of several tables, one after another, an empty line between two: each
     table as `read_csv_with_units_in_header` reads a file of one, in the order
     written."""
-    with Path(path).open(newline='', encoding='utf-8') as file:
-        lines = list(csv.reader(file))
+    lines = list(csv.reader(read_text(path).splitlines()))
     tables, table = [], []
     for line in [*lines, []]:
         if any(cell.strip() for cell in line):
             table.append(line)
         elif table:
-            tables.append(_read_table(*table))
+            tables.append(table_with_units_in_header(*table))
             table = []
     return tables
 
 
-def _read_table(header, *rows) -> dict[str, object]:
+def table_with_units_in_header(header, *rows) -> dict[str, object]:
+    """A table given as its `header` and `rows`, each a list of cells as text, read as
+    `read_csv_with_units_in_header` reads a file."""
     columns = list(zip(*rows)) if rows else [()] * len(header)
     return dict(_read_column(title, cells) for title, cells in zip(header, columns))
 
@@ -127,9 +202,17 @@ def _read_column(title: str, cells) -> tuple[str, object]:
     match = _HEADER_WITH_UNIT.fullmatch(title.strip())
     if match is None:
         return title.strip(), np.array(cells, dtype=str)
+    return match.group('name'), _quantity(title, cells, match.group('unit'))
+
+
+def _quantity(title: str, cells, unit: str) -> pint.Quantity:
+    """`cells` as numbers in `unit`, an empty cell as NaN."""
     try:
-        factor, unit = split_match_convert(f'1 {match.group("unit")}')
-        values = np.array(cells, dtype=float) * factor
-        return match.group('name'), ureg.Quantity(values, unit)
+        factor, unit = split_match_convert(f'1 {unit}')
+        numbers = [
+            np.nan if isinstance(cell, str) and not cell.strip() else float(cell)
+            for cell in cells
+        ]
+        return ureg.Quantity(np.array(numbers, dtype=float) * factor, unit)
     except (ValueError, pint.errors.UndefinedUnitError) as error:
         raise ValueError(f'column `{title}` cannot be read: {error}') from error

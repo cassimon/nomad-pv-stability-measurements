@@ -359,6 +359,93 @@ def test_a_sweep_takes_the_figures_of_merit_its_station_reported_per_scan():
     assert ['column `wind_speed`' in problem for problem in problems] == [True, True]
 
 
+def test_a_scan_whose_curve_was_not_kept_keeps_the_figures_of_merit_logged():
+    steps = [
+        {
+            'name': 'J–V at 0.5 h',
+            'kind': 'jv',
+            'start': START,
+            'figures_of_merit': {
+                'direction': ['forward', 'reverse'],
+                'efficiency': [15.2, 15.9] * ureg.percent,
+            },
+        },
+        {'name': 'lost', 'kind': 'jv'},
+    ]
+    measurement = StabilityMeasurement()
+
+    problems = measurement.read_files(
+        'run.yaml', **read_from({'run': {}, 'steps': steps}, {})
+    )
+
+    scan, _ = measurement.steps
+    assert scan.voltage is None
+    assert [each.direction for each in scan.figures_of_merit] == ['forward', 'reverse']
+    [problem] = problems
+    assert 'step `lost` names no file' in problem
+
+
+def test_a_sweep_takes_how_it_was_set_up_from_its_step_or_its_file():
+    steps = [
+        {
+            'name': 'J–V',
+            'kind': 'jv',
+            'file': 'jv.csv',
+            'settings': {'scan_order': 'forward then reverse', 'colour': 'blue'},
+        }
+    ]
+    tables = {
+        'jv.csv': {
+            'voltage': [0.0, 1.1] * ureg.volt,
+            'settings': {
+                'voltage_start': -0.1 * ureg.volt,
+                'voltage_stop': 1.5 * ureg.volt,
+                'voltage_step': 20 * ureg.millivolt,
+                'scan_rate': 200 * ureg('mV/s'),
+            },
+        },
+    }
+    measurement = StabilityMeasurement()
+
+    problems = measurement.read_files(
+        'run.yaml', **read_from({'run': {}, 'steps': steps}, tables)
+    )
+
+    [jv] = measurement.steps
+    assert jv.scan_order == 'forward then reverse'
+    assert jv.scan_rate.to('V/s').magnitude == pytest.approx(0.2)
+    assert jv.voltage_stop.to('V').magnitude == pytest.approx(1.5)
+    [problem] = problems
+    assert 'a setting `colour`' in problem
+
+
+def test_a_series_takes_how_its_load_was_tracked_from_its_settings():
+    steps = [
+        {
+            'name': 'ageing',
+            'kind': 'stability_series',
+            'file': 'series.csv',
+            'settings': {
+                'tracking_algorithm': 'fixed voltage',
+                'tracking_step': 20 * ureg.millivolt,
+                'tracking_delay': 0.5 * ureg.second,
+            },
+        }
+    ]
+    tables = {'series.csv': {'time': HOURS}}
+    measurement = StabilityMeasurement()
+
+    problems = measurement.read_files(
+        'run.yaml', **read_from({'run': {}, 'steps': steps}, tables)
+    )
+
+    [series] = measurement.steps
+    assert problems == []
+    assert series.tracking_algorithm == 'fixed voltage'
+    assert series.tracking_step.to('V').magnitude == pytest.approx(0.02)
+    assert series.tracking_delay.to('s').magnitude == pytest.approx(0.5)
+
+
 def test_what_has_no_place_is_reported_and_the_rest_read():
     steps = [
         {'name': 'photo', 'kind': 'image', 'file': 'photo.png'},
