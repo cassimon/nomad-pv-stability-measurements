@@ -87,7 +87,7 @@ TOP_ROWS = (
     'absolute humidity',
     'oxygen fraction',
 )
-BOTTOM_ROWS = ('electrical load',)
+BOTTOM_ROWS = ('electrical load', 'J–V scan')
 
 
 def axis_sections(end: float, breaks: list[AxisBreak]):

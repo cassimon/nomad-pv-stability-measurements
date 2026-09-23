@@ -359,7 +359,10 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        self.figures = self.figures_for_plotting(logger)
+        # A measurement made of others draws its figure where they are read: they are
+        # other entries, which need not have been processed when this one is.
+        if not self.sub_activities:
+            self.figures = self.figures_for_plotting(logger)
 
     #: What the overview shows of each J–V scan, as the station reported it, and in
     #: which row: the efficiency on top, the power at the maximum power point beside
@@ -369,16 +372,20 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         'power_density_at_maximum_power_point': 'power_density',
     }
 
-    def figures_for_plotting(self, logger) -> list[PlotlyFigure]:
+    def figures_for_plotting(self, logger, steps=None) -> list[PlotlyFigure]:
         """The whole test on one time axis, in hours since it started: on top the
         efficiency of each J–V scan as the station reported it, one line per direction,
         then the output and the conditions the series recorded, each in the colour of
         its role, controlled or only monitored, with each scan's power at the maximum
         power point as dots on the power density row, and a dashed line where
         each J–V sweep was taken. Nothing where there is nothing to draw. A step with no
-        `start_time` has no place on the axis and is left out, with a warning."""
-        placed = [step for step in self.steps if step.start_time is not None]
-        for step in self.steps:
+        `start_time` has no place on the axis and is left out, with a warning.
+
+        `steps` are the steps to draw, by default this measurement's own; a
+        measurement made of others draws theirs too."""
+        steps = self.steps if steps is None else steps
+        placed = [step for step in steps if step.start_time is not None]
+        for step in steps:
             if step.start_time is None and isinstance(
                 step, StabilitySeriesStep | JVSweepStep
             ):

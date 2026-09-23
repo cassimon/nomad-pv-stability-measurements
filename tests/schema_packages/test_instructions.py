@@ -11,6 +11,9 @@ from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     MonitorControlInstruction,
     RampInstruction,
 )
+from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
+    JVScan,
+)
 from nomad_pv_stability_measurements.schema_packages.general import Duration
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBelowRelativeHumidity,
@@ -445,3 +448,19 @@ def test_control_regulates_what_is_set_and_monitor_logs_what_follows(
 
     assert instruction.controlled_quantities() == controlled
     assert instruction.monitored_quantities() == monitored
+
+
+def test_jv_scans_are_listed_by_how_often_and_drawn_on_their_own_row(normalized, log):
+    scans = normalized(JVScan(duration=fixed(1 * ureg.hour), interval=10 * ureg.minute))
+
+    [piece] = scans.time_series_for_plotting(0, 7200).pieces
+    assert scans.label == 'J–V scan every 10 min'
+    assert (piece.row, piece.role, piece.end) == ('J–V scan', 'monitored', 3600)
+    assert log.errors == []
+
+
+def test_jv_scans_follow_one_another_after_a_positive_interval(normalized, log):
+    normalized(JVScan(duration=fixed(1 * ureg.hour), interval=0 * ureg.minute))
+
+    [message] = log.errors
+    assert 'must be positive' in message

@@ -39,3 +39,15 @@ protocols_in_run_files_example_upload_entry_point = ExampleUploadEntryPoint(
     'describes, and the run refers to its protocol. Nothing was measured.',
     resources=['example_uploads/protocols_in_run_files/*'],
 )
+
+unitov_runs_example_upload_entry_point = ExampleUploadEntryPoint(
+    title='Stability runs measured at UNITOV',
+    category='Examples',
+    description='Short stability runs of six solar cells, measured at the University '
+    'of Rome Tor Vergata, as their station writes them: a folder per run, with the '
+    'voltage held and tracked over time, J–V scans in between, and the figures of '
+    'merit of every scan. Each run becomes an entry, with the protocol it describes; '
+    'each cell becomes a sample, and a collection of its whole history: its runs, '
+    'and one figure of all they measured.',
+    resources=['example_uploads/institutes/UNITOV/*'],
+)

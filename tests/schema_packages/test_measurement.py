@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from nomad.datamodel import EntryArchive
 from nomad.units import ureg
 
 import nomad_pv_stability_measurements
@@ -231,6 +232,28 @@ def test_the_power_each_scan_reported_is_shown_beside_the_tracked_power(normaliz
     assert reported['yaxis'] == tracked['yaxis']  # the same row
     assert (reported['mode'], reported['x']) == ('markers', [1.0])
     assert reported['y'] == pytest.approx([19.0])  # mW/cm²
+
+
+def test_a_measurement_made_of_others_keeps_the_figure_drawn_of_their_steps(log):
+    run = StabilityMeasurement(
+        name='run',
+        steps=[
+            StabilitySeriesStep(
+                name='ageing',
+                start_time=START,
+                time=HOURS,
+                power_density=ELECTRICAL['power_density'],
+            )
+        ],
+    )
+    collection = StabilityMeasurement(name='device', sub_activities=[run])
+    collection.figures = collection.figures_for_plotting(log, list(run.steps))
+
+    collection.normalize(EntryArchive(), log)
+
+    [figure] = collection.figures
+    [power] = figure.figure['data']
+    assert power['x'] == [0.0, 1.0, 2.0]
 
 
 def test_a_step_without_a_start_is_left_out_of_the_overview(normalized, log):

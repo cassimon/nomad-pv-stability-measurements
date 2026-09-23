@@ -18,6 +18,8 @@ from nomad_pv_stability_measurements.parsers.channels import (
     CHANNEL_VARIABLES,
     HOLD_BELOW_INSTRUCTIONS,
     HOLD_BETWEEN_INSTRUCTIONS,
+    JV_SCAN_FIELDS,
+    JV_SCAN_WORD,
     NAMED_VALUES,
     OLD_CHANNEL_CLASSES,
     OLD_CLASSES,
@@ -36,6 +38,9 @@ from nomad_pv_stability_measurements.parsers.units import (
 )
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     MonitorControlInstruction,
+)
+from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
+    JVScan,
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
     FIXED,
@@ -68,6 +73,7 @@ AUTHORING_WORDS = (
     'mode',
     'repeat',
     'repeat_for',
+    JV_SCAN_WORD,
 )
 #: Keys a protocol may be written with that become its instructions (§14.3).
 PROTOCOL_WORDS = ('channel_settings', 'routine', 'duration')
@@ -397,6 +403,9 @@ def _instruction(entry, path: str, problems: list) -> list[dict]:
         cls = _resolve(qualified, path, problems)
         if cls is None:
             return []
+    elif JV_SCAN_WORD in rest:
+        cls = JVScan
+        rest = _jv_scan(rest, path, problems)
     elif 'channel' in rest:
         cls = None
     elif 'repeat_for' in rest:
@@ -408,6 +417,25 @@ def _instruction(entry, path: str, problems: list) -> list[dict]:
     if cls is None or issubclass(cls, MonitorControlInstruction):
         return _monitor_control(rest, cls, path, problems)
     return [{'m_def': m_def(cls), **_fields(rest, cls, path, problems)}]
+
+
+def _jv_scan(authored: dict, path: str, problems: list) -> dict:
+    """`jv_scan: {every: 10 min, from: -0.1 V, to: 1.2 V, ...}` as the fields of a
+    `JVScan`, beside the entry's other keys such as its `duration`. `jv_scan: {}`, or
+    with no settings, is one scan."""
+    rest = dict(authored)
+    written = rest.pop(JV_SCAN_WORD)
+    if written is None:
+        return rest
+    if not isinstance(written, dict):
+        where = _at(path, JV_SCAN_WORD)
+        problems.append(
+            Problem(where, f"expected the scan's settings, got {written!r}.")
+        )
+        return rest
+    for word, value in written.items():
+        rest[JV_SCAN_FIELDS.get(word, word)] = value
+    return rest
 
 
 def _resolve(qualified, path: str, problems: list) -> type | None:

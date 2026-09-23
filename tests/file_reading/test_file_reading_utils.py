@@ -10,6 +10,7 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
     as_datetime,
+    cumulative_protocol,
     jv_from_side_by_side,
     protocol_from_phases,
     read_csv_with_units_in_header,
@@ -157,6 +158,37 @@ def test_phases_make_a_protocol_run_in_sequence_and_repeated(log):
     assert protocol.notes == 'A lab test.'
     # Held and monitored, except the light in the dark.
     assert monitored == [True, None]
+
+
+def test_a_collection_follows_a_protocol_that_specifies_nothing(log):
+    translation = translate(cumulative_protocol())
+    protocol = StabilityProtocol.m_from_dict(translation.archive['data'])
+    for section in protocol.m_all_contents(depth_first=True, include_self=True):
+        section.normalize(EntryArchive(), log)
+
+    assert translation.problems == [] and log.errors == [] and log.warnings == []
+    assert protocol.instructions == []
+    assert protocol.duration.kind == 'open_ended'
+
+
+def test_assumed_conditions_fill_only_what_a_phase_leaves_out_and_are_said():
+    document = protocol_from_phases(
+        'Soak',
+        [{'name': 'soak', 'duration': '1 h', 'temperature': '65 °C'}],
+        assumed={'temperature': 'RT', 'irradiance': '1000 W/m^2'},
+    )
+
+    data = document['data']
+    [phase] = data['routine']['instructions']
+    held = {each['channel']: each for each in phase['instructions']}
+    assert held['temperature']['hold'] == '65 °C'
+    # Assumed, so never recorded: held, not monitored.
+    assert (held['irradiation']['hold'], 'monitor' in held['irradiation']) == (
+        '1000 W/m^2',
+        False,
+    )
+    assert 'irradiance 1000 W/m^2' in data['notes']
+    assert 'temperature' not in data['notes']
 
 
 @pytest.mark.parametrize(

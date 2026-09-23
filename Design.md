@@ -3039,6 +3039,8 @@ never repaired. Dark level-3 protocols (D-3, V-3, T-3) are untouched.
 value, beside the free-text `standard_variant`), the reporting obligations of Table 3 (location,
 MPPT hardware, dwell times, number of samples), stop conditions ("at least 1000 h"), and periodic
 J–V characterization as a step. All four belong with the measurement layer (§4.5).
+*Amended by §37.4: periodic J–V characterization is built, as the instruction `JVScan`. The ISOS
+files still say it only in their `notes`.*
 
 **Also still open:** conditional control ("controlled at 50 % beyond 40 °C", §19 #3) was not
 decided; those clauses stay in `notes`.
@@ -3832,6 +3834,8 @@ entry, and the protocol a child keyed `PROTOCOL_KEY = 'protocol'`.
   wrote, dependent on processing order, and a second copy that can drift from the run file.
 - The protocol is what the file says was **planned**, never inferred from the recorded data,
   which would merge the plan into what happened and leave no deviation to find.
+  *Amended by §37.3: an institution may work out a set point no file states, or assume its
+  standard conditions, always saying so in `notes`.*
 
 ### 34.5 Example uploads
 
@@ -4198,9 +4202,10 @@ resistance V/I or the power V·I, are never listed as dependents.
 
 ## 37. Runs without a run file, degradation series, and collections
 
-**Status: planned, not built.** The working plan, with its order of building, is in
-`claude/UNITOV_plan.md`. When built, this section amends §34.3–§34.4a (runs, reading, and
-protocols described in run files) and §20.8 (periodic J–V characterization, until now deferred).
+**Status: built, steps 1–20 of `claude/UNITOV_plan.md`.** Amends §34.3–§34.4a (runs, reading,
+and protocols described in run files) and §20.8 (periodic J–V characterization, until now
+deferred). 461 tests, ruff clean; the UNITOV example upload (52 entries) goes through NOMAD's
+`match_parser`, `parse` and `normalize_all` with no errors, every reference into the upload.
 The first case is UNITOV (`example_uploads/institutes/UNITOV/`), whose files differ from SIM's
 in every way §34 assumed.
 
@@ -4246,17 +4251,26 @@ following a plan it never had.
   belongs to the run, including the scans that only `Parameters` records. The rest under the
   pixel's folder is loose.
 - **A collection is made even where a pixel has no run**, so that no data is lost.
-- **Entries:** a pixel's earliest run anchor also makes the children `'collection'` and
-  `'collection protocol'`. A pixel with only loose files is anchored at the first of them.
-  `sub_activities` are built from `generate_entry_id` of each run's anchor, so the order in
-  which entries are processed does not matter.
-- **Figure:** the collection draws all its runs' steps and its own steps on one time axis, each
-  placed by its `start_time`. It uses the same function as a run's overview, which is widened to
-  a list of step lists.
+- **Entries:** a pixel's earliest run anchor also makes the children `'collection'`,
+  `'collection protocol'` and `'sample'` (`read_collection(path)` returns the collection only
+  for that file). A pixel with only loose files is anchored at the first of them, whose main
+  entry is then the collection itself. `sub_activities`, `plan` and sample references are built
+  from `generate_entry_id` of the file and key, so the order in which entries are processed does
+  not matter. A run's sample names the anchor as its `file`; the parser turns it into the
+  reference (`_referring`), so the schema never sees a path.
+- **Figure (verified risk, resolved):** a collection's parts are other entries, which its
+  `normalize` cannot rely on having been processed. The **parser** therefore reads each run again
+  with the same reader functions, in memory, and draws the collection's figure from all their
+  steps and its own (`figures_for_plotting(logger, steps)`); `normalize` leaves the figure of a
+  measurement with `sub_activities` as drawn. Each run's steps are named after the run in it.
 - **Samples:** until a real sample schema exists, a placeholder `SolarCellSample(System)` holds
   what the files state of the device (cell area, typology, number of cells). One sample entry is
   made per pixel, beside its collection, and runs and collections refer to it from `samples`.
-  No `lab_id` is set, since `EntityReference.normalize` would search all of NOMAD for it.
+  The reference carries both `reference` and `lab_id` (the device's name): with only a
+  `reference`, `EntityReference.normalize` resolves it to fill `lab_id`, which fails where the
+  sample's entry is not yet processed (**verified**: "Proxy with archive url, but no context");
+  with only a `lab_id`, it searches all of NOMAD. With both it does neither. `W cell area` and
+  `#W cells` have no place yet and are left out knowingly.
 - **Later:** a collection links the Device and Substrate it measured, once they exist as results
   of processing entries; they replace the placeholder sample.
 
@@ -4270,7 +4284,9 @@ said**:
   voltage is the mean of the recorded voltage, rounded to 1 mV.
 - An institution may declare **`ASSUMED_CONDITIONS`**: its standard conditions, used where the
   files state none. For UNITOV this is room temperature and 1000 W/m². It is empty in the
-  template and for SIM. `protocol_from_phases` fills in only what a phase leaves out.
+  template and for SIM. `protocol_from_phases(..., assumed=...)` fills in only what a phase
+  leaves out, holds it **without monitoring** it (nothing recorded it), and adds a sentence
+  naming it to `notes`.
 - The protocol's `notes` name every value that was assumed or worked out rather than read.
 
 ### 37.4 Schema additions
@@ -4285,4 +4301,6 @@ quantity for is reported.
 | `JVFiguresOfMerit` | `power_density_at_maximum_power_point` (P_MPP), taken as reported; drawn as markers on the power density row of the overview, beside the tracked power |
 | `JVSweepStep` | `voltage_start`, `voltage_stop` (the range set, which the data may not reach, where V_oc is detected automatically), `voltage_step`, `scan_rate`, `scan_order` |
 | `StabilitySeriesStep` | flat fields for the tracker: `tracking_algorithm` (text), `tracking_step`, `tracking_delay` |
-| protocol | `JVScan`, a periodic J–V characterization (amends §20.8): the scan's settings, the light it is measured under, and `interval`, one instruction lasting its block and scanning every `interval`. Preferred over a repeating block of scan and pause: it is what standards and labs write, it needs no `Pause` instruction, and it needs no scan duration, which a protocol rarely knows. |
+| protocol | `JVScan` (`characterization_instructions.py`), a periodic J–V characterization (amends §20.8): the scan's settings, the light it is measured under, and `interval`, one instruction lasting its block and scanning every `interval`. Preferred over a repeating block of scan and pause: it is what standards and labs write, it needs no `Pause` instruction, and it needs no scan duration, which a protocol rarely knows. Authored as `jv_scan: {every: 10 min, from: -0.1 V, to: 1.2 V, step: 20 mV, rate: 200 mV/s, order: forward then reverse}` (each field also by its own name); a phase of `protocol_from_phases` takes the same `jv_scan`. Drawn as a bar in its own row, `J–V scan`, under the electrical load, labelled `J–V scan every 33 s`, in the colour of the monitored: it measures the cell and regulates nothing. Not drawn as one tick per scan: a 1000 h test every 10 min would be 6000 shapes. |
+| `StabilityActivity` | `sub_activities`, references to other stability activities (§37.2) |
+| `sample.py` | `SolarCellSample(System)`, the placeholder sample (§37.2) |

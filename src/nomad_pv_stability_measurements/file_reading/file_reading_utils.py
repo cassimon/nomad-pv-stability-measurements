@@ -141,8 +141,35 @@ def as_datetime(value) -> datetime:
     return value if isinstance(value, datetime) else datetime.fromisoformat(value)
 
 
+#: The name of the protocol every collection follows.
+CUMULATIVE_PROTOCOL = 'CumulativeStabilityMeasurements'
+
+
+def cumulative_protocol() -> dict:
+    """The protocol of a collection: a device's whole history, its runs and the
+    measurements in between, taken at no planned times. It holds nothing and lasts
+    until stopped, since nothing between the measurements was specified.
+
+    Returns what a `*.stability.yaml` file holds, as plain data, like
+    `protocol_from_phases`."""
+    return {
+        'data': {
+            'name': CUMULATIVE_PROTOCOL,
+            'duration': 'open-ended',
+            'notes': 'The history of one device: stability runs, each following a '
+            'protocol of its own, and measurements taken between them at no planned '
+            'times. Nothing between the measurements was specified: not the '
+            'conditions, not the load, not how long.',
+        }
+    }
+
+
 def protocol_from_phases(
-    name: str, phases: list[dict], repeat: int = 1, **fields
+    name: str,
+    phases: list[dict],
+    repeat: int = 1,
+    assumed: dict[str, str] | None = None,
+    **fields,
 ) -> dict:
     """A protocol, for a run file that describes its test instead of naming a protocol
     file: phases run one after another, the whole sequence `repeat` times.
@@ -155,13 +182,35 @@ def protocol_from_phases(
          'irradiance': '1000 W/m^2', 'relative_humidity': '85 %',
          'electrical_load': 'mpp'}
 
+    A phase's `jv_scan` are the J–V scans taken during it, as a protocol file writes
+    them: `{'every': '10 min', 'from': '-0.1 V', 'to': '1.2 V'}`.
+
     Every quantity held is also monitored, except the light in the dark. `fields` are
     further fields of the protocol, as `notes='...'` or `standard='ISOS-D-3'`.
+
+    `assumed` are an institution's standard conditions, its `ASSUMED_CONDITIONS`: each
+    is held in every phase that states no value of its own, but not monitored, since
+    nothing recorded it, and the `notes` say which were assumed, so that an assumption
+    is never taken for what a file states.
 
     Returns what a `*.stability.yaml` file holds, as plain data, for the parser to read
     as it reads such a file. A quantity not in `SET_POINTS`, or a phase without a
     `duration`, raises a `ValueError`.
     """
+    used = {}
+    completed = []
+    for phase in phases:
+        missing = {
+            key: value for key, value in (assumed or {}).items() if key not in phase
+        }
+        used.update(missing)
+        completed.append(({**phase, **missing}, set(missing)))
+    if used:
+        said = ', '.join(
+            f'{key.replace("_", " ")} {value}' for key, value in used.items()
+        )
+        note = f'Assumed as the standard conditions, not stated in the files: {said}.'
+        fields['notes'] = ' '.join(filter(None, (fields.get('notes'), note)))
     return {
         'data': {
             'name': name,
@@ -169,15 +218,19 @@ def protocol_from_phases(
             'routine': {
                 'name': name,
                 'repeat': repeat,
-                'instructions': [_phase(phase) for phase in phases],
+                'instructions': [
+                    _phase(phase, unmonitored) for phase, unmonitored in completed
+                ],
             },
         }
     }
 
 
-def _phase(phase: dict) -> dict:
+def _phase(phase: dict, unmonitored: set[str] = frozenset()) -> dict:
     held = {
-        key: value for key, value in phase.items() if key not in {'name', 'duration'}
+        key: value
+        for key, value in phase.items()
+        if key not in {'name', 'duration', 'jv_scan'}
     }
     unknown = sorted(set(held) - set(SET_POINTS))
     if unknown:
@@ -189,11 +242,14 @@ def _phase(phase: dict) -> dict:
     instructions = []
     for quantity, value in held.items():
         instruction = {**SET_POINTS[quantity], 'hold': value}
-        if value != 'dark':
+        if value != 'dark' and quantity not in unmonitored:
             instruction['monitor'] = True
         # The first sets how long the phase lasts; the others last as long.
         instruction['duration'] = 'whole block' if instructions else phase['duration']
         instructions.append(instruction)
+    if 'jv_scan' in phase:
+        duration = 'whole block' if instructions else phase['duration']
+        instructions.append({'jv_scan': phase['jv_scan'], 'duration': duration})
     block = {'repeat': 1, 'mode': 'parallel', 'instructions': instructions}
     return {'name': phase['name'], **block} if 'name' in phase else block
 

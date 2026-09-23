@@ -73,7 +73,8 @@ def read_protocol(path: str | Path) -> dict:
                 'start': datetime(...),
                 'end': datetime(...),
                 'location': 'Berlin, lab 2.14',
-                'samples': [{'name': 'cell A'}],
+                'samples': [{'name': 'cell A'}],  # or, where a collection holds it:
+                # [{'name': 'AI14-1A', 'lab_id': 'AI14-1A', 'file': '/path/to/it'}]
                 'instruments': [{'name': 'solar simulator'}],
                 'notes': 'Free text.',
             },
@@ -94,6 +95,9 @@ def read_protocol(path: str | Path) -> dict:
                 ...
             ],
         }
+
+    A sample whose entry is made with a collection names the `file` that stands for
+    the collection, and its `lab_id`; the run then refers to that entry.
 
     Where the run file does not list the steps, find them beside it, for example the
     other files in its folder, using `is_stability_series_file` and `is_jv_file`.
@@ -168,10 +172,18 @@ def read_collection(path: str | Path) -> dict | None:
 
         {
             'name': 'AI14-1A',
-            'samples': [{'name': 'AI14-1A'}],
+            'sample': {  # the device, by the names of a `SolarCellSample`'s fields
+                'name': 'AI14-1A',
+                'lab_id': 'AI14-1A',
+                'cell_area': 0.09 * ureg('cm^2'),
+            },
             'runs': ['/full/path/to/run/file', ...],  # the run files of its runs
             'steps': [...],  # the steps outside any run, as in `read_protocol`
         }
+
+    The file makes entries of the collection, of the protocol it follows, which
+    specifies nothing, and of the sample. A run refers to that sample by naming this
+    file as its sample's `file` (see `read_protocol`).
 
     For every other file, and where the institution keeps no collections, `return None`.
     """

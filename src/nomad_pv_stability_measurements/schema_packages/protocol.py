@@ -5,10 +5,18 @@ import numpy as np
 from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.basesections.v2 import ActivityStep, Measurement
 from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
-from nomad.metainfo import MEnum, Quantity, Reference, SchemaPackage, SubSection
+from nomad.metainfo import (
+    MEnum,
+    Quantity,
+    Reference,
+    SchemaPackage,
+    SectionProxy,
+    SubSection,
+)
 
 # The protocol's instructions name these classes; importing them registers them with NOMAD.
 from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
+    characterization_instructions,
     hold_below_instructions,
     hold_instructions,
     mpp_instructions,
@@ -152,6 +160,13 @@ class StabilityActivity(Measurement, Planned):
     plan = Quantity(
         type=Reference(StabilityProtocol),
         description='The protocol this test runs.',
+    )
+    sub_activities = Quantity(
+        type=Reference(SectionProxy('StabilityActivity')),
+        shape=['*'],
+        description='Other stability tests that are part of this one: the runs of a '
+        "device's whole history, whose conditions in between nobody specified. It "
+        'stands in until activities can hold activities of their own.',
     )
 
     def populate_from_plan(self):

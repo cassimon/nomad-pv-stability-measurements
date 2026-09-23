@@ -11,6 +11,9 @@ from nomad_pv_stability_measurements.parsers.translate import (
     translate,
     translate_section,
 )
+from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
+    JVScan,
+)
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
     IndefiniteRepeatingBlock,
@@ -519,3 +522,35 @@ def test_an_instruction_in_the_routine_writes_its_duration(ramp, reported):
     ]
     for problem, fragment in zip(translation.problems, reported):
         assert fragment in problem.message
+
+
+def test_jv_scans_are_written_with_their_settings_in_words_or_by_field():
+    translation = translate(
+        {
+            'data': {
+                'name': 'Light soak with J–V',
+                'routine': {
+                    'instructions': [
+                        {
+                            'jv_scan': {
+                                'every': '10 min',
+                                'from': '-0.1 V',
+                                'to': '1.2 V',
+                                'scan_rate': '100 mV/s',
+                                'order': 'reverse then forward',
+                            },
+                            'duration': '1 h',
+                        }
+                    ]
+                },
+            }
+        }
+    )
+
+    [scans] = translation.archive['data']['instructions'][0]['sub_instructions']
+    assert translation.problems == []
+    assert scans['m_def'] == m_def(JVScan)
+    assert (scans['interval'], scans['voltage_stop'], scans['scan_rate']) == approx(
+        (600.0, 1.2, 0.1)
+    )
+    assert scans['scan_order'] == 'reverse then forward'

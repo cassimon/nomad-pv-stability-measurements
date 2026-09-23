@@ -1,6 +1,6 @@
 # Plan: reading UNITOV's runs, and what it takes to add the next institution
 
-Status: **proposed, not built.** Edit freely. Decisions you have already taken are
+Status: **built** (steps 1–20, 2026-09-23). Edit freely. Decisions you have already taken are
 marked **(decided)**. Open points are in the last section.
 
 ---
@@ -28,8 +28,10 @@ marked **(decided)**. Open points are in the last section.
 - In the curve, FW runs from −0.1 V to about V_oc (Voc is auto-detected) and RV runs back
   down. The two columns can differ in length. J is positive where the cell delivers
   power, the same convention as the schema.
-- **Parameters has a row for a J–V scan whose file is missing** in 3 runs:
-  `AI14_1C/17.23.47`, `AI22_1C/17.33.33` and `AI22_1C/21.18.55`.
+- **Parameters has a row for a J–V scan whose file is missing** in 5 runs:
+  `AI14_1C/17.23.47`, `AI22_1B/21.18.55`, `AI22_1C/17.33.33`, `AI22_1C/17.34.36` and
+  `AI22_1C/21.18.55`. Row `N` of Parameters is the scan of the J–V file numbered `N`
+  (verified: their times agree within a second).
 - **The fixed voltage is not in any header.** The data holds it at 1.40 V, which is the
   intended set point **(decided)**. That is forward bias beyond V_oc ≈ 0.73 V, so J and P
   are negative.
@@ -264,29 +266,42 @@ Each step ends with the full test suite and ruff passing, and a stop for review.
     normalize without problems. The columns are mapped by title with their units, since
     the station writes `Hours`, which is no unit; `JV interval`, `Test duration` and
     `Start-up Time` are left to `read_protocol`.
-11. **`read_protocol`**: the folder as the run, Parameters rows without a file as FOM-only
-    scans, `is_protocol_file`, and UNITOV listed in `INSTITUTIONS`. *Test:* the run with a
-    missing J–V file still has two scans.
-12. **Embedded protocol**: `ASSUMED_CONDITIONS`, the mean voltage, `notes`. *Test:* the
-    protocol entry, and the run's `plan` pointing to it.
+11. **`read_protocol`** *(done)*: the folder as the run, Parameters rows without a file
+    as FOM-only scans, `is_protocol_file` (name, then `Test	Stability (Tracking)`), and
+    UNITOV listed in `INSTITUTIONS`. Times are local to Rome. The untitled second time
+    column of Parameters is left out. All 17 runs read and normalize without problems,
+    and one runs through NOMAD's `parse` and `normalize_all` without errors.
+    `read_embedded_protocol` and `read_collection` return `None` until steps 12 and 15.
+12. **Embedded protocol** *(done)*: `ASSUMED_CONDITIONS` through
+    `protocol_from_phases(..., assumed=...)`, held but **not monitored**, and named in
+    `notes`; the mean voltage (1.400 V), also named in `notes`.
 
-**C. Samples and collections**
-13. **Sample entries**: the `'sample'` child and `samples[].reference` of the run.
+**C. Samples and collections** *(done, 13–16)*
+13. **Sample entries**: the `'sample'` child and `samples[].reference` of the run. A run's
+    sample names the anchor as its `file`; the parser turns that into the reference.
+    *Changed:* the reference carries `lab_id` (the device's name) too. With only a
+    reference, NOMAD's `EntityReference.normalize` resolves it and fails where the
+    sample's entry is not processed yet (verified); with both, it neither resolves nor
+    searches.
 14. **`sub_activities`** on `StabilityActivity`, and `cumulative_protocol()`.
-15. **Collections in the parser**: `read_collection` for UNITOV, the `'collection'` and
-    `'collection protocol'` children, loose steps, and a collection anchored at a loose
-    file. *Test:* a fixture folder of loose files, as the example batch has none.
-16. **The cumulative figure.** Verify the reference/ordering question of §4 first.
+15. **Collections in the parser**: `read_collection` for UNITOV, the `'collection'`,
+    `'collection protocol'` and `'sample'` children, loose steps, and a collection
+    anchored at a loose file (then its main entry). *Tests:* fixture folders of loose files.
+16. **The cumulative figure**: drawn by the parser, which reads each run again in memory;
+    `normalize` keeps the figure of a measurement with `sub_activities`.
 
-**D. Periodic J–V in the protocol**
-17. **`JVScan`** (§5.3): the schema class and its normalize.
-18. The translator word `jv_scan`, the timeline ticks, and use in UNITOV's protocol.
+**D. Periodic J–V in the protocol** *(done, 17–18)*
+17. **`JVScan`** in `characterization_instructions.py`, with a positive `interval`.
+18. The translator word `jv_scan` (`every`, `from`, `to`, `step`, `rate`, `order`), a phase's
+    `jv_scan` in `protocol_from_phases`, and UNITOV's protocol scanning every `JV interval`
+    with the Parameters file's J–V settings. *Changed:* drawn as one labelled bar in its own
+    row, `J–V scan every 33 s`, not as one tick per scan (a long test would draw thousands).
 
-**E. Example upload and docs**
-19. The entry point for `institutes/UNITOV/*`, and an upload test like
-    `test_simulated_runs.py`: every entry through NOMAD's `parse` and `normalize_all` with
-    no errors, and each `plan`, `sub_activities` and sample reference pointing into the
-    upload.
+**E. Example upload and docs** *(done, 19–20)*
+19. `unitov_runs_example_upload_entry_point` (`institutes/UNITOV/*`), and
+    `tests/example_uploads/test_unitov_runs.py`: every file through NOMAD's `match_parser`,
+    `parse` and `normalize_all` with upload ids, no errors, 52 entries, and each `plan`,
+    `sub_activities` and sample reference pointing into the upload.
 20. Design.md §37 marked built (and §34.4a, §20.8 amended); CLAUDE.md updated.
 
 ## 9. Open points

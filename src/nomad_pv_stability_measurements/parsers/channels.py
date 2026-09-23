@@ -135,6 +135,18 @@ TRACKED_POINTS = {
 #: `dark` is refused off the irradiance axis (D8a).
 TRACKED_POINT_CHANNEL = 'electrical_load'
 
+#: The word for periodic J–V scans, `jv_scan: {every: 10 min, from: -0.1 V, ...}`, and
+#: what each of its words becomes; a field may also be written by its own name.
+JV_SCAN_WORD = 'jv_scan'
+JV_SCAN_FIELDS = {
+    'every': 'interval',
+    'from': 'voltage_start',
+    'to': 'voltage_stop',
+    'step': 'voltage_step',
+    'rate': 'scan_rate',
+    'order': 'scan_order',
+}
+
 #: Words the schema has no place for any more (§15), and why.
 RETIRED_WORDS = {
     'humidity': 'humidity is two variables — write `relative_humidity: 85 %`, or the '
