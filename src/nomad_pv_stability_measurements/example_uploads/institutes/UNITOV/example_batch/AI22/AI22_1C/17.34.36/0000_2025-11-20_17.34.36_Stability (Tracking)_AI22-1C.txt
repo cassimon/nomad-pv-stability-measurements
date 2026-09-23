@@ -1,0 +1,32 @@
+## Header ##
+[General info]
+User	FDN
+Device	AI22-1C
+Cell area (cm2)	0.09
+Test	Stability (Tracking)
+Date	2025-11-20
+Time	17:34:36
+Note	SMU 1C
+
+[Tracking Settings]
+Algorithm	Fixed Voltage
+dV track (V)	0.0200
+track delay (s)	0.500
+JV interval (min)	0.550
+Test duration (min)	1.000
+Start-up Time	17:34:36 20/11/2025
+
+[Cell Settings]
+Tipology	Cell
+Cell Area (cm2)	0.09
+#Cells	1.00
+W cell area (cm2)	1.00
+#W cells	1.00
+
+## Data ##
+Time (Hours)	Voltage (V)	Current Density (mA/cm²)	Power (mW/cm²)
+0.003015	1.400000	-5.357652	-7.500711
+0.005931	1.400000	-10.579888	-14.811843
+0.008845	1.399999	-14.270120	-19.978159
+0.011759	1.399999	-15.843870	-22.181407
+0.015168	1.400000	-10.778294	-15.089612

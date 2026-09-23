@@ -1,0 +1,33 @@
+## Header ##
+[General info]
+User	FDN
+Device	AI22-1C
+Cell area (cm2)	0.09
+Test	Stability (Parameters)
+Date	2025-11-19
+Time	21:18:55
+Note	SMU 1C
+
+[JV Settings]
+Vmin (V)	-0.100
+Vmax (V)	1.500
+Voltage Step (mV)	20.000
+Scan Rate (mV/s)	200.000
+Auto-detect Voc	Yes
+Scan direction	FW then RV
+Voltage Range (V)	10 V
+Current Range (V)	L
+Inverted	No
+Auto-range	On
+
+[Cell Settings]
+Tipology	Cell
+Cell Area (cm2)	0.09
+#Cells	1.00
+W cell area (cm2)	1.00
+#W cells	1.00
+
+## Data ##
+Time (Hours)	Voc (V) FW	Jsc (mA/cm2) FW	V_MPP (V) FW	J_MPP (mA/cm2) FW	P_MPP (mW/cm2) FW	Rs (Ohm) FW	R// (Ohm) FW	Fill Factor (%) FW	Efficiency (%) FW	Voc (V) RV	Jsc (mA/cm2) RV	V_MPP (V) RV	J_MPP (mA/cm2) RV	P_MPP (mW/cm2) RV	Rs (Ohm) RV	R// (Ohm) RV	Fill Factor (%) RV	Efficiency (%) RV
+4.606326E-4	-9.999942E-2	-2.087197E+2	-9.999942E-2	-2.082357E+2	2.082345E+1	4.591668E+2	4.591668E+2	9.976810E+1	2.082345E+1	4.606326E-4	-1.199997E-1	-2.079448E+2	-1.199997E-1	-2.058464E+2	2.470151E+1	1.874592E+2	2.437257E+2	9.899088E+1	2.470151E+1
+1.177344E-2	4.544863E-1	1.753722E+1	2.464875E-1	1.000695E+1	2.466588E+0	2.264698E+2	4.849571E+2	3.094675E+1	2.466588E+0	1.177344E-2	4.557454E-1	1.710512E+1	2.483603E-1	9.562484E+0	2.374941E+0	2.265632E+2	4.412435E+2	3.046523E+1	2.374941E+0

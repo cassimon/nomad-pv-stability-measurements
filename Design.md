@@ -4195,3 +4195,82 @@ resistance V/I or the power V·I, are never listed as dependents.
 2. Plotting per §36.3; a test that open circuit followed by a fixed voltage draws one row; the
    monitored sub-row.
 3. The gap between bars side by side; one text size for a row and its monitored row.
+
+## 37. Runs without a run file, degradation series, and collections
+
+**Status: planned, not built.** The working plan, with its order of building, is in
+`claude/UNITOV_plan.md`. When built, this section amends §34.3–§34.4a (runs, reading, and
+protocols described in run files) and §20.8 (periodic J–V characterization, until now deferred).
+The first case is UNITOV (`example_uploads/institutes/UNITOV/`), whose files differ from SIM's
+in every way §34 assumed.
+
+### 37.1 A run need not have a run file
+
+UNITOV writes no file that lists a run's steps. A run is a folder: a tracking series, a file of
+figures of merit over time (`Parameters`), and one file per J–V scan. The **run file** of §34.3
+becomes *the one file per run that stands for it* (its anchor; here the Tracking file), and
+`read_protocol` may collect the step files around it. The interface does not change.
+
+- The parser's entry point matches every file (`mainfile_name_re=r'.*'`), and each
+  institution's `is_protocol_file` decides. Adding an institution then means its module and one
+  line in `INSTITUTIONS`, with no regex to widen.
+- A step may carry its `figures_of_merit` inline, without a `file`: a scan whose curve file is
+  missing but whose figures of merit the station logged. Many set-ups log only figures of merit
+  over time, so this is generic, not specific to UNITOV.
+
+### 37.2 The physical model: a degradation series
+
+A cell's life is a **degradation series**: J–V scans at different times, with conditions between
+them that nobody specified. It is rarely standardized. Standardized stability runs happen
+**within** that life. Data taken outside any planned run is kept, and it is not presented as
+following a plan it never had.
+
+- **Two kinds of entry**, both `StabilityMeasurement`:
+  - a **run**, whose `plan` is the protocol it followed;
+  - a **collection**, one per **pixel** (the physical device), whose `plan` is the general
+    protocol *Storage and irregular measurements*. It holds the runs as `sub_activities` and the
+    loose J–V scans as its own steps.
+- `StabilityActivity.sub_activities` is a reference list to other `StabilityActivity` entries.
+  It stands in for the subactivities of Activity v2 and is to be replaced by them once they
+  exist.
+- **Storage and irregular measurements:** a protocol with **no instructions, no conditions, no
+  holds**, and an **open-ended** duration. It says exactly that nothing between the measurements
+  was specified. It is authored once (`file_reading_utils.irregular_protocol()`) and used for
+  every institution's collections. *Verified:* it translates without problems and normalizes
+  without errors, warnings or figure.
+- **Which scans are loose** is decided by the institution's reader from where the files lie,
+  never by comparing data with a plan. For UNITOV: all of a run folder with a Tracking file
+  belongs to the run, including the scans that only `Parameters` records. The rest under the
+  pixel's folder is loose.
+- **A collection is made even where a pixel has no run**, so that no data is lost.
+- **Entries:** a pixel's earliest run anchor also makes the children `'collection'` and
+  `'collection protocol'`. A pixel with only loose files is anchored at the first of them.
+  `sub_activities` are built from `generate_entry_id` of each run's anchor, so the order in
+  which entries are processed does not matter.
+- **Figure:** the collection draws all its runs' steps and its own steps on one time axis, each
+  placed by its `start_time`. It uses the same function as a run's overview, which is widened to
+  a list of step lists.
+- **Later:** a collection links the Device and Substrate it measured, once they exist as results
+  of processing entries.
+
+### 37.3 Values an institution assumes
+
+§34.4a keeps the protocol to what the file says was planned. UNITOV's files state neither the
+fixed voltage nor the conditions. This gives two exceptions, **per institution and always
+said**:
+
+- A set point that no header states may be **worked out from the data**. For UNITOV, the fixed
+  voltage is the mean of the recorded voltage, rounded to 1 mV.
+- An institution may declare **`ASSUMED_CONDITIONS`**: its standard conditions, used where the
+  files state none. For UNITOV this is room temperature and 1000 W/m². It is empty in the
+  template and for SIM. `protocol_from_phases` fills in only what a phase leaves out.
+- The protocol's `notes` name every value that was assumed or worked out rather than read.
+
+### 37.4 Schema additions
+
+| Where | What |
+|---|---|
+| `JVFiguresOfMerit` | `power_density_at_maximum_power_point` (P_MPP), taken as reported; drawn as markers on the power density row of the overview, beside the tracked power |
+| `JVSweepStep` | `voltage_start`, `voltage_stop` (the range set, which the data may not reach, where V_oc is detected automatically), `voltage_step`, `scan_rate`, `scan_order` |
+| `StabilitySeriesStep` | flat fields for the tracker: `tracking_algorithm` (text), `tracking_step`, `tracking_delay` |
+| protocol | `JVScan`, a periodic J–V characterization (amends §20.8): the scan's settings, the light it is measured under, and `interval`, one instruction lasting its block and scanning every `interval`. Preferred over a repeating block of scan and pause: it is what standards and labs write, it needs no `Pause` instruction, and it needs no scan duration, which a protocol rarely knows. |
