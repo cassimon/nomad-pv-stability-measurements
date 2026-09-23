@@ -12,6 +12,7 @@ import numpy as np
 import pint
 from nomad.units import ureg
 
+from nomad_pv_stability_measurements.parsers.channels import LIGHT_SOURCE_WORD
 from nomad_pv_stability_measurements.parsers.units import split_match_convert
 
 _HEADER_WITH_UNIT = re.compile(r'(?P<name>[^()]+?)\s*\((?P<unit>[^()]+)\)')
@@ -186,7 +187,9 @@ def protocol_from_phases(
          'electrical_load': 'mpp'}
 
     A phase's `jv_scan` are the J–V scans taken during it, as a protocol file writes
-    them: `{'every': '10 min', 'from': '-0.1 V', 'to': '1.2 V'}`.
+    them: `{'every': '10 min', 'from': '-0.1 V', 'to': '1.2 V'}`, and its `light_source`
+    is where its irradiance comes from, as a protocol file writes it:
+    `{'type': 'LED', 'solar_simulator': True}`.
 
     Every value is controlled, except darkness, open circuit and room temperature, which
     are only stated. Every quantity is also monitored, except the light in the dark. `fields` are
@@ -234,7 +237,7 @@ def _phase(phase: dict, unmonitored: set[str] = frozenset()) -> dict:
     held = {
         key: value
         for key, value in phase.items()
-        if key not in {'name', 'duration', 'jv_scan'}
+        if key not in {'name', 'duration', 'jv_scan', LIGHT_SOURCE_WORD}
     }
     unknown = sorted(set(held) - set(SET_POINTS))
     if unknown:
@@ -243,6 +246,10 @@ def _phase(phase: dict, unmonitored: set[str] = frozenset()) -> dict:
         )
     if 'duration' not in phase:
         raise ValueError(f'the phase `{phase.get("name")}` states no duration.')
+    if LIGHT_SOURCE_WORD in phase and 'irradiance' not in held:
+        raise ValueError(
+            f'the phase `{phase.get("name")}` names a light source but no irradiance.'
+        )
     instructions = []
     for quantity, value in held.items():
         instruction = {**SET_POINTS[quantity], 'specify': value}
@@ -252,6 +259,8 @@ def _phase(phase: dict, unmonitored: set[str] = frozenset()) -> dict:
             instruction['control'] = True
         if value != 'dark' and quantity not in unmonitored:
             instruction['monitor'] = True
+        if quantity == 'irradiance' and LIGHT_SOURCE_WORD in phase:
+            instruction[LIGHT_SOURCE_WORD] = phase[LIGHT_SOURCE_WORD]
         # The first sets how long the phase lasts; the others last as long.
         instruction['duration'] = 'whole block' if instructions else phase['duration']
         instructions.append(instruction)

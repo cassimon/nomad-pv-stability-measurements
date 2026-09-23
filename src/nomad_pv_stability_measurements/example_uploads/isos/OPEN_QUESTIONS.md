@@ -88,8 +88,10 @@ monitored. (Until 2026-09: a variant without an irradiance beside one with the r
 ### 11. Smaller readings
 
 - ISOS-L-3's "~ 50%" is written as a relative humidity of 50 %, with no tolerance for the "~".
-- ISOS-O-1 and -O-2 differ only in the light the J–V curves are measured under (p.37), which the
-  protocol files do not describe; they are identical but for `standard` and `notes`.
+- ISOS-O-3's characterization light source is "Sunlight and Solar simulator" (Table 1); the text
+  reads the two apart: "in situ MPP tracking under natural sunlight and periodic performance
+  measurements under a solar simulator" (p.37). **The file follows the text**: its J–V scans
+  are under a solar simulator, and the sunlight is the light it ages and tracks under.
 - MPP tracking is "encouraged … whenever possible" (p.37) at the levels where it is not mandatory.
   That is a preference among load options, which the files keep as separate variants.
 - The minimum ageing time, "at least 1000 h" when T80 is not reached (p.44), is a stop condition
@@ -97,13 +99,21 @@ monitored. (Until 2026-09: a variant without an irradiance beside one with the r
 
 ### 12. What is logged
 
-The paper asks for monitoring outright only where a condition is not controlled: the ambient
-temperature and humidity ("monitored but not explicitly controlled", p.36; "the temperature and
-RH are monitored, but not controlled", p.39; "even if a parameter is not controlled … it is still
-important to monitor and report", p.43), the outdoor weather ("preferably in tabulated format",
-Table 3), and ISOS-LT's humidity ("Monitored", Table 1). For what it controls, it asks for things
-to report: the temperature "sensor type", "RH (controlled or monitored)" (Table 3), the exact
-irradiance and a periodic check "with a reference cell" (p.43–44). **The files log only the
-first group**, and MPP tracking, which "measures the output" (p.43). ISOS-T-3's humidity is
-logged too: it goes uncontrolled below 40 °C. Is a controlled temperature meant to be logged
-after all?
+The consensus is no pass/fail standard ("a solar cell cannot pass or fail ISOS stability tests",
+p.36), so it requires nothing in a strict sense. **The files log only what it asks for in so
+many words**, and control the rest without logging it:
+
+| Logged | Where | Its words |
+|---|---|---|
+| ambient temperature and humidity | ISOS-D-1 | "the cell environment is monitored but not explicitly controlled" (p.36) |
+| ambient humidity | ISOS-D-1, -D-2 | "monitoring and reporting the ambient relative humidity (RH) is of critical importance" (p.36) |
+| ambient temperature and humidity | ISOS-LC-1 | "the temperature and RH are monitored, but not controlled" (p.39) |
+| humidity | ISOS-LT-1, -2, -3 | "Monitored" (Table 1) |
+| every uncontrolled temperature and humidity: ISOS-V-1, L-1 (room temperature); V-2, L-2, LC-2, T-1, T-2 (humidity); T-3 (humidity, uncontrolled below 40 °C) | | "even if a parameter is not controlled … (for example, temperature or RH in 'ISOS-1' protocols), it is still important to monitor and report the parameters listed in Table 3" (p.43) |
+| the weather | ISOS-O | "Temperature, humidity, sunlight irradiance (preferably in tabulated format)" (Table 3), and p.43 |
+| the output under MPP tracking | where the load tracks the MPP | "MPPT simultaneously holds the device at its normal operating voltage and measures the output" (p.43) |
+
+Not logged: a controlled temperature (Table 3 asks for its "sensor type"), a controlled humidity
+("RH (controlled or monitored)", Table 3), the solar simulator (its irradiance "should be
+reported", and checked periodically "with a reference cell", p.43–44), darkness, open circuit and
+a fixed bias. Is a controlled temperature meant to be logged after all?

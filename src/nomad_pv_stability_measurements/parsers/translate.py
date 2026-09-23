@@ -20,6 +20,9 @@ from nomad_pv_stability_measurements.parsers.channels import (
     HOLD_BETWEEN_INSTRUCTIONS,
     JV_SCAN_FIELDS,
     JV_SCAN_WORD,
+    LIGHT_SOURCE_TYPE,
+    LIGHT_SOURCE_WORD,
+    LIGHT_SOURCES,
     NAMED_VALUES,
     OLD_CHANNEL_CLASSES,
     OLD_CLASSES,
@@ -44,6 +47,7 @@ from nomad_pv_stability_measurements.schema_packages.characterization_instructio
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
     FIXED,
+    NOT_STATED,
     OPEN_ENDED,
     TYPICAL,
     WHOLE_BLOCK,
@@ -52,10 +56,12 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     IndefiniteRepeatingBlock,
     Instruction,
     InstructionBlock,
+    Period,
     Plan,
     RepeatingBlock,
     TimedRepeatingBlock,
 )
+from nomad_pv_stability_measurements.schema_packages.light_sources import LightSource
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 
 #: Keys an instruction may be written with that are no field of the schema. They are
@@ -89,6 +95,8 @@ RETIRED_REPEATS = {
 }
 #: How a duration is written where it is no fixed length.
 DURATION_WORDS = {'open-ended': OPEN_ENDED, 'whole block': WHOLE_BLOCK}
+#: How a period is written where it is no fixed length: `every: not stated`.
+PERIOD_WORDS = {'not stated': NOT_STATED}
 #: What a typical length is written with: `typical 1 min`.
 TYPICAL_WORD = 'typical'
 #: Every way a single instruction in a block may write its duration.
@@ -259,6 +267,11 @@ def _section(authored, cls: type, path: str, problems: list) -> dict:
     if not isinstance(authored, dict):
         problems.append(Problem(path, f'expected a section, got {authored!r}.'))
         return {}
+    # A bare archive names a subclass of the section it fills, and reads as that class.
+    if 'm_def' in authored:
+        named = _resolve(authored['m_def'], path, problems)
+        if named is not None and issubclass(named, cls):
+            cls = named
     if issubclass(cls, MonitorControlInstruction):
         read = _monitor_control(authored, cls, path, problems)
         return {k: v for k, v in read[0].items() if k != 'm_def'} if read else {}
@@ -292,15 +305,52 @@ def _fields(authored: dict, cls: type, path: str, problems: list) -> dict:
             read = _value(value, cls, key, where, problems)
             if read is not None:
                 bare[key] = read
-        elif key in sub_sections and sub_sections[key].repeats:
-            in_block = issubclass(cls, InstructionBlock)
-            bare[key] = _instruction_list(value, where, in_block, problems)
         elif key in sub_sections:
-            nested = sub_sections[key].sub_section.section_cls
-            bare[key] = _section(value, nested, where, problems)
+            read = _sub_section(value, cls, key, where, problems)
+            if read is not None:
+                bare[key] = read
         else:
             problems.append(Problem(where, _unknown(written, cls)))
     return bare
+
+
+def _sub_section(value, cls: type, key: str, where: str, problems: list):
+    """The subsection `key` of `cls` as written: a list of instructions, a light
+    source, or a section."""
+    sub_section = cls.m_def.all_sub_sections[key]
+    if sub_section.repeats:
+        in_block = issubclass(cls, InstructionBlock)
+        return _instruction_list(value, where, in_block, problems)
+    if key == LIGHT_SOURCE_WORD:
+        return _light_source(value, where, problems)
+    if issubclass(sub_section.sub_section.section_cls, Period):
+        return _time_span(value, Period, PERIOD_WORDS, where, problems)
+    return _section(value, sub_section.sub_section.section_cls, where, problems)
+
+
+def _light_source(written, where: str, problems: list) -> dict | None:
+    """`light_source: sunlight`, or a section with a `type` and fields of its own, as
+    the section of the class the word names; a bare archive's section as itself."""
+    fields = {}
+    if isinstance(written, dict) and LIGHT_SOURCE_TYPE in written:
+        fields = {k: v for k, v in written.items() if k != LIGHT_SOURCE_TYPE}
+        written = written[LIGHT_SOURCE_TYPE]
+    elif isinstance(written, dict):
+        return {
+            'm_def': m_def(LightSource),
+            **_section(written, LightSource, where, problems),
+        }
+    if written not in LIGHT_SOURCES:
+        problems.append(
+            Problem(
+                where,
+                f'could not read the light source {written!r}: write one of '
+                f'{", ".join(LIGHT_SOURCES)}.',
+            )
+        )
+        return None
+    cls, preset = LIGHT_SOURCES[written]
+    return {'m_def': m_def(cls), **preset, **_section(fields, cls, where, problems)}
 
 
 def _duration(value, cls: type, where: str, problems: list, bare: dict) -> None:
@@ -316,17 +366,24 @@ def _duration(value, cls: type, where: str, problems: list, bare: dict) -> None:
                 '`duration` on the protocol.',
             )
         )
-    elif isinstance(value, dict):
-        bare['duration'] = _section(value, Duration, where, problems)
-    elif isinstance(value, str) and value.strip().lower() in DURATION_WORDS:
-        bare['duration'] = {'kind': DURATION_WORDS[value.strip().lower()]}
     else:
-        kind, text = FIXED, value
-        if isinstance(value, str) and value.strip().lower().startswith(TYPICAL_WORD):
-            kind, text = TYPICAL, value.strip()[len(TYPICAL_WORD) :]
-        read = _value(text, Duration, 'value', where, problems)
+        read = _time_span(value, Duration, DURATION_WORDS, where, problems)
         if read is not None:
-            bare['duration'] = {'kind': kind, 'value': read}
+            bare['duration'] = read
+
+
+def _time_span(value, cls: type, named: dict, where: str, problems: list):
+    """`1 h` as a fixed length, `typical 1 min` as a typical one, a word of `named` as
+    its kind; a bare archive's section as itself."""
+    if isinstance(value, dict):
+        return _section(value, cls, where, problems)
+    if isinstance(value, str) and value.strip().lower() in named:
+        return {'kind': named[value.strip().lower()]}
+    kind, text = FIXED, value
+    if isinstance(value, str) and value.strip().lower().startswith(TYPICAL_WORD):
+        kind, text = TYPICAL, value.strip()[len(TYPICAL_WORD) :]
+    read = _value(text, cls, 'value', where, problems)
+    return None if read is None else {'kind': kind, 'value': read}
 
 
 def _renamed(written: str, cls: type) -> str:

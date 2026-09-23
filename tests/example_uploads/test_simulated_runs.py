@@ -15,6 +15,9 @@ from nomad_pv_stability_measurements.example_uploads import (
 )
 from nomad_pv_stability_measurements.parsers import parser_entry_point
 from nomad_pv_stability_measurements.parsers.parser import stem
+from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
+    JVScan,
+)
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
     TimedRepeatingBlock,
@@ -93,7 +96,7 @@ def test_a_protocol_in_phases_is_recorded_one_series_per_phase(tmp_path):
     ]
 
 
-def test_the_custom_protocols_load_and_repeat_by_count_and_by_time(tmp_path, log):
+def test_the_custom_protocols_load_repeat_and_measure_between_phases(tmp_path, log):
     upload = built(custom_protocols_example_upload_entry_point, tmp_path)
     blocks = set()
 
@@ -104,4 +107,4 @@ def test_the_custom_protocols_load_and_repeat_by_count_and_by_time(tmp_path, log
         blocks |= {type(each) for each in archive.data.m_all_contents()}
 
     assert log.errors == []
-    assert {CountingRepeatingBlock, TimedRepeatingBlock} <= blocks
+    assert {CountingRepeatingBlock, TimedRepeatingBlock, JVScan} <= blocks

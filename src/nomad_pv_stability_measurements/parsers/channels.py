@@ -25,6 +25,14 @@ from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldTemperature,
     HoldVoltage,
 )
+from nomad_pv_stability_measurements.schema_packages.light_sources import (
+    LED,
+    ArtificialLightSource,
+    MetalHalideLamp,
+    NaturalLightSource,
+    SulfurPlasmaLamp,
+    XenonLamp,
+)
 from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     MPPTracking,
     VOCTracking,
@@ -121,6 +129,22 @@ CHANNEL_VARIABLES = {
 NAMED_VALUES = {
     'irradiance': {'dark': Dark},
     'temperature': {'RT': RoomTemperature},
+}
+
+#: Where a `light_source:` is written, the words for its kind, as the class each names and
+#: the fields each word also sets: `light_source: solar simulator`, or with fields of its
+#: own, `light_source: {type: xenon lamp, solar_simulator: true, uv_filter: true}`. A
+#: section without `type` is a source of a kind not stated.
+LIGHT_SOURCE_WORD = 'light_source'
+LIGHT_SOURCE_TYPE = 'type'
+LIGHT_SOURCES = {
+    'sunlight': (NaturalLightSource, {}),
+    'artificial light': (ArtificialLightSource, {}),
+    'solar simulator': (ArtificialLightSource, {'solar_simulator': True}),
+    'LED': (LED, {}),
+    'xenon lamp': (XenonLamp, {}),
+    'metal halide lamp': (MetalHalideLamp, {}),
+    'sulfur plasma lamp': (SulfurPlasmaLamp, {}),
 }
 
 #: Words that name an instruction outright, with no value to hold: the load is driven to a point

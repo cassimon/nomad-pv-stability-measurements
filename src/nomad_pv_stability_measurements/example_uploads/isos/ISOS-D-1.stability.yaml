@@ -10,7 +10,17 @@ data:
     # assumed to be 23±4 °C)" (p.36)
     temperature: {specify: RT, monitor: true}
     atmosphere:
-      - {variable: relative_humidity, monitor: true}
+      - {variable: relative_humidity, specify: ambient, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
       - {variable: oxygen, specify: ambient}
     electrical_load: {specify: open_circuit}
+  instructions:
+    # Periodic J–V curves (p.37), at a periodicity that "depends on the characteristic
+    # degradation timescale of each given device" (p.43), under Table 1's
+    # characterization light source.
+    - jv_scan:
+        every: not stated
+        # "Solar simulator or sunlight" (Table 1)
+        options:
+          - {label: J–V under solar simulator, light_source: solar simulator}
+          - {label: J–V under sunlight, light_source: sunlight}

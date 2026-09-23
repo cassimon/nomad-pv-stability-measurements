@@ -4,6 +4,7 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     ElectricalLoad,
+    Illuminated,
     RampInstruction,
 )
 
@@ -27,7 +28,7 @@ class RampTemperature(RampInstruction):
         return 100 * ureg.kelvin / ureg.hour
 
 
-class RampIrradiance(RampInstruction):
+class RampIrradiance(Illuminated, RampInstruction):
     """The light on the sample, moving."""
 
     start_point = Quantity(
@@ -38,10 +39,6 @@ class RampIrradiance(RampInstruction):
     )
     ramp_rate = Quantity(
         type=np.float64, unit='W/m^2/s', description='How fast the irradiance moves.'
-    )
-    spectrum = Quantity(
-        type=str,
-        description='Which spectrum the lamp delivers, e.g. `AM1.5G`. Free text for now.',
     )
 
 

@@ -6,10 +6,15 @@ data:
   notes: Outdoors; in situ MPP tracking under sunlight, periodic measurements under a solar simulator.
   channel_settings:
     # The weather is logged: Table 3 asks for it "preferably in tabulated format".
-    irradiation: {monitor: true}
-    temperature: {monitor: true}
+    irradiation: {light_source: sunlight, monitor: true}
+    temperature: {specify: ambient, monitor: true}
     atmosphere:
-      - {variable: relative_humidity, monitor: true}
+      - {variable: relative_humidity, specify: ambient, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
       - {variable: oxygen, specify: ambient}
     electrical_load: {specify: mpp, control: true, monitor: true}
+  instructions:
+    # Periodic J–V curves (p.37), at a periodicity that "depends on the characteristic
+    # degradation timescale of each given device" (p.43), under Table 1's
+    # characterization light source.
+    - {jv_scan: {every: not stated, light_source: solar simulator}}

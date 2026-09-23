@@ -4,10 +4,25 @@ from nomad.metainfo import MEnum, Quantity, SchemaPackage
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     ElectricalLoad,
     HoldInstruction,
+    Illuminated,
     MonitorControlInstruction,
 )
 
 m_package = SchemaPackage()
+
+
+#: The one point a condition of the surroundings is taken from, where the protocol states
+#: no number: whatever the laboratory, or the weather, gives.
+AMBIENT = 'ambient'
+
+
+def ambient(quantity: str) -> Quantity:
+    """`reference_point` for a quantity that may be left to the surroundings."""
+    return Quantity(
+        type=MEnum(AMBIENT),
+        description=f'The {quantity} taken from the surroundings instead of written as a '
+        f'number: `{AMBIENT}`, whatever the laboratory or the weather gives.',
+    )
 
 
 class HoldTemperature(HoldInstruction):
@@ -19,9 +34,10 @@ class HoldTemperature(HoldInstruction):
         unit='K',
         description='How far either side of `value` still counts.',
     )
+    reference_point = ambient('temperature')
 
 
-class HoldIrradiance(HoldInstruction):
+class HoldIrradiance(Illuminated, HoldInstruction):
     """The light on the sample."""
 
     value = Quantity(type=np.float64, unit='W/m^2', description='Irradiance to hold.')
@@ -29,10 +45,6 @@ class HoldIrradiance(HoldInstruction):
         type=np.float64,
         unit='W/m^2',
         description='How far either side of `value` still counts.',
-    )
-    spectrum = Quantity(
-        type=str,
-        description='Which spectrum the lamp delivers, e.g. `AM1.5G`. Free text for now.',
     )
 
 
@@ -152,6 +164,7 @@ class HoldRelativeHumidity(HoldInstruction):
         unit='dimensionless',
         description='How far either side of `value` still counts.',
     )
+    reference_point = ambient('relative humidity')
 
 
 class HoldOxygenFraction(HoldInstruction):
@@ -169,7 +182,7 @@ class HoldOxygenFraction(HoldInstruction):
         description='How far either side of `value` still counts.',
     )
     reference_point = Quantity(
-        type=MEnum('ambient'),
+        type=MEnum(AMBIENT),
         description='The oxygen taken from the surroundings instead of written as a '
         'number: `ambient`, whatever the air around the sample holds. Not the 21 % of '
         'fresh air: people, flames and processes in a laboratory consume oxygen.',
@@ -201,7 +214,7 @@ class BalanceGas(MonitorControlInstruction):
     gas = Quantity(
         type=str,
         description='Which gas makes up the balance, e.g. `N2`, `air`, `Ar`. Free text, '
-        'like `HoldIrradiance.spectrum`.',
+        'like `LightSource.spectrum`.',
     )
 
     def describe_values(self) -> str:

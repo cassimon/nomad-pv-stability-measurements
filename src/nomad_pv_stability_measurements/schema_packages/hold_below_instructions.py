@@ -4,6 +4,7 @@ from nomad.metainfo import Quantity, SchemaPackage
 from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     HoldBelowInstruction,
     HoldBetweenInstruction,
+    Illuminated,
 )
 
 m_package = SchemaPackage()
@@ -39,7 +40,7 @@ class HoldBelowOxygenFraction(HoldBelowInstruction):
     )
 
 
-class HoldBetweenIrradiance(HoldBetweenInstruction):
+class HoldBetweenIrradiance(Illuminated, HoldBetweenInstruction):
     """The light on the sample, kept between two bounds (§22)."""
 
     lower_bound = Quantity(

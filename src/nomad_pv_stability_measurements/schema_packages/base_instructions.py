@@ -2,7 +2,7 @@ from dataclasses import replace
 from math import inf, isclose
 
 import numpy as np
-from nomad.metainfo import MEnum, MSection, Quantity, SchemaPackage
+from nomad.metainfo import MEnum, MSection, Quantity, SchemaPackage, SubSection
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
@@ -13,6 +13,7 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     SingleInstruction,
     kind_of,
 )
+from nomad_pv_stability_measurements.schema_packages.light_sources import LightSource
 from nomad_pv_stability_measurements.schema_packages.utils import (
     MONITORED,
     shown,
@@ -205,6 +206,39 @@ class ElectricalLoad(DependentMonitorControl):
         """One row for the port, whichever quantity is set: it is in one state at a
         time."""
         return 'electrical load'
+
+
+class Illuminated(MSection):
+    """The light on the sample, and where it comes from. Mixed in before the kind:
+    `class HoldIrradiance(Illuminated, HoldInstruction)`.
+
+    Naming the source states something about the light even where no irradiance is
+    stated: an outdoor test under `sunlight` says where its light comes from.
+    """
+
+    light_source = SubSection(
+        section_def=LightSource,
+        description='Where the light comes from: the sun, or a lamp.',
+    )
+
+    def describe_values(self) -> str:
+        values = super().describe_values()
+        if self.light_source is None:
+            return values
+        return f'{values} ({self.light_source.describe()})'
+
+    def states_a_value(self) -> bool:
+        return self.light_source is not None or super().states_a_value()
+
+    def annotation_for_plotting(self) -> str:
+        """The source, where the irradiance itself is not stated: `sunlight,
+        monitored`."""
+        text = super().annotation_for_plotting()
+        if self.light_source is None or super().states_a_value():
+            return text
+        if self.monitor and not self.control:
+            return f'{self.light_source.describe()}, monitored'
+        return self.light_source.describe()
 
 
 class HoldInstruction(MonitorControlInstruction):

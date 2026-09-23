@@ -4307,8 +4307,7 @@ quantity for is reported.
 
 ## 38. Stated, controlled, monitored — `specify`; light sources; periods
 
-**Status: steps A and B built** (474 tests, ruff clean; all 117 ISOS variants compared
-whole). Steps C and D are planned, in order, each reviewed before the next. Amends §15.2 (a written value no longer
+**Status: steps A–D built** (510 tests, ruff clean; all 118 ISOS variants compared whole). Amends §15.2 (a written value no longer
 sets `control`), §17.4 (`set_point` → `value`), §26 (monitoring), §29 (roles), §34.10 (open
 circuit) and §36.3.
 
@@ -4367,8 +4366,13 @@ independent things, none implied by another.
   `ambient`. The counterpart the ISOS-I protocols will need.
 - The ISOS README and OPEN_QUESTIONS.md #5 say how a humidity controlled only above 40 °C is
   written.
+- Table 1's "Ambient" is stated as `specify: ambient`: the relative humidity of ISOS-D-1/-2,
+  V-1/-2, L-1/-2, O, T-1/-2 and LC-1/-2, and the outdoor temperature of ISOS-O. `ambient` is the
+  one `reference_point` of `HoldTemperature`, `HoldRelativeHumidity` and `HoldOxygenFraction`.
+  ISOS-LT-1's humidity keeps the table's "Monitored, uncontrolled": nothing stated.
+- Every `monitor: true` left in the ISOS files has a sentence behind it (OPEN_QUESTIONS.md #12).
 
-### 38.4 Step C — light sources
+### 38.4 Step C — light sources — built
 
 ```
 LightSource                      spectrum (a name for now, data later), model, calibration
@@ -4403,18 +4407,70 @@ LightSource                      spectrum (a name for now, data later), model, c
 - ISOS-L, -LC, -LT: an `ArtificialLightSource` with `solar_simulator: true`; ISOS-O: a
   `NaturalLightSource` with nothing stated, for the lab to fill in.
 
-### 38.5 Step D — periods with a kind, and the characterization light
+**As built.** `schema_packages/light_sources.py` holds `GeoLocation` (moved from
+`protocol.py`, which imports it) and the sources. The `Illuminated` mixin
+(`base_instructions.py`, like `ElectricalLoad`) gives `HoldIrradiance`,
+`HoldBetweenIrradiance` and `RampIrradiance` their `light_source`; naming a source counts as
+stating something (`states_a_value`), so sunlight alone is `specified`, and the label says the
+source: `Hold irradiance between 800 W/m² and 1000 W/m² (solar simulator)`; a bar with no
+irradiance stated writes `sunlight, monitored`. Authored as a word, `light_source: sunlight`,
+or a section with a `type` and its own fields (`LIGHT_SOURCES`, `channels.py`); a section
+without `type` is a `LightSource` of a kind not stated. The translator now also reads any
+subsection whose bare archive names a subclass in `m_def` as that class. `NaturalLightSource`
+reports a `tilt` outside 0–180°, an `azimuth` outside 0–360° (clockwise from north) and an
+exposure that ends before it starts; `ArtificialLightSource` questions a simulator standard or
+class written without `solar_simulator`.
+
+**Every protocol names its lights** (after review): the light a cell ages and is tracked under,
+and the light its J–V scans are measured under, are named where a protocol states them. The
+example protocols do: the three custom protocols (an LED solar simulator of class AAA, an LED
+solar simulator dimmed along the ramps, a 1200 W metal halide lamp with its UV filtered out)
+and *Day and night at 45 °C*, whose run file names its light in the phase
+(`protocol_from_phases` puts a phase's `light_source` on its irradiance, and refuses one
+without an irradiance). UNITOV's real files name no light, and are left so. Built as needed
+and no further: `ArtificialLightSource.lamp_power` (W), as lamps are named ("1,700 W
+air-cooled xenon lamp", Table 4), and `JVScan.light_source` beside its `irradiance`, the
+characterization light apart from the ageing light; the label says it (`J–V scan every 10 min
+(xenon lamp solar simulator AAA)`). The ISOS files get their J–V scans, and with them
+Table 1's characterization light source, in step D.
+
+**J–V scans as instructions of the sequence** (after review). No new word: `jv_scan:` without
+`every` already is one scan (the `sweep:` state of §8 was its forerunner), and in a sequence it
+writes its length, `duration: typical 2 min`. The three custom protocols now run initial J–V →
+ageing → final J–V (*Stepped stress* also between its phases), as their runs record, each scan
+under a class AAA xenon solar simulator at one sun, AM1.5G, reverse then forward. What held for
+the whole protocol but not during a scan — the chamber's temperature and humidity, MPP tracking
+(D17: a J–V sweep during MPP tracking is not expressible) — moved into the ageing block;
+what holds throughout (ambient oxygen, logged humidity) stays in `channel_settings`. Each
+protocol's length is now derived with `includes_typical`. `simulate_runs.phases` would take
+the scans for phases; the runs are not regenerated (§38.2), and teaching the simulator is part
+of that later task.
+
+### 38.5 Step D — periods with a kind, and the characterization light — built
 
 - `Duration`'s `fixed`/`typical` become a shared base; `Period` takes `fixed`, `typical` and a
   kind for "periodic, the interval left to the lab" (the paper: a periodicity that "depends on
   the characteristic degradation timescale of each given device", p.43), since a `typical`
   value there would be one the standard does not state. `JVScan.interval` becomes a `Period`,
   written like a duration: `jv_scan: {every: typical 24 h}`.
-- `JVScan.light_source`: the characterization light, apart from the ageing light. The ISOS files
-  then write Table 1's "Characterization light source": ISOS-D-1 "Solar simulator or sunlight"
+- `JVScan.light_source` (built in step C): the characterization light, apart from the ageing
+  light. The ISOS files then write Table 1's "Characterization light source": ISOS-D-1 "Solar simulator or sunlight"
   (2 variants, 117 → 118), ISOS-O-1 a simulator, -O-2 sunlight (so the two differ at last,
   OPEN_QUESTIONS.md #11), -O-3 a simulator; ISOS-V's fresh-device scan at one sun AM1.5G
   (p.39), from which its reference points come.
+
+**As built.** `general.py`: `TimeSpan` (a `value` in s, and the check that `fixed`/`typical`
+have a positive one and the other kinds none, naming the field it checks) under `Duration`
+and `Period` (`fixed`, `typical`, `not_stated`). `JVScan.interval` is a `Period`; its label
+says `every 10 min`, `every ≈ 1 h` or `periodically`. `every:` is written like a duration,
+plus `not stated`. Every ISOS file has, among the protocol's own instructions,
+`jv_scan: {every: not stated, light_source: …}`; ISOS-D-1's two lights are options, so
+117 → 118 variants, and the simulated ISOS-D-1 run was regenerated alone for its variant's
+new name (its data unchanged). The instructions carry no `name`, so their label says the
+light. One scan with no length of its own (ISOS-V's fresh device) is drawn as 2 min at the
+start with a note in red, not across the whole test (`ONE_SCAN_FOR_PLOTTING`), as a ramp
+without a pace is drawn at an assumed one; and an endless protocol is drawn for at least an
+hour, as `drawing_end` always said and did not do once something ended sooner.
 
 ### 38.6 Later
 

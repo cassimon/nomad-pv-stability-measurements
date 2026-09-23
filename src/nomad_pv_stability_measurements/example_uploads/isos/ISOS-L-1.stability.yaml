@@ -9,11 +9,12 @@ data:
       # "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied" (p.43)
       specify: {lower: 800 W/m^2, upper: 1000 W/m^2}
       control: true
+      light_source: solar simulator
     # "monitored but not explicitly controlled (room temperature in the laboratory is
     # assumed to be 23±4 °C)" (p.36)
     temperature: {specify: RT, monitor: true}
     atmosphere:
-      - {variable: relative_humidity, monitor: true}
+      - {variable: relative_humidity, specify: ambient, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
       - {variable: oxygen, specify: ambient}
     electrical_load:
@@ -23,3 +24,8 @@ data:
         - {label: MPP, specify: mpp, control: true, monitor: true}
         - {label: OC, specify: open_circuit}
         - {label: fixed voltage near MPP, variable: voltage, specify: near V_MPP, control: true}
+  instructions:
+    # Periodic J–V curves (p.37), at a periodicity that "depends on the characteristic
+    # degradation timescale of each given device" (p.43), under Table 1's
+    # characterization light source.
+    - {jv_scan: {every: not stated, light_source: solar simulator}}

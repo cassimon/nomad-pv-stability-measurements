@@ -22,6 +22,9 @@ from nomad_pv_stability_measurements import example_uploads
 from nomad_pv_stability_measurements.parsers.options import expand
 from nomad_pv_stability_measurements.parsers.parser import read, stem
 from nomad_pv_stability_measurements.parsers.translate import m_def, translate
+from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
+    JVScan,
+)
 from nomad_pv_stability_measurements.schema_packages.general import (
     IndefiniteRepeatingBlock,
 )
@@ -36,6 +39,10 @@ from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldRelativeHumidity,
     HoldTemperature,
     HoldVoltage,
+)
+from nomad_pv_stability_measurements.schema_packages.light_sources import (
+    ArtificialLightSource,
+    NaturalLightSource,
 )
 from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     MPPTracking,
@@ -87,15 +94,22 @@ DARK = instruction(HoldIrradiance, value=0.0)
 #: (p.43): read as what every solar simulator is held at — a range, never a target (§22).
 #: Not logged: "the exact irradiance … should be reported" (p.43), and a periodic check
 #: "with a reference cell" is recommended (p.44), which is no continuous record.
+#: Table 1's "Solar simulator" names no lamp and no class.
 SOLAR_SIMULATOR = instruction(
     HoldBetweenIrradiance,
     control=True,
     lower_bound=pytest.approx(800),
     upper_bound=pytest.approx(1000),
+    light_source=instruction(ArtificialLightSource, solar_simulator=True),
 )
 #: Table 3 has an outdoor test report its weather "preferably in tabulated format".
-SUNLIGHT = instruction(HoldIrradiance, monitor=True)
-AMBIENT_TEMPERATURE = instruction(HoldTemperature, monitor=True)
+#: Table 1's "Sunlight": the standard names no site, no dates and no orientation.
+SUNLIGHT = instruction(
+    HoldIrradiance, monitor=True, light_source=instruction(NaturalLightSource)
+)
+AMBIENT_TEMPERATURE = instruction(
+    HoldTemperature, reference_point='ambient', monitor=True
+)
 #: "Ambient (23 ± 4 °C)": "monitored but not explicitly controlled (room temperature in
 #: the laboratory is assumed to be 23±4 °C)" (p.36) — the figure, not regulated.
 ROOM_TEMPERATURE = instruction(
@@ -106,8 +120,12 @@ ROOM_TEMPERATURE = instruction(
 )
 #: Bare "Ambient": "even if a parameter is not controlled … it is still important to
 #: monitor and report" it (p.43). Humidity is stated as RH throughout (§20.6).
-#: ISOS-LT-1's "Monitored, uncontrolled" reads the same.
-AMBIENT_HUMIDITY = instruction(HoldRelativeHumidity, monitor=True)
+#: Table 1's "Ambient" is stated as what the surroundings give.
+AMBIENT_HUMIDITY = instruction(
+    HoldRelativeHumidity, reference_point='ambient', monitor=True
+)
+#: ISOS-LT-1: "Monitored, uncontrolled" (Table 1), with no value stated.
+HUMIDITY_MONITORED = instruction(HoldRelativeHumidity, monitor=True)
 #: Controlled only above 40 °C, which cannot be written: stated and monitored, and not
 #: controlled, the condition in `notes`. ISOS-LT-2/-3: "Monitored, controlled at 50%
 #: beyond 40 °C" (Table 1); ISOS-T-3: "< 55%", "controlled at temperatures above 40 °C"
@@ -127,6 +145,34 @@ OPEN_CIRCUIT = instruction(VOCTracking)
 #: MPP tracking "holds the device at its normal operating voltage and measures the output"
 #: (p.43).
 MPP = ('MPP', instruction(MPPTracking, control=True, monitor=True))
+
+
+#: Table 1's "Characterization light source": J–V curves measured periodically (p.37), at
+#: a periodicity that "depends on the characteristic degradation timescale of each given
+#: device" (p.43), so not stated.
+def periodic_jv(light_source: dict) -> dict:
+    return instruction(
+        JVScan,
+        interval={'kind': 'not_stated'},
+        light_source=light_source,
+    )
+
+
+SIMULATOR_LIGHT = instruction(ArtificialLightSource, solar_simulator=True)
+SUN_LIGHT = instruction(NaturalLightSource)
+JV_UNDER_SIMULATOR = periodic_jv(SIMULATOR_LIGHT)
+JV_UNDER_SUNLIGHT = periodic_jv(SUN_LIGHT)
+#: ISOS-V's biases are "determined from light J–V curves measured under standard solar
+#: cell testing conditions on a fresh device" (Table 1, footnote a), "under AM1.5G one sun
+#: illumination" (p.39): one scan at the start.
+JV_OF_THE_FRESH_DEVICE = instruction(
+    JVScan,
+    irradiance=pytest.approx(1000),
+    light_source=instruction(
+        ArtificialLightSource, solar_simulator=True, spectrum='AM1.5G'
+    ),
+)
+
 #: Levels 1 and 2 under light: "options of exposure under open-circuit condition or using a
 #: fixed voltage bias near the MPP (instead of active MPP tracking)" (p.37).
 LOWER_LEVEL_LOADS = {
@@ -224,9 +270,12 @@ def light_dark(light: float, dark: float, lit: dict) -> dict:
 EXPECTED = {}
 
 
-def protocol(standard, options, instructions, environment='indoor'):
+def protocol(
+    standard, options, instructions, environment='indoor', scans=(JV_UNDER_SIMULATOR,)
+):
     """The archive one variant must load to. `options` are (token, label) in the order the
-    file writes them, or `None` for the alternative that adds nothing to its name."""
+    file writes them, or `None` for the alternative that adds nothing to its name. `scans`
+    are its J–V scans, the file's own instructions."""
     options = [option for option in options if option]
     variant = ', '.join(label for _, label in options)
     # The file's own instructions come after its settings, before its routine (§14.3).
@@ -239,7 +288,12 @@ def protocol(standard, options, instructions, environment='indoor'):
         if each['m_def']
         in (m_def(HoldRelativeHumidity), m_def(HoldBelowRelativeHumidity))
     )
-    written = [*instructions[: humid + 1], AMBIENT_AIR, *instructions[humid + 1 : at]]
+    written = [
+        *instructions[: humid + 1],
+        AMBIENT_AIR,
+        *instructions[humid + 1 : at],
+        *scans,
+    ]
     settings = [{**each, 'duration': WHOLE_BLOCK} for each in written]
     instructions = [*settings, *instructions[at:]]
     archive = {
@@ -260,7 +314,17 @@ def protocol(standard, options, instructions, environment='indoor'):
 
 
 # ISOS-D — dark storage.
-protocol('ISOS-D-1', [], [DARK, ROOM_TEMPERATURE, AMBIENT_HUMIDITY, OPEN_CIRCUIT])
+# "Solar simulator or sunlight" (Table 1).
+for token, label, scan in (
+    ('simulator', 'J–V under solar simulator', JV_UNDER_SIMULATOR),
+    ('sunlight', 'J–V under sunlight', JV_UNDER_SUNLIGHT),
+):
+    protocol(
+        'ISOS-D-1',
+        [(token, label)],
+        [DARK, ROOM_TEMPERATURE, AMBIENT_HUMIDITY, OPEN_CIRCUIT],
+        scans=[scan],
+    )
 for token, (label, celsius) in TEMPERATURES.items():
     option = [(token, label)]
     protocol('ISOS-D-2', option, [DARK, held(celsius), AMBIENT_HUMIDITY, OPEN_CIRCUIT])
@@ -268,17 +332,29 @@ for token, (label, celsius) in TEMPERATURES.items():
     protocol('ISOS-D-3', option, [DARK, held(celsius), humidity(85), OPEN_CIRCUIT])
 
 # ISOS-V — the biases span all three rows (the merged cells G8:G10).
+V_SCANS = [JV_OF_THE_FRESH_DEVICE, JV_UNDER_SIMULATOR]
 for b_token, (b_label, cls, point) in BIASES.items():
     load = bias(cls, point)
     protocol(
         'ISOS-V-1',
         [(b_token, b_label)],
         [DARK, ROOM_TEMPERATURE, AMBIENT_HUMIDITY, load],
+        scans=V_SCANS,
     )
     for token, (label, celsius) in TEMPERATURES.items():
         options = [(token, label), (b_token, b_label)]
-        protocol('ISOS-V-2', options, [DARK, held(celsius), AMBIENT_HUMIDITY, load])
-        protocol('ISOS-V-3', options, [DARK, held(celsius), humidity(85), load])
+        protocol(
+            'ISOS-V-2',
+            options,
+            [DARK, held(celsius), AMBIENT_HUMIDITY, load],
+            scans=V_SCANS,
+        )
+        protocol(
+            'ISOS-V-3',
+            options,
+            [DARK, held(celsius), humidity(85), load],
+            scans=V_SCANS,
+        )
 
 # ISOS-L — light soaking.
 for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
@@ -306,8 +382,13 @@ for token, (label, celsius) in TEMPERATURES.items():
 # No site is stated: it is reported, not prescribed (Table 3).
 OUTDOOR = [SUNLIGHT, AMBIENT_TEMPERATURE, AMBIENT_HUMIDITY]
 for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
-    for standard in ('ISOS-O-1', 'ISOS-O-2'):
-        protocol(standard, [(l_token, l_label)], [*OUTDOOR, load], 'outdoor')
+    # "Under the ISOS-O-1 protocol, periodic measurements of J–V curves are done under
+    # illumination by a solar simulator. In ISOS-O-2, … by natural sunlight" (p.37).
+    for standard, scan in (
+        ('ISOS-O-1', JV_UNDER_SIMULATOR),
+        ('ISOS-O-2', JV_UNDER_SUNLIGHT),
+    ):
+        protocol(standard, [(l_token, l_label)], [*OUTDOOR, load], 'outdoor', [scan])
 # Level 3: "ISOS-O-3 requires both in situ MPP tracking under natural sunlight …" (p.37).
 protocol('ISOS-O-3', [], [*OUTDOOR, MPP[1]], 'outdoor')
 
@@ -358,7 +439,7 @@ for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
         protocol(
             'ISOS-LT-1',
             [(l_token, l_label), (s_token, s_label)],
-            [SOLAR_SIMULATOR, AMBIENT_HUMIDITY, load, routine],
+            [SOLAR_SIMULATOR, HUMIDITY_MONITORED, load, routine],
         )
     protocol(
         'ISOS-LT-2',

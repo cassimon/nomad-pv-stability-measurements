@@ -8,7 +8,7 @@ Open any of them in the ELN, or copy one and add what your own run needs.
 
 | Family | What it stresses | Protocols |
 |---|---|---|
-| ISOS-D | Dark storage | 5 |
+| ISOS-D | Dark storage | 6 |
 | ISOS-V | Electrical bias, in the dark | 25 |
 | ISOS-L | Light soaking under a solar simulator | 11 |
 | ISOS-O | Outdoor exposure to sunlight | 7 |
@@ -58,7 +58,7 @@ Search for `standard` to find every variant of a protocol, and for `standard_var
 channel_settings:          # conditions that hold for the whole test
   temperature: {specify: RT, monitor: true}                 # assumed 23 ± 4 °C, logged
   atmosphere:              # a channel of several variables: one setting each
-    - {variable: relative_humidity, monitor: true}          # ambient: logged, nothing stated
+    - {variable: relative_humidity, specify: ambient, monitor: true}  # Table 1's "Ambient"
     - {variable: oxygen, specify: ambient}                  # whatever the air holds
   electrical_load: {specify: mpp, control: true, monitor: true}
 routine:                   # only what changes during the test
@@ -68,8 +68,9 @@ routine:                   # only what changes during the test
     - {channel: irradiation, specify: dark, duration: 16 h}
 ```
 
-**Only what the standard states is written.** There is **no test duration, sampling interval or
-measurement schedule** in any file, because the standard fixes none — add your own. A light–dark
+**Only what the standard states is written.** There is **no test duration or sampling interval**
+in any file, and the J–V scans repeat at an interval **not stated**, because the standard fixes
+none — add your own. A light–dark
 cycle states its period, and repeats for as long as your test runs.
 
 - **Three things are said about each quantity, and each only where the standard says it.**
@@ -93,10 +94,13 @@ cycle states its period, and repeats for as long as your test runs.
 - **A humidity controlled only above 40 °C** (ISOS-T-3's "< 55%", ISOS-LT-2/-3's "controlled
   at 50% beyond 40 °C") is stated and monitored, but not written as controlled: control that
   depends on the temperature cannot be written yet, so the condition is in `notes`.
-- **Ambient means monitored, not regulated.** The standard assumes room temperature to be
-  23 ± 4 °C without controlling it (p.36), and asks for every uncontrolled condition to be
-  monitored and reported "even if a parameter is not controlled" (p.43): `monitor: true`, and no
-  `control`. Outdoors, the weather is logged "preferably in tabulated format" (Table 3).
+- **Ambient is stated, monitored, and not regulated.** Where Table 1 writes "Ambient", the file
+  writes `specify: ambient`: whatever the laboratory or the weather gives, with no number. Where
+  it writes "Ambient (23 ± 4 °C)", it writes `specify: RT`, the room temperature the standard
+  assumes (p.36). Either is monitored, since the standard asks for every uncontrolled condition
+  to be monitored and reported "even if a parameter is not controlled" (p.43); outdoors, the
+  weather "preferably in tabulated format" (Table 3). ISOS-LT-1's humidity is "Monitored,
+  uncontrolled", with nothing stated.
 - **What is controlled is not also logged, unless the standard says so.** The standard asks for
   a controlled temperature's "sensor type" and for "RH (controlled or monitored)" (Table 3), and
   for the exact irradiance to be reported and checked periodically with a reference cell
@@ -106,6 +110,20 @@ cycle states its period, and repeats for as long as your test runs.
   beside it.
 - **A bias measured on the device** is specified by its point (`V_MPP`, `-J_MPP`, …): the
   protocol cannot know the number before the fresh device is measured.
+- **J–V curves are measured periodically**, as a protocol instruction of its own:
+  `jv_scan: {every: not stated, light_source: solar simulator}`, under Table 1's
+  "Characterization light source", which may differ from the light the cell ages under:
+  ISOS-O-2 measures under sunlight, ISOS-O-1 and -O-3 under a solar simulator, ISOS-D-1
+  under either (two variants). ISOS-V adds one scan of the fresh device at one sun, AM1.5G,
+  from which its biases are taken. Write your interval as `every: 10 min`, or
+  `every: typical 1 h` where it is only a typical one.
+- **The light says where it comes from.** `light_source: solar simulator` (ISOS-L, -LC, -LT)
+  names no lamp and no class, as Table 1 does not; `light_source: sunlight` (ISOS-O) names no
+  site, dates or orientation. Write your own: `light_source: {type: xenon lamp,
+  solar_simulator: true, simulator_classification: AAA, uv_filter: true}`, or for sunlight
+  `{type: sunlight, geo_location: {…}, tilt: 30°, azimuth: 180°, mounting: fixed}`. The types
+  are `sunlight`, `artificial light`, `solar simulator`, `LED`, `xenon lamp`,
+  `metal halide lamp` and `sulfur plasma lamp`.
 - **A solar simulator is held between 800 and 1000 W/m².** The standard recommends that range
   ("Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied", p.43), and
   the files read it as what the light is held at: `specify: {lower: 800 W/m^2, upper:

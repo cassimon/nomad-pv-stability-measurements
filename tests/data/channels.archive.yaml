@@ -10,7 +10,10 @@ data:
     duration:
       kind: whole_block
   - m_def: nomad_pv_stability_measurements.schema_packages.hold_instructions.HoldIrradiance
-    spectrum: AM1.5G
+    light_source:
+      m_def: nomad_pv_stability_measurements.schema_packages.light_sources.ArtificialLightSource
+      solar_simulator: true
+      spectrum: AM1.5G
     monitor: true
     sample_every: 60.0
     value: 1000.0

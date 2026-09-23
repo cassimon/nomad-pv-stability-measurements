@@ -4,23 +4,38 @@ data:
   environment: indoor
   notes: >-
     A lab's own stress sequence, not a standard: a burn-in under light, three
-    temperature cycles under light, then recovery in the dark. Shows phases run one
+    temperature cycles under light, then recovery in the dark, the cell tracked at its
+    maximum power point throughout and its J–V curve measured before, between and after
+    the phases. The light is an LED solar simulator of class AAA; the J–V curves are
+    measured at one sun under a class AAA xenon solar simulator. Shows phases run one
     after another, a counted repetition, and a condition held beside a nested sequence.
   channel_settings:
     atmosphere:
       - {variable: relative_humidity, monitor: true}
       - {variable: oxygen, specify: ambient}
-    electrical_load: {specify: mpp, control: true, monitor: true}
   routine:
     name: phases
     repeat: 1
     instructions:
+      - name: initial J–V
+        jv_scan: &jv
+          order: reverse then forward
+          irradiance: 1000 W/m^2
+          light_source: {type: xenon lamp, solar_simulator: true, simulator_classification: AAA, spectrum: AM1.5G}
+        duration: typical 2 min
       - name: burn-in
         repeat: 1
         mode: parallel
         instructions:
-          - {channel: irradiation, specify: 1000 W/m^2, control: true, monitor: true, duration: 24 h}
+          - channel: irradiation
+            specify: 1000 W/m^2
+            control: true
+            monitor: true
+            light_source: &lamp {type: LED, solar_simulator: true, simulator_classification: AAA}
+            duration: 24 h
           - {channel: temperature, specify: 25 °C, control: true, monitor: true, duration: whole block}
+          - &track {channel: electrical_load, specify: mpp, control: true, monitor: true, duration: whole block}
+      - {name: J–V after burn-in, jv_scan: *jv, duration: typical 2 min}
       - name: temperature cycles under light
         repeat: 3
         instructions:
@@ -28,7 +43,8 @@ data:
             repeat: 1
             mode: parallel
             instructions:
-              - {channel: irradiation, specify: 1000 W/m^2, control: true, monitor: true, duration: whole block}
+              - {channel: irradiation, specify: 1000 W/m^2, control: true, monitor: true, light_source: *lamp, duration: whole block}
+              - *track
               - name: temperature profile
                 repeat: 1
                 instructions:
@@ -36,9 +52,12 @@ data:
                   - {channel: temperature, specify: 85 °C, control: true, monitor: true, duration: 6 h}
                   - {channel: temperature, specify: {from: 85 °C, to: 25 °C, rate: 1 K/min}, control: true, monitor: true}
                   - {channel: temperature, specify: 25 °C, control: true, monitor: true, duration: 4 h}
+      - {name: J–V after temperature cycles under light, jv_scan: *jv, duration: typical 2 min}
       - name: recovery in the dark
         repeat: 1
         mode: parallel
         instructions:
           - {channel: irradiation, specify: dark, duration: 24 h}
           - {channel: temperature, specify: 25 °C, control: true, monitor: true, duration: whole block}
+          - *track
+      - {name: final J–V, jv_scan: *jv, duration: typical 2 min}

@@ -7,10 +7,15 @@ data:
   channel_settings:
     irradiation: {specify: dark}
     atmosphere:
-      - {variable: relative_humidity, monitor: true}
+      - {variable: relative_humidity, specify: ambient, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
       - {variable: oxygen, specify: ambient}
     electrical_load: {specify: open_circuit}
+  instructions:
+    # Periodic J–V curves (p.37), at a periodicity that "depends on the characteristic
+    # degradation timescale of each given device" (p.43), under Table 1's
+    # characterization light source.
+    - {jv_scan: {every: not stated, light_source: solar simulator}}
   routine:
     instructions:
       - channel: temperature

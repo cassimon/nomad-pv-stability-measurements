@@ -6,25 +6,46 @@ data:
     Damp heat interrupted by light soaks, not a standard: 85 °C and 85 % throughout,
     and four times a day in the dark followed by a light soak at the maximum power
     point. The cell is tracked only while lit, and left at open circuit in the dark.
-    Shows an instruction held only within one phase of a repetition.
+    The light is a 1200 W metal halide light-soaking lamp, its UV filtered out. The
+    cell's J–V curve is measured before and after, at one sun under a class AAA xenon
+    solar simulator. Shows an instruction held only within one phase of a repetition.
   channel_settings:
-    temperature: {specify: 85 °C, control: true, monitor: true}
     atmosphere:
-      - {variable: relative_humidity, specify: 85 %, control: true, monitor: true}
       - {variable: oxygen, specify: ambient}
   routine:
-    name: dark and light
-    repeat: 4
+    name: measured, aged, measured
+    repeat: 1
     instructions:
-      - name: dark
+      - name: initial J–V
+        jv_scan: &jv
+          order: reverse then forward
+          irradiance: 1000 W/m^2
+          light_source: {type: xenon lamp, solar_simulator: true, simulator_classification: AAA, spectrum: AM1.5G}
+        duration: typical 2 min
+      - name: damp heat
         repeat: 1
         mode: parallel
         instructions:
-          - {channel: irradiation, specify: dark, duration: 20 h}
-          - {channel: electrical_load, specify: open_circuit, duration: whole block}
-      - name: light soak
-        repeat: 1
-        mode: parallel
-        instructions:
-          - {channel: irradiation, specify: 1000 W/m^2, control: true, monitor: true, duration: 4 h}
-          - {channel: electrical_load, specify: mpp, control: true, monitor: true, duration: whole block}
+          - {channel: temperature, specify: 85 °C, control: true, monitor: true, duration: whole block}
+          - {channel: atmosphere, variable: relative_humidity, specify: 85 %, control: true, monitor: true, duration: whole block}
+          - name: dark and light
+            repeat: 4
+            instructions:
+              - name: dark
+                repeat: 1
+                mode: parallel
+                instructions:
+                  - {channel: irradiation, specify: dark, duration: 20 h}
+                  - {channel: electrical_load, specify: open_circuit, duration: whole block}
+              - name: light soak
+                repeat: 1
+                mode: parallel
+                instructions:
+                  - channel: irradiation
+                    specify: 1000 W/m^2
+                    control: true
+                    monitor: true
+                    light_source: {type: metal halide lamp, solar_simulator: true, uv_filter: true, lamp_power: 1200 W}
+                    duration: 4 h
+                  - {channel: electrical_load, specify: mpp, control: true, monitor: true, duration: whole block}
+      - {name: final J–V, jv_scan: *jv, duration: typical 2 min}

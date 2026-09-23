@@ -118,4 +118,4 @@ def drawing_end(series: TimePlotSeries) -> float:
         for piece in series.pieces
         if piece.cycle
     ]
-    return max(times, default=0) or 3600.0
+    return max([*times, 3600.0])

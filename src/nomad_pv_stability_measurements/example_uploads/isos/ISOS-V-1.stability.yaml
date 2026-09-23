@@ -10,7 +10,7 @@ data:
     # assumed to be 23±4 °C)" (p.36)
     temperature: {specify: RT, monitor: true}
     atmosphere:
-      - {variable: relative_humidity, monitor: true}
+      - {variable: relative_humidity, specify: ambient, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
       - {variable: oxygen, specify: ambient}
     electrical_load:
@@ -21,3 +21,12 @@ data:
         - {label: J_SC, variable: current, specify: J_SC}
         - {label: −V_oc, variable: voltage, specify: -V_oc}
         - {label: −J_MPP, variable: current, specify: -J_MPP}
+  instructions:
+    # The biases are "determined from light J–V curves measured under standard solar cell
+    # testing conditions on a fresh device" (Table 1, footnote a), "under AM1.5G one sun
+    # illumination" (p.39): one scan, before anything else.
+    - jv_scan: {irradiance: 1000 W/m^2, light_source: {type: solar simulator, spectrum: AM1.5G}}
+    # Periodic J–V curves (p.37), at a periodicity that "depends on the characteristic
+    # degradation timescale of each given device" (p.43), under Table 1's
+    # characterization light source.
+    - {jv_scan: {every: not stated, light_source: solar simulator}}

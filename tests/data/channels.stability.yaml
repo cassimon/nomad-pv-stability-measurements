@@ -10,7 +10,7 @@ data:
     irradiation:
       specify: 1 sun
       control: true
-      spectrum: AM1.5G
+      light_source: {type: solar simulator, spectrum: AM1.5G}
       monitor: true
       sample_every: 60 s
     electrical_load:

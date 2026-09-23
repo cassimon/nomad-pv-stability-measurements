@@ -196,8 +196,34 @@ def test_assumed_conditions_fill_only_what_a_phase_leaves_out_and_are_said():
     [
         ({'name': 'soak', 'duration': '1 h', 'pressure': '1 bar'}, 'pressure'),
         ({'name': 'soak', 'temperature': '85 °C'}, 'no duration'),
+        (
+            {'name': 'soak', 'duration': '1 h', 'light_source': 'solar simulator'},
+            'no irradiance',
+        ),
     ],
 )
 def test_a_phase_that_cannot_be_written_raises(phase, fragment):
     with pytest.raises(ValueError, match=fragment):
         protocol_from_phases('test', [phase])
+
+
+def test_a_phase_names_the_light_its_irradiance_comes_from():
+    lamp = {'type': 'LED', 'solar_simulator': True}
+    document = protocol_from_phases(
+        'Soak',
+        [
+            {
+                'name': 'soak',
+                'duration': '1 h',
+                'irradiance': '1000 W/m^2',
+                'temperature': '65 °C',
+                'light_source': lamp,
+            }
+        ],
+    )
+
+    [phase] = document['data']['routine']['instructions']
+    sources = {
+        each['channel']: each.get('light_source') for each in phase['instructions']
+    }
+    assert sources == {'irradiation': lamp, 'temperature': None}

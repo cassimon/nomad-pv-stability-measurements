@@ -15,7 +15,6 @@ from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldTemperature,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import (
-    GeoLocation,
     StabilityActivity,
     StabilityProtocol,
 )
@@ -95,15 +94,6 @@ def test_a_protocol_is_indoors_unless_it_says_otherwise():
     assert StabilityProtocol().environment == 'indoor'
     with pytest.raises(ValueError):
         StabilityProtocol(environment='in orbit')
-
-
-def test_coordinates_the_wrong_way_round_are_reported(normalized, log):
-    normalized(
-        GeoLocation(latitude=-104.99 * ureg.degree, longitude=39.74 * ureg.degree)
-    )
-
-    [error] = log.errors
-    assert 'wrong way round' in error
 
 
 def test_executed_what_the_caller_says_stands():

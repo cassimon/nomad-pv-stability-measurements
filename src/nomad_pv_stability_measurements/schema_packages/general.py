@@ -37,16 +37,47 @@ TYPICAL = 'typical'
 WHOLE_BLOCK = 'whole_block'
 OPEN_ENDED = 'open_ended'
 DERIVED = 'derived'
+NOT_STATED = 'not_stated'
 #: The kinds that are a length, and so have a `value`.
 WITH_VALUE = (FIXED, TYPICAL, DERIVED)
-#: What a kind without a value lasts, in words.
+#: What a kind without a value is, in words.
 WITHOUT_VALUE = {
-    WHOLE_BLOCK: 'as long as its block',
-    OPEN_ENDED: 'until something outside the plan stops it',
+    WHOLE_BLOCK: 'lasts as long as its block',
+    OPEN_ENDED: 'lasts until something outside the plan stops it',
+    NOT_STATED: 'is left to whoever runs the plan',
 }
 
 
-class Duration(ArchiveSection):
+class TimeSpan(ArchiveSection):
+    """A length of time, and what kind of length it is. `fixed` and `typical` are the
+    kinds with a `value`; each subclass says which others it takes."""
+
+    value = Quantity(
+        type=np.float64,
+        unit='s',
+        description='The length. Required for a `fixed` or `typical` one, and positive.',
+    )
+
+    def normalize(self, archive, logger):
+        """Whether its value suits its kind."""
+        super().normalize(archive, logger)
+        owner = getattr(self.m_parent, 'name', None) or '<unnamed>'
+        field = self.m_parent_sub_section.name if self.m_parent_sub_section else 'span'
+        if self.kind in WITHOUT_VALUE and self.value is not None:
+            logger.error(
+                f'{owner} writes a `{field}` that {WITHOUT_VALUE[self.kind]}, so it '
+                f'takes no value.'
+            )
+        elif self.kind in (FIXED, TYPICAL) and self.value is None:
+            logger.error(f'{owner} has a {self.kind} `{field}`, but no value.')
+        elif self.kind in (FIXED, TYPICAL) and self.value <= 0:
+            logger.error(
+                f'{owner} writes a `{field}` of {self.value.to("s").magnitude:g} s: '
+                f'it must be positive.'
+            )
+
+
+class Duration(TimeSpan):
     """How long an instruction or a plan lasts, and what kind of length that is."""
 
     kind = Quantity(
@@ -76,21 +107,9 @@ class Duration(ArchiveSection):
     def normalize(self, archive, logger):
         """Whether its value suits its kind, and a `whole_block` one its place."""
         super().normalize(archive, logger)
-        owner = getattr(self.m_parent, 'name', None) or '<unnamed>'
         if self.kind == WHOLE_BLOCK:
+            owner = getattr(self.m_parent, 'name', None) or '<unnamed>'
             self.report_a_place_without_a_parallel_block(owner, logger)
-        if self.kind in WITHOUT_VALUE and self.value is not None:
-            logger.error(
-                f'{owner} lasts {WITHOUT_VALUE[self.kind]}, so its duration takes no '
-                f'value.'
-            )
-        elif self.kind in (FIXED, TYPICAL) and self.value is None:
-            logger.error(f'{owner} has a {self.kind} duration, but no value.')
-        elif self.kind in (FIXED, TYPICAL) and self.value <= 0:
-            logger.error(
-                f'{owner} writes a `duration` of {self.value.to("s").magnitude:g} s: '
-                f'it must be positive.'
-            )
 
     def report_a_place_without_a_parallel_block(self, owner: str, logger) -> None:
         """As long as its block only exists where the block runs its instructions in
@@ -111,6 +130,18 @@ class Duration(ArchiveSection):
             f'{owner} lasts as long as its block, but {where}: run it in a parallel '
             f'block, or give it a duration of its own.'
         )
+
+
+class Period(TimeSpan):
+    """How long from one repetition of something to the next, and what kind of length
+    that is."""
+
+    kind = Quantity(
+        type=MEnum(FIXED, TYPICAL, NOT_STATED),
+        description='What kind of length this is. `fixed`: exactly `value`. `typical`: '
+        'the plan does not fix it; `value` is a typical one, used to draw the plan. '
+        '`not_stated`: it repeats, at a period the plan leaves to whoever runs it.',
+    )
 
 
 def execution_mode(container) -> str | None:

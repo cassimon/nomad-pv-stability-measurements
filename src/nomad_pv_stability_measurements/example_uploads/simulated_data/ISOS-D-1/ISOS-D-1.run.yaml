@@ -1,8 +1,8 @@
 run:
   institution: SIM
-  name: ISOS-D-1, cell A
+  name: ISOS-D-1 (J–V under solar simulator), cell A
   protocol: isos/ISOS-D-1.stability.yaml
-  variant: ISOS-D-1
+  variant: ISOS-D-1 (J–V under solar simulator)
   standard: ISOS-D-1
   operator: A. Researcher
   start: '2026-03-02T09:00:00+01:00'

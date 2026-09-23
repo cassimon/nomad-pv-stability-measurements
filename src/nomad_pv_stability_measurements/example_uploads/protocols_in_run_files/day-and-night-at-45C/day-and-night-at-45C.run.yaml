@@ -21,6 +21,7 @@ test conditions:
   - name: day
     duration: 12 h
     irradiance: 1000 W/m^2
+    light_source: {type: LED, solar_simulator: true}
     temperature: 45 °C
     electrical_load: mpp
   - name: night

@@ -1,8 +1,6 @@
 import re
 from math import inf
 
-import numpy as np
-from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.basesections.v2 import ActivityStep, Measurement
 from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
 from nomad.metainfo import (
@@ -19,6 +17,7 @@ from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
     characterization_instructions,
     hold_below_instructions,
     hold_instructions,
+    light_sources,
     mpp_instructions,
     ramp_instructions,
 )
@@ -27,6 +26,7 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     TimePlan,
     titled_for_plotting,
 )
+from nomad_pv_stability_measurements.schema_packages.light_sources import GeoLocation
 from nomad_pv_stability_measurements.schema_packages.plan_timeline import (
     figure_for_plotting,
 )
@@ -35,43 +35,6 @@ m_package = SchemaPackage()
 
 #: An ISOS designation, its level the last digit: `ISOS-L-3`, `ISOS-LC-3I` (§20.7).
 _ISOS_DESIGNATION = re.compile(r'^ISOS-[A-Z]+-(?P<level>[1-3])I?$')
-
-
-class GeoLocation(ArchiveSection):
-    """Where on Earth a test ran, as coordinates.
-
-    The place's *name* is deliberately not here: it goes in the protocol's own
-    `location`, as `Denver, U.S.`, and stays searchable as text.
-    """
-
-    latitude = Quantity(
-        type=np.float64,
-        unit='degree',
-        description='Degrees north of the equator; negative is south.',
-    )
-    longitude = Quantity(
-        type=np.float64,
-        unit='degree',
-        description='Degrees east of Greenwich; negative is west.',
-    )
-    altitude = Quantity(
-        type=np.float64,
-        unit='m',
-        description='Height above sea level; negative is below it. It sets the air '
-        'mass, and so the spectrum an outdoor test actually sees. ',
-    )
-
-    def normalize(self, archive, logger):
-        super().normalize(archive, logger)
-        # Reported, never repaired (D13a). The usual mistake is the pair the wrong way
-        # round, which a latitude past ±90° is what catches.
-        for field, limit in (('latitude', 90), ('longitude', 180)):
-            value = getattr(self, field)
-            if value is not None and abs(value.to('degree').magnitude) > limit:
-                logger.error(
-                    f'`{field}` is {value.to("degree").magnitude:g}°, outside '
-                    f'±{limit}°: are latitude and longitude the wrong way round?'
-                )
 
 
 class StabilityProtocol(PlotSection, TimePlan):

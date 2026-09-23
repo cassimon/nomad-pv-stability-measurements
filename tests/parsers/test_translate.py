@@ -36,6 +36,12 @@ from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldTemperature,
     HoldVoltage,
 )
+from nomad_pv_stability_measurements.schema_packages.light_sources import (
+    ArtificialLightSource,
+    LightSource,
+    NaturalLightSource,
+    XenonLamp,
+)
 from nomad_pv_stability_measurements.schema_packages.mpp_instructions import (
     MPPTracking,
     VOCTracking,
@@ -262,6 +268,39 @@ def test_the_shape_of_what_is_specified_chooses_the_kind(authored, expected):
 )
 def test_humidity_is_relative_or_absolute(authored, expected):
     assert only(instructions(authored)) == expected
+
+
+# Where the light comes from.
+
+
+@pytest.mark.parametrize(
+    ('written', 'expected'),
+    [
+        ('sunlight', entry(NaturalLightSource)),
+        ('solar simulator', entry(ArtificialLightSource, solar_simulator=True)),
+        (
+            {'type': 'xenon lamp', 'solar_simulator': True, 'uv_filter': True},
+            entry(XenonLamp, solar_simulator=True, uv_filter=True),
+        ),
+        # A source of a kind not stated.
+        ({'spectrum': 'AM1.5G'}, entry(LightSource, spectrum='AM1.5G')),
+        # A bare archive's source, as itself.
+        (entry(XenonLamp, uv_filter=True), entry(XenonLamp, uv_filter=True)),
+    ],
+)
+def test_a_light_source_is_a_word_or_a_section_of_its_type(written, expected):
+    light = only(instructions({'channel': 'irradiation', 'light_source': written}))
+
+    assert light['light_source'] == expected
+
+
+def test_a_light_source_not_known_is_reported_and_the_light_stays():
+    translation = instructions({'channel': 'irradiation', 'light_source': 'candle'})
+
+    [problem] = translation.problems
+    assert problem.path == 'instructions[0].light_source'
+    assert 'sunlight' in problem.message
+    assert read_as(translation) == [entry(HoldIrradiance)]
 
 
 # Blocks and repetition (§23).
@@ -574,6 +613,7 @@ def test_jv_scans_are_written_with_their_settings_in_words_or_by_field():
                                 'to': '1.2 V',
                                 'scan_rate': '100 mV/s',
                                 'order': 'reverse then forward',
+                                'light_source': 'solar simulator',
                             },
                             'duration': '1 h',
                         }
@@ -586,7 +626,21 @@ def test_jv_scans_are_written_with_their_settings_in_words_or_by_field():
     [scans] = translation.archive['data']['instructions'][0]['sub_instructions']
     assert translation.problems == []
     assert scans['m_def'] == m_def(JVScan)
-    assert (scans['interval'], scans['voltage_stop'], scans['scan_rate']) == approx(
-        (600.0, 1.2, 0.1)
-    )
+    assert scans['interval'] == {'kind': 'fixed', 'value': approx(600.0)}
+    assert (scans['voltage_stop'], scans['scan_rate']) == approx((1.2, 0.1))
     assert scans['scan_order'] == 'reverse then forward'
+    assert scans['light_source'] == entry(ArtificialLightSource, solar_simulator=True)
+
+
+@pytest.mark.parametrize(
+    ('every', 'interval'),
+    [
+        ('10 min', {'kind': 'fixed', 'value': 600.0}),
+        ('typical 1 h', {'kind': 'typical', 'value': 3600.0}),
+        ('not stated', {'kind': 'not_stated'}),
+    ],
+)
+def test_how_often_jv_scans_repeat_is_written_like_a_duration(every, interval):
+    scans = only(instructions({'jv_scan': {'every': every}}))
+
+    assert scans['interval'] == interval

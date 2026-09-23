@@ -5,31 +5,52 @@ data:
   notes: >-
     An outdoor day emulated in a climate chamber, not a standard: for five days, the
     light rises, peaks and sets while the temperature follows it, both as ramps, in
-    two sequences run side by side. Shows a timed repetition of a parallel block of
+    two sequences run side by side. The light is an LED solar simulator, dimmed along
+    the ramps. The cell's J–V curve is measured before and after, at one sun under a
+    class AAA xenon solar simulator. Shows a timed repetition of a parallel block of
     sequences.
   channel_settings:
     atmosphere:
-      - {variable: relative_humidity, specify: 60 %, control: true, monitor: true}
       - {variable: oxygen, specify: ambient}
-    electrical_load: {specify: mpp, control: true, monitor: true}
   routine:
-    name: five days
-    repeat_for: 120 h
+    name: measured, aged, measured
+    repeat: 1
     instructions:
-      - name: one day
+      - name: initial J–V
+        jv_scan: &jv
+          order: reverse then forward
+          irradiance: 1000 W/m^2
+          light_source: {type: xenon lamp, solar_simulator: true, simulator_classification: AAA, spectrum: AM1.5G}
+        duration: typical 2 min
+      - name: emulated days
         repeat: 1
         mode: parallel
         instructions:
-          - name: sun
-            repeat: 1
+          - {channel: atmosphere, variable: relative_humidity, specify: 60 %, control: true, monitor: true, duration: whole block}
+          - {channel: electrical_load, specify: mpp, control: true, monitor: true, duration: whole block}
+          - name: five days
+            repeat_for: 120 h
             instructions:
-              - {channel: irradiation, specify: dark, duration: 6 h}
-              - {channel: irradiation, specify: {from: 0 W/m^2, to: 1000 W/m^2}, control: true, monitor: true, duration: 5 h}
-              - {channel: irradiation, specify: 1000 W/m^2, control: true, monitor: true, duration: 2 h}
-              - {channel: irradiation, specify: {from: 1000 W/m^2, to: 0 W/m^2}, control: true, monitor: true, duration: 5 h}
-              - {channel: irradiation, specify: dark, duration: 6 h}
-          - name: air
-            repeat: 1
-            instructions:
-              - {channel: temperature, specify: {from: 15 °C, to: 45 °C}, control: true, monitor: true, duration: 14 h}
-              - {channel: temperature, specify: {from: 45 °C, to: 15 °C}, control: true, monitor: true, duration: 10 h}
+              - name: one day
+                repeat: 1
+                mode: parallel
+                instructions:
+                  - name: sun
+                    repeat: 1
+                    instructions:
+                      - {channel: irradiation, specify: dark, duration: 6 h}
+                      - channel: irradiation
+                        specify: {from: 0 W/m^2, to: 1000 W/m^2}
+                        control: true
+                        monitor: true
+                        light_source: &lamp {type: LED, solar_simulator: true}
+                        duration: 5 h
+                      - {channel: irradiation, specify: 1000 W/m^2, control: true, monitor: true, light_source: *lamp, duration: 2 h}
+                      - {channel: irradiation, specify: {from: 1000 W/m^2, to: 0 W/m^2}, control: true, monitor: true, light_source: *lamp, duration: 5 h}
+                      - {channel: irradiation, specify: dark, duration: 6 h}
+                  - name: air
+                    repeat: 1
+                    instructions:
+                      - {channel: temperature, specify: {from: 15 °C, to: 45 °C}, control: true, monitor: true, duration: 14 h}
+                      - {channel: temperature, specify: {from: 45 °C, to: 15 °C}, control: true, monitor: true, duration: 10 h}
+      - {name: final J–V, jv_scan: *jv, duration: typical 2 min}

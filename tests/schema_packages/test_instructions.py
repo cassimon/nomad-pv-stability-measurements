@@ -14,7 +14,7 @@ from nomad_pv_stability_measurements.schema_packages.base_instructions import (
 from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
     JVScan,
 )
-from nomad_pv_stability_measurements.schema_packages.general import Duration
+from nomad_pv_stability_measurements.schema_packages.general import Duration, Period
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBelowRelativeHumidity,
     HoldBetweenIrradiance,
@@ -463,7 +463,8 @@ def test_control_regulates_what_is_set_and_monitor_logs_what_follows(
 
 
 def test_jv_scans_are_listed_by_how_often_and_drawn_on_their_own_row(normalized, log):
-    scans = normalized(JVScan(duration=fixed(1 * ureg.hour), interval=10 * ureg.minute))
+    every = Period(kind='fixed', value=10 * ureg.minute)
+    scans = normalized(JVScan(duration=fixed(1 * ureg.hour), interval=every))
 
     [piece] = scans.time_series_for_plotting(0, 7200).pieces
     assert scans.label == 'J–V scan every 10 min'
@@ -471,8 +472,41 @@ def test_jv_scans_are_listed_by_how_often_and_drawn_on_their_own_row(normalized,
     assert log.errors == []
 
 
-def test_jv_scans_follow_one_another_after_a_positive_interval(normalized, log):
-    normalized(JVScan(duration=fixed(1 * ureg.hour), interval=0 * ureg.minute))
+@pytest.mark.parametrize(
+    ('interval', 'label'),
+    [
+        (None, 'J–V scan'),
+        (Period(kind='typical', value=1 * ureg.hour), 'J–V scan every ≈ 1 h'),
+        # "a periodicity that depends on the characteristic degradation timescale of
+        # each given device" (Khenkin et al. 2020, p.43)
+        (Period(kind='not_stated'), 'J–V scan periodically'),
+    ],
+)
+def test_jv_scans_say_how_their_interval_is_known(normalized, interval, label):
+    scans = normalized(JVScan(duration=fixed(1 * ureg.hour), interval=interval))
+
+    assert scans.label == label
+
+
+def test_one_scan_is_drawn_as_one_scan_at_the_start_and_says_so():
+    once = JVScan(duration=Duration(kind='whole_block'))
+
+    [piece] = once.time_series_for_plotting(0, 7200).pieces
+    assert (piece.start, piece.end, piece.endless) == (0, 120, False)
+    assert 'length not stated' in piece.typical
+
+
+@pytest.mark.parametrize(
+    ('interval', 'reported'),
+    [
+        (Period(kind='fixed', value=0 * ureg.minute), 'must be positive'),
+        (Period(kind='typical'), 'but no value'),
+        (Period(kind='not_stated', value=1 * ureg.hour), 'takes no value'),
+    ],
+)
+def test_an_interval_s_value_suits_its_kind(normalized, log, interval, reported):
+    normalized(JVScan(duration=fixed(1 * ureg.hour), interval=interval))
 
     [message] = log.errors
-    assert 'must be positive' in message
+    assert '`interval`' in message
+    assert reported in message

@@ -17,7 +17,8 @@ test conditions:
   name: Day and night at 45 °C
   repeat: 7
   phases:
-  - {name: day, duration: 12 h, irradiance: 1000 W/m^2, temperature: 45 °C, electrical_load: mpp}
+  - {name: day, duration: 12 h, irradiance: 1000 W/m^2, light_source: {type: LED, solar_simulator: true},
+     temperature: 45 °C, electrical_load: mpp}
   - {name: night, duration: 12 h, irradiance: dark, temperature: 45 °C, electrical_load: open_circuit}
 ```
 
