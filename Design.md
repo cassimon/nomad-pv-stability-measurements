@@ -4304,3 +4304,122 @@ quantity for is reported.
 | protocol | `JVScan` (`characterization_instructions.py`), a periodic J–V characterization (amends §20.8): the scan's settings, the light it is measured under, and `interval`, one instruction lasting its block and scanning every `interval`. Preferred over a repeating block of scan and pause: it is what standards and labs write, it needs no `Pause` instruction, and it needs no scan duration, which a protocol rarely knows. Authored as `jv_scan: {every: 10 min, from: -0.1 V, to: 1.2 V, step: 20 mV, rate: 200 mV/s, order: forward then reverse}` (each field also by its own name); a phase of `protocol_from_phases` takes the same `jv_scan`. Drawn as a bar in its own row, `J–V scan`, under the electrical load, labelled `J–V scan every 33 s`, in the colour of the monitored: it measures the cell and regulates nothing. Not drawn as one tick per scan: a 1000 h test every 10 min would be 6000 shapes. |
 | `StabilityActivity` | `sub_activities`, references to other stability activities (§37.2) |
 | `sample.py` | `SolarCellSample(System)`, the placeholder sample (§37.2) |
+
+## 38. Stated, controlled, monitored — `specify`; light sources; periods
+
+**Status: steps A and B built** (474 tests, ruff clean; all 117 ISOS variants compared
+whole). Steps C and D are planned, in order, each reviewed before the next. Amends §15.2 (a written value no longer
+sets `control`), §17.4 (`set_point` → `value`), §26 (monitoring), §29 (roles), §34.10 (open
+circuit) and §36.3.
+
+### 38.1 Why
+
+Every word that stated a value (`hold`, `hold_below`, `hold_between`, `ramp`) also switched on
+`control`, so an ambient condition had to be written `hold: RT, control: false`: a hold that is
+not held. And §26 logged every controlled quantity, reading p.43's "*even if* a parameter is not
+controlled … monitor and report" as implying that controlled ones are monitored too. The text
+states it only for the uncontrolled, and Table 3 asks for "RH (controlled or monitored)": one or
+the other. A hot plate set to 65 °C is controlled and stated but need not be logged. So what the
+protocol **states**, whether something **regulates** it, and whether it is **logged** are three
+independent things, none implied by another.
+
+### 38.2 Step A — built
+
+- **Authoring.** `specify:` is the one word that states a value, and its shape chooses the kind:
+  a value (`65 °C`, a named value `RT`/`dark`, a tracked point `mpp`/`open_circuit`, a device
+  point `V_MPP`, which lands in `reference_point`, or a relative humidity's `{rh, at}`),
+  `{below: …}`, `{lower: …, upper: …}` or `{from: …, to: …, rate: …}`. `tolerance` replaces
+  `hold_tolerance`. `control` and `monitor` are **never defaulted**: each is what the file
+  writes. `hold`, `hold_below`, `hold_between`, `ramp`, `hold_tolerance`, and a value under the
+  variable's or point's own key (`voltage: 0.8 V`, `mpp: true`) are refused with the spelling
+  that replaces them, and the instruction is left out. `variable:` alone names the variable.
+- **Schema.** No flag for "stated": a value, bounds, ends or a point *is* the statement
+  (`states_a_value()`). `set_point` → `value`, `set_point_tolerance` → `tolerance`; no alias,
+  so `tests/data/channels.setpoint.archive.yaml` is gone. The `Hold…` class names stay for now.
+- **Roles (amends §29).** The strongest of what is asked: `controlled`, else `monitored`, else
+  `specified` where a value is stated, else `unspecified`. Controlled to a value left open is
+  still controlled. The overrides for dark and open circuit are gone: they are specified
+  because nothing regulates them. Room temperature, monitored, is now green.
+- **`describe()`.** `Hold …`/`Ramp …` only where controlled, `Monitor …` where only logged, the
+  bare quantity where only stated: `Temperature 23 °C`, `Irradiance 0 W/m²`.
+- **Open circuit is specified, not controlled** (amends §34.10): "disconnected" (p.40). A run
+  still says what it controlled; only a protocol's open circuit changes. `protocol_from_phases`
+  controls every value but `dark`, `open_circuit`/`voc` and `RT`.
+- **The ISOS files (amends §26)** log what the paper asks to be logged: ambient temperature and
+  humidity, the outdoor weather, ISOS-LT's humidity, ISOS-T-3's (uncontrolled below 40 °C) and
+  MPP tracking. Controlled temperatures and humidities, the thermal cycles and the solar
+  simulator are controlled and not logged. OPEN_QUESTIONS.md #12 records the reading.
+- **Not regenerated:** the simulated runs. `simulate_runs.monitored()` writes only monitored
+  columns, so regenerating would drop temperature and irradiance from runs that control them;
+  making the simulator record controlled quantities too is a later task.
+
+### 38.3 Step B — values `specify` can now state — built
+
+- ISOS-T-3: `specify: {below: 55 %}` on the humidity, monitored, not controlled.
+- ISOS-LT-2/-3: `specify: 50 %` on the humidity, monitored, not controlled; "beyond 40 °C" stays
+  in `notes` (OPEN_QUESTIONS.md #5).
+- The oxygen: `specify: ambient`, a `reference_point` of `HoldOxygenFraction` (an `MEnum`
+  of `ambient` alone), specified only. No number: people, flames and processes in a
+  laboratory consume oxygen, so ambient air need not hold the 20.95 % of dry air (a named
+  value of that figure was built and taken back in review). `reference_point` now means where
+  the value is taken from, where the protocol names it instead of giving a number: the
+  device's own characteristic (`V_MPP`) or the surroundings (`ambient`). The timeline writes
+  `ambient`. The counterpart the ISOS-I protocols will need.
+- The ISOS README and OPEN_QUESTIONS.md #5 say how a humidity controlled only above 40 °C is
+  written.
+
+### 38.4 Step C — light sources
+
+```
+LightSource                      spectrum (a name for now, data later), model, calibration
+├─ NaturalLightSource            geo_location (GeoLocation), exposure_start / exposure_end,
+│                                orientation of the device: tilt (its angle to the
+│                                horizon), azimuth (the compass direction it faces) and
+│                                mounting (fixed, or tracking the sun on one or two axes,
+│                                where the angles vary); with the place and time, these
+│                                give the angle of incidence of the sun at every moment
+└─ ArtificialLightSource         solar_simulator (bool), simulator_standard (IEC 60904-9,
+   │                             ASTM E927, JIS C 8912, …), simulator_classification (AAA, …)
+   ├─ LED                        colour temperature
+   ├─ XenonLamp                  uv_filter
+   ├─ MetalHalideLamp            uv_filter
+   └─ SulfurPlasmaLamp
+```
+
+- "Solar simulator" is a property, not a class: any lamp can be built into one. Table 1's "Solar
+  simulator" is the base `ArtificialLightSource` with `solar_simulator: true`.
+- `uv_filter` only where the lamp emits UV: "Metal halide and xenon arc lamps have UV light in
+  their spectra, so any filtering used must be reported"; for sulfur plasma and white LEDs a "no
+  UV filter" would be "misleading" (p.43).
+- Outdoors, Table 3 asks for "Place or coordinates; dates and total amount of hours of
+  exposure"; the orientation of the device decides what it receives. Tilt and azimuth of a
+  fixed device, with its coordinates and the time, fix the sun's angle of incidence; the sun's
+  own position is derived, never stated. A tracker's angles follow the sun, so it states its
+  axes instead. `GeoLocation` becomes
+  shared; the protocol **keeps** its own `geo_location`, since a standardized test may be tied
+  to a site.
+- A `light_source` subsection on the irradiance instructions (the stress light) and on `JVScan`
+  (step D). Dark has none. `HoldIrradiance.spectrum` moves into `LightSource`.
+- ISOS-L, -LC, -LT: an `ArtificialLightSource` with `solar_simulator: true`; ISOS-O: a
+  `NaturalLightSource` with nothing stated, for the lab to fill in.
+
+### 38.5 Step D — periods with a kind, and the characterization light
+
+- `Duration`'s `fixed`/`typical` become a shared base; `Period` takes `fixed`, `typical` and a
+  kind for "periodic, the interval left to the lab" (the paper: a periodicity that "depends on
+  the characteristic degradation timescale of each given device", p.43), since a `typical`
+  value there would be one the standard does not state. `JVScan.interval` becomes a `Period`,
+  written like a duration: `jv_scan: {every: typical 24 h}`.
+- `JVScan.light_source`: the characterization light, apart from the ageing light. The ISOS files
+  then write Table 1's "Characterization light source": ISOS-D-1 "Solar simulator or sunlight"
+  (2 variants, 117 → 118), ISOS-O-1 a simulator, -O-2 sunlight (so the two differ at last,
+  OPEN_QUESTIONS.md #11), -O-3 a simulator; ISOS-V's fresh-device scan at one sun AM1.5G
+  (p.39), from which its reference points come.
+
+### 38.6 Later
+
+The simulator records controlled quantities too; the temperature sensor's type and position
+("In shadow and/or under illumination", Table 3), which also tells an ambient from a device
+temperature in ISOS-L-1 and the light of ISOS-LC-1; wind speed for ISOS-O; ISOS-V's recovery
+in the dark "until it reaches saturation" (p.40); equipment classes (oven, hot plate,
+chambers); renaming the `Hold…` classes.

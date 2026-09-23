@@ -16,6 +16,9 @@ from nomad_pv_stability_measurements.parsers.units import split_match_convert
 
 _HEADER_WITH_UNIT = re.compile(r'(?P<name>[^()]+?)\s*\((?P<unit>[^()]+)\)')
 
+#: The words for values a phase states without anything regulating them.
+UNREGULATED = ('dark', 'open_circuit', 'voc', 'RT')
+
 #: Each quantity a phase can set, by its name in a `StabilitySeriesStep` where it has
 #: one, and how a protocol file writes it.
 SET_POINTS = {
@@ -185,7 +188,8 @@ def protocol_from_phases(
     A phase's `jv_scan` are the J–V scans taken during it, as a protocol file writes
     them: `{'every': '10 min', 'from': '-0.1 V', 'to': '1.2 V'}`.
 
-    Every quantity held is also monitored, except the light in the dark. `fields` are
+    Every value is controlled, except darkness, open circuit and room temperature, which
+    are only stated. Every quantity is also monitored, except the light in the dark. `fields` are
     further fields of the protocol, as `notes='...'` or `standard='ISOS-D-3'`.
 
     `assumed` are an institution's standard conditions, its `ASSUMED_CONDITIONS`: each
@@ -241,7 +245,11 @@ def _phase(phase: dict, unmonitored: set[str] = frozenset()) -> dict:
         raise ValueError(f'the phase `{phase.get("name")}` states no duration.')
     instructions = []
     for quantity, value in held.items():
-        instruction = {**SET_POINTS[quantity], 'hold': value}
+        instruction = {**SET_POINTS[quantity], 'specify': value}
+        # Conditions a run file names rather than sets — darkness, a disconnected cell,
+        # the room — are stated; every other value was set.
+        if value not in UNREGULATED:
+            instruction['control'] = True
         if value != 'dark' and quantity not in unmonitored:
             instruction['monitor'] = True
         # The first sets how long the phase lasts; the others last as long.

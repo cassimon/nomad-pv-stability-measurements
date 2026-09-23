@@ -89,11 +89,11 @@ def test_breaks_cut_the_axis_into_sections_at_their_true_times():
 
 def test_a_protocol_shows_its_timeline(normalized):
     light = HoldIrradiance(
-        set_point=SUN * ureg('W/m^2'),
+        value=SUN * ureg('W/m^2'),
         duration=Duration(kind='fixed', value=1 * ureg.hour),
     )
     dark = HoldIrradiance(
-        set_point=0 * ureg('W/m^2'),
+        value=0 * ureg('W/m^2'),
         duration=Duration(kind='fixed', value=1 * ureg.hour),
     )
     protocol = normalized(
@@ -162,10 +162,10 @@ def test_bounds_are_a_band_and_a_protocol_without_end_goes_on(normalized):
     assert '<b>⋯</b>' in texts
 
 
-def test_a_set_point_is_drawn_with_its_tolerance_around_it(normalized):
+def test_a_value_is_drawn_with_its_tolerance_around_it(normalized):
     room = HoldTemperature(
-        set_point=296.15 * ureg.kelvin,
-        set_point_tolerance=4 * K,
+        value=296.15 * ureg.kelvin,
+        tolerance=4 * K,
         duration=whole_block(),
     )
     protocol = normalized(StabilityProtocol(instructions=[room]))
@@ -211,7 +211,7 @@ def test_a_typical_length_is_drawn_as_its_length_and_said_in_red_and_in_the_titl
     normalized, kind, about, said
 ):
     light = HoldIrradiance(
-        set_point=SUN * ureg('W/m^2'), duration=Duration(kind=kind, value=1 * ureg.hour)
+        value=SUN * ureg('W/m^2'), duration=Duration(kind=kind, value=1 * ureg.hour)
     )
     routine = CountingRepeatingBlock(repeat_n=2, sub_instructions=[light])
     protocol = normalized(StabilityProtocol(name='soak', instructions=[routine]))
@@ -248,13 +248,15 @@ def test_every_piece_tells_all_of_itself_where_hovered_even_if_too_narrow_to_wri
     normalized,
 ):
     brief = HoldCurrent(
-        set_point=0.02 * ureg.ampere,
+        value=0.02 * ureg.ampere,
+        control=True,
         duration=Duration(kind='fixed', value=1 * ureg.minute),
     )
     protocol = normalized(
         one_after_another(
             HoldVoltage(
-                set_point=0.8 * ureg.volt,
+                value=0.8 * ureg.volt,
+                control=True,
                 duration=Duration(kind='fixed', value=1000 * ureg.hour),
             ),
             brief,
@@ -273,7 +275,7 @@ def test_the_electrical_load_is_one_row_whichever_quantity_is_set(normalized):
     protocol = normalized(
         one_after_another(
             VOCTracking(duration=one_hour()),
-            HoldVoltage(set_point=0.8 * ureg.volt, duration=one_hour()),
+            HoldVoltage(value=0.8 * ureg.volt, duration=one_hour()),
         )
     )
     layout = protocol.figures[0].figure['layout']
@@ -286,8 +288,8 @@ def test_values_in_different_units_on_one_row_are_written_not_drawn(normalized):
     protocol = normalized(
         one_after_another(
             VOCTracking(duration=one_hour()),
-            HoldVoltage(set_point=0.8 * ureg.volt, duration=one_hour()),
-            HoldCurrent(set_point=0.02 * ureg.ampere, duration=one_hour()),
+            HoldVoltage(value=0.8 * ureg.volt, control=True, duration=one_hour()),
+            HoldCurrent(value=0.02 * ureg.ampere, control=True, duration=one_hour()),
         )
     )
     figure = protocol.figures[0].figure
@@ -305,7 +307,9 @@ def test_values_in_different_units_on_one_row_are_written_not_drawn(normalized):
 def test_what_follows_the_load_is_monitored_on_a_thin_row_under_it(normalized):
     protocol = normalized(
         one_after_another(
-            HoldVoltage(set_point=0.8 * ureg.volt, monitor=True, duration=one_hour()),
+            HoldVoltage(
+                value=0.8 * ureg.volt, control=True, monitor=True, duration=one_hour()
+            ),
             VOCTracking(duration=one_hour()),
         )
     )

@@ -1,7 +1,8 @@
 """The words an authored file uses for instructions (Design.md §15.2).
 
-None of them reaches the archive: a `channel:` and a variable's key choose the instruction's
-class, `hold` becomes its `set_point`, and a named word becomes the value it stands for.
+None of them reaches the archive: a `channel:` and a `variable:` choose the instruction's
+class, `specify` becomes its `value`, bounds or ends, and a named word becomes the value it
+stands for.
 """
 
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
@@ -62,7 +63,7 @@ VARIABLE_INSTRUCTIONS = {
     'balance_gas': BalanceGas,
 }
 
-#: Where a written value lands for a class that does not keep it in `set_point`. The
+#: Where a written value lands for a class that does not keep it in `value`. The
 #: balance is a gas's name, not a number, so it has a field of its own (§15.15).
 VALUE_FIELDS = {BalanceGas: 'gas'}
 
@@ -115,7 +116,7 @@ CHANNEL_VARIABLES = {
     ),
 }
 
-#: Words a set point reads as a value, per instruction class. Never global: `dark` is an
+#: Words `specify` reads as a value, per instruction class. Never global: `dark` is an
 #: irradiance and means nothing on the temperature axis, or in a duration (D8a).
 NAMED_VALUES = {
     'irradiance': {'dark': Dark},
@@ -149,8 +150,17 @@ JV_SCAN_FIELDS = {
 
 #: Words the schema has no place for any more (§15), and why.
 RETIRED_WORDS = {
-    'humidity': 'humidity is two variables — write `relative_humidity: 85 %`, or the '
-    'water as a volume ratio, `absolute_humidity: 500 ppm` (§20.6)',
+    'humidity': 'humidity is two variables — write `variable: relative_humidity, specify: '
+    '85 %`, or the water as a volume ratio, `variable: absolute_humidity, specify: '
+    '500 ppm`',
+    # Every word that stated a value also claimed it was regulated. `specify` states it,
+    # and `control` alone says whether it is regulated.
+    'hold': 'write `specify:` for the value, and `control: true` where it is regulated',
+    'hold_below': 'write `specify: {below: …}`, and `control: true` where it is regulated',
+    'hold_between': 'write `specify: {lower: …, upper: …}`, and `control: true` where it '
+    'is regulated',
+    'ramp': 'write `specify: {from: …, to: …}`, and `control: true` where it is regulated',
+    'hold_tolerance': 'write `tolerance`',
 }
 
 _CHANNEL_COMMANDS = 'nomad_pv_stability_measurements.schema_packages.channel_commands'

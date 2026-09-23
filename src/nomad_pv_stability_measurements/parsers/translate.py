@@ -2,7 +2,7 @@
 
 Works on plain dicts and never builds a section. From the schema it reads definitions
 only: the class an entry names and each quantity's declared unit. The authoring words it
-knows (`channel`, `hold`, `dark`, ...) are listed in `channels.py`. What it cannot read
+knows (`channel`, `specify`, `dark`, ...) are listed in `channels.py`. What it cannot read
 becomes a `Problem`, never an exception, so one typo does not stop the rest of the file
 from loading (§7).
 """
@@ -63,11 +63,7 @@ from nomad_pv_stability_measurements.schema_packages.protocol import StabilityPr
 AUTHORING_WORDS = (
     'channel',
     'variable',
-    'hold',
-    'hold_tolerance',
-    'hold_below',
-    'hold_between',
-    'ramp',
+    'specify',
     'duration',
     'instructions',
     'mode',
@@ -82,9 +78,6 @@ PROTOCOL_WORDS = ('channel_settings', 'routine', 'duration')
 RENAMED = {
     'mode': 'sub_instruction_execution_mode',
     'repeat_for': 'repeat_duration',
-    # A field renamed in the schema itself: every bare archive written before §17.4 still
-    # spells it `setpoint`, and still loads (§13.1a).
-    'setpoint': 'set_point',
 }
 #: What `repeat:` says when it is no number of times (§23).
 REPEAT_INDEFINITELY = 'indefinitely'
@@ -116,12 +109,19 @@ VARIABLE_KEYS = (
 )
 
 #: The fields a named value such as `dark` or `RT` may be written into (D8a, §17.3).
-NAMED_FIELDS = ('set_point', 'start_point', 'end_point', 'upper_bound', 'lower_bound')
+NAMED_FIELDS = ('value', 'start_point', 'end_point', 'upper_bound', 'lower_bound')
 
-#: What a `ramp:` writes, and the field each becomes (§15.14).
+#: What a ramp's `specify: {from, to, rate}` writes, and the field each becomes.
 RAMP_FIELDS = {'from': 'start_point', 'to': 'end_point', 'rate': 'ramp_rate'}
-#: What a `hold_between:` writes, and the field each becomes (§22).
+#: What a range's `specify: {lower, upper}` writes, and the field each becomes.
 BETWEEN_FIELDS = {'lower': 'lower_bound', 'upper': 'upper_bound'}
+#: What a bound's `specify: {below: 55 %}` writes.
+BELOW_WORD = 'below'
+#: Every shape a `specify:` may take, for the messages.
+SPECIFY_SHAPES = (
+    'a value (`65 °C`, `RT`, `mpp`), `{below: 55 %}`, `{lower: …, upper: …}` or '
+    '`{from: …, to: …}`'
+)
 
 #: A relative humidity may be written the way it is usually read, `85 %RH` (§20.6).
 _RELATIVE_HUMIDITY_UNIT = re.compile(r'%\s*rh$', re.IGNORECASE)
@@ -456,32 +456,40 @@ class _Words:
     channel: str | None
     #: `variable: voltage`
     named: str | None
-    #: `hold: 0.8 V`; `None` when not written or blank
-    hold: object
-    #: A variable as its own key: `voltage: 0.8 V`
+    #: `specify: 0.8 V`, a named value or a relative humidity's `{rh, at}`; `None` when
+    #: not written or blank
+    value: object
+    #: A value written the way the file no longer writes one, under the variable's or
+    #: the point's own key: `voltage: 0.8 V`, `mpp: true`
     keys: dict
     #: (where, word) for each word the schema has no place for any more
     retired: list
-    #: (where, word, value) for each word naming a point the cell decides (§15.13)
+    #: (where, word) for a `specify:` naming a point the cell decides
     tracked: list
-    #: `ramp: {from: …, to: …, rate: …}`, which picks the ramping kind (§15.14)
+    #: `specify: {from: …, to: …, rate: …}`, which picks the ramping kind
     ramp: object
-    #: `hold_tolerance: 2 K`; `None` when not written (§17.4)
+    #: `tolerance: 2 K`; `None` when not written
     tolerance: object = None
-    #: `hold_below: 55 %`, which picks the bounded kind (§17.5); `None` when not written
+    #: `specify: {below: 55 %}`'s bound, which picks the bounded kind
     below: object = None
-    #: `hold_between: {lower: …, upper: …}`, which picks the range kind (§22)
+    #: `specify: {lower: …, upper: …}`, which picks the range kind
     between: object = None
 
     @classmethod
     def take(cls, authored: dict, path: str) -> '_Words':
-        hold = authored.pop('hold', None)
-        if isinstance(hold, str) and not hold.strip():
-            hold = None  # blank text asks nothing, like never writing the key (D8)
-        ramp = authored.pop('ramp', None)
-        tolerance = authored.pop('hold_tolerance', None)
-        below = authored.pop('hold_below', None)
-        between = authored.pop('hold_between', None)
+        value = authored.pop('specify', None)
+        if isinstance(value, str) and not value.strip():
+            value = None  # blank text asks nothing, like never writing the key (D8)
+        ramp = below = between = None
+        if isinstance(value, dict) and value:
+            shape = set(value)
+            if shape <= set(RAMP_FIELDS):
+                ramp, value = value, None
+            elif shape == {BELOW_WORD}:
+                below, value = value[BELOW_WORD], None
+            elif shape <= set(BETWEEN_FIELDS):
+                between, value = value, None
+        tolerance = authored.pop('tolerance', None)
         for old, new in VARIABLE_ALIASES.items():  # a key's former spelling (§20.6)
             if old in authored:
                 authored.setdefault(new, authored.pop(old))
@@ -490,17 +498,13 @@ class _Words:
         retired = [(_at(path, key), key) for key in authored if key in RETIRED_WORDS]
         for _, key in retired:
             authored.pop(key)
-        if isinstance(hold, str) and hold.strip() in RETIRED_WORDS:
-            retired.append((_at(path, 'hold'), hold.strip()))
-            hold = None
-        tracked = [
-            (_at(path, key), key, authored.pop(key))
-            for key in list(authored)
-            if key in TRACKED_POINTS
-        ]
-        if isinstance(hold, str) and hold.strip() in TRACKED_POINTS:
-            tracked.append((_at(path, 'hold'), hold.strip(), True))
-            hold = None
+        if isinstance(value, str) and value.strip() in RETIRED_WORDS:
+            retired.append((_at(path, 'specify'), value.strip()))
+            value = None
+        tracked = []
+        if isinstance(value, str) and value.strip() in TRACKED_POINTS:
+            tracked.append((_at(path, 'specify'), value.strip()))
+            value = None
         variable = authored.get('variable')
         if isinstance(variable, str) and variable.strip() in RETIRED_WORDS:
             retired.append((_at(path, 'variable'), variable.strip()))
@@ -509,11 +513,11 @@ class _Words:
         return cls(
             channel=authored.pop('channel', None),
             named=authored.pop('variable') if isinstance(variable, str) else None,
-            hold=hold,
+            value=value,
             keys={
                 key: authored.pop(key)
                 for key in list(authored)
-                if key in VARIABLE_INSTRUCTIONS
+                if key in VARIABLE_INSTRUCTIONS or key in TRACKED_POINTS
             },
             retired=retired,
             tracked=tracked,
@@ -526,19 +530,12 @@ class _Words:
 
 def _monitor_control(authored: dict, cls: type | None, path: str, problems: list):
     """A monitor/control entry as the instructions the schema stores (§15.2): the class its
-    `m_def`, `channel` or variable names, and `hold` or the variable's key as the
-    `set_point`, which also sets `control`."""
+    `m_def`, `channel` or `variable` names, and what `specify` states as its value,
+    bounds, ends or point. Stating a value claims nothing about regulating or logging
+    it: `control` and `monitor` say that, and are only ever what the file writes."""
     authored = dict(authored)
     words = _Words.take(authored, path)
-    for where, word in words.retired:
-        problems.append(
-            Problem(
-                where,
-                f'`{word}` is not part of the schema any more (§15): '
-                f'{RETIRED_WORDS[word]}. The instruction is left out.',
-            )
-        )
-    if words.retired:
+    if _refused(words, path, problems):
         return []
     if words.tracked:
         return _tracked_instructions(words, authored, path, problems)
@@ -552,55 +549,76 @@ def _monitor_control(authored: dict, cls: type | None, path: str, problems: list
         if read is None:
             return []
         bare.update(read)
-        bare.setdefault('control', True)
-    # A class naming a point or a gas has no `set_point` to fill, and reaches here when a
+    # A class naming a point or a gas has no `value` to fill, and reaches here when a
     # bare archive names it in `m_def` and is read back (§13.1a, §15.13).
     elif (
         len(classes) == 1
         and _value_field(classes[0]) in classes[0].m_def.all_quantities
     ):
-        written = _set_point(words, classes[0], path, problems)
-        if written is not None:
-            bare[_value_field(classes[0])] = written
-            bare.setdefault('control', True)
+        point = _reference_point(words.value, classes[0])
+        if point is not None:
+            bare['reference_point'] = point
+        else:
+            written = _written_value(words, classes[0], path, problems)
+            if written is not None:
+                bare[_value_field(classes[0])] = written
         tolerance = _tolerance(words, classes[0], path, problems)
         if tolerance is not None:
-            bare['set_point_tolerance'] = tolerance
+            bare['tolerance'] = tolerance
     elif words.tolerance is not None:
         problems.append(
             Problem(
-                _at(path, 'hold_tolerance'),
-                'a tolerance belongs to one held value: say which variable it is for.',
+                _at(path, 'tolerance'),
+                'a tolerance belongs to one value: say which variable it is for.',
             )
         )
     return [{'m_def': m_def(each), **bare} for each in classes]
 
 
+def _refused(words: _Words, path: str, problems: list) -> bool:
+    """Whether the entry writes a value the way the file no longer writes one, each
+    reported with the way it is written now."""
+    for where, word in words.retired:
+        problems.append(
+            Problem(
+                where,
+                f'`{word}` is not written any more: {RETIRED_WORDS[word]}. The '
+                f'instruction is left out.',
+            )
+        )
+    for key, value in words.keys.items():
+        problems.append(
+            Problem(
+                _at(path, key),
+                f'a value is written with `specify`: '
+                f'{_respelled(key, value)}. The instruction is left out.',
+            )
+        )
+    return bool(words.retired or words.keys)
+
+
+def _respelled(key: str, value) -> str:
+    """How a value written under its own key is written now."""
+    if key in TRACKED_POINTS:
+        return f'`specify: {key}`'
+    return f'`variable: {key}, specify: {value}`'
+
+
+def _reference_point(value, cls: type) -> str | None:
+    """`value`, where it is one of the points on the device's own characteristic the
+    class takes instead of a number (`V_MPP`); else `None`."""
+    quantity = cls.m_def.all_quantities.get('reference_point')
+    points = getattr(quantity.type, '_list', ()) if quantity is not None else ()
+    if isinstance(value, str) and value.strip() in points:
+        return value.strip()
+    return None
+
+
 def _tracked_instructions(
     words: _Words, authored: dict, path: str, problems: list
 ) -> list[dict]:
-    """An instruction naming a point the cell decides, not a value to hold (§15.13).
-
-    Asking for one is asking the load to be regulated, so it sets `control` exactly as a
-    written set point does — there is simply no number to store beside it.
-    """
-    if len(words.tracked) > 1:
-        written = ', '.join(word for _, word, _ in words.tracked)
-        problems.append(
-            Problem(
-                path,
-                f'a load sits at one point, but this instruction writes {written}.',
-            )
-        )
-        return []
-    where, word, value = words.tracked[0]
-    if value is False:
-        problems.append(
-            Problem(
-                where, f'`{word}: false` asks for nothing; write it or leave it out.'
-            )
-        )
-        return []
+    """An instruction naming a point the cell decides, not a value to hold."""
+    where, word = words.tracked[0]
     if words.channel is not None and words.channel != TRACKED_POINT_CHANNEL:
         problems.append(
             Problem(
@@ -610,19 +628,10 @@ def _tracked_instructions(
             )
         )
         return []
-    if words.keys:
-        problems.append(
-            Problem(
-                path,
-                f'`{word}` is where the cell decides, so it takes no set point, but this '
-                f'instruction also writes {", ".join(words.keys)}.',
-            )
-        )
-        return []
     if words.tolerance is not None:
         problems.append(
             Problem(
-                _at(path, 'hold_tolerance'),
+                _at(path, 'tolerance'),
                 f'`{word}` is where the cell decides, so there is no value to be a '
                 f'tolerance of.',
             )
@@ -630,13 +639,12 @@ def _tracked_instructions(
         return []
     tracking = TRACKED_POINTS[word]
     bare = _fields(authored, tracking, path, problems)
-    bare.setdefault('control', True)
     return [{'m_def': m_def(tracking), **bare}]
 
 
 def _kind_fields(words: _Words):
-    """The reader for the word that chose a kind other than a hold, if one was written:
-    `ramp:`, `hold_between:` or `hold_below:` (§15.14, §17.5, §22)."""
+    """The reader for a `specify:` that chose a kind other than a single value, if one
+    was written: a ramp, a range or a bound."""
     if words.ramp is not None:
         return _ramp_fields
     if words.between is not None:
@@ -644,43 +652,68 @@ def _kind_fields(words: _Words):
     return _bound_fields if words.below is not None else None
 
 
+def _without_tolerance(words: _Words, kind: str, path: str, problems: list) -> bool:
+    """Whether the entry writes no `tolerance`, which only a single value takes."""
+    if words.tolerance is None:
+        return True
+    problems.append(
+        Problem(
+            _at(path, 'tolerance'),
+            f'a tolerance belongs to a single value, not to {kind}.',
+        )
+    )
+    return False
+
+
 def _ramp_fields(
     words: _Words, classes: list, path: str, problems: list
 ) -> dict | None:
-    """`ramp: {from, to, rate}` as the fields the schema stores (§15.14).
+    """`specify: {from, to, rate}` as the fields the schema stores.
 
     `None` where the instruction cannot be read at all, so the caller leaves it out.
     """
-    where = _at(path, 'ramp')
-    if (
-        words.hold is not None
-        or words.tolerance is not None
-        or words.below is not None
-        or words.between is not None
-        or words.keys
-    ):
-        problems.append(
-            Problem(
-                where, 'an instruction ramps or holds, not both; write one of them.'
-            )
-        )
+    if not _without_tolerance(words, 'a ramp', path, problems):
         return None
-    if not isinstance(words.ramp, dict):
-        problems.append(Problem(where, f'expected a section, got {words.ramp!r}.'))
+    return _shape_fields(words.ramp, RAMP_FIELDS, classes[0], path, problems)
+
+
+def _between_fields(
+    words: _Words, classes: list, path: str, problems: list
+) -> dict | None:
+    """`specify: {lower, upper}` as the fields the schema stores. A bound left
+    out is reported by the instruction's own `normalize`, as a stored archive would be.
+
+    `None` where the instruction cannot be read at all, so the caller leaves it out.
+    """
+    if not _without_tolerance(words, 'a range', path, problems):
         return None
+    return _shape_fields(words.between, BETWEEN_FIELDS, classes[0], path, problems)
+
+
+def _bound_fields(
+    words: _Words, classes: list, path: str, problems: list
+) -> dict | None:
+    """`specify: {below: 55 %}` as the field the schema stores.
+
+    `None` where the instruction cannot be read at all, so the caller leaves it out.
+    """
+    if not _without_tolerance(words, 'a bound', path, problems):
+        return None
+    where = _at(_at(path, 'specify'), BELOW_WORD)
+    if isinstance(words.below, dict):
+        bound = _relative_humidity(words.below, classes[0], where, problems)
+    else:
+        bound = _value(words.below, classes[0], 'upper_bound', where, problems)
+    return {} if bound is None else {'upper_bound': bound}
+
+
+def _shape_fields(written: dict, fields: dict, cls: type, path: str, problems: list):
+    """A `specify:` section's words as the fields each becomes."""
+    where = _at(path, 'specify')
     bare = {}
-    for written, value in words.ramp.items():
-        if written not in RAMP_FIELDS:
-            problems.append(
-                Problem(
-                    _at(where, written),
-                    f'`{written}` is no part of a ramp; it has '
-                    f'{", ".join(RAMP_FIELDS)}.',
-                )
-            )
-            continue
-        field_name = RAMP_FIELDS[written]
-        read = _value(value, classes[0], field_name, _at(where, written), problems)
+    for word, value in written.items():
+        field_name = fields[word]
+        read = _value(value, cls, field_name, _at(where, word), problems)
         if read is not None:
             bare[field_name] = read
     return bare
@@ -694,7 +727,6 @@ def _instruction_classes(words: _Words, cls, path: str, problems: list) -> list[
     if allowed is None:
         return []
     written = [(_at(path, 'variable'), words.named)] if words.named else []
-    written += [(_at(path, key), key) for key in words.keys]
     chosen = []
     for where, key in written:
         if key not in allowed:
@@ -717,127 +749,44 @@ def _instruction_classes(words: _Words, cls, path: str, problems: list) -> list[
             )
         )
         return []
-    table, word = _kind(words, cls)
+    table, kind = _kind(words, cls)
     if chosen or len(allowed) == 1:
         key = (chosen or allowed)[0]
         if key not in table:
-            problems.append(Problem(_at(path, word), _no_such_kind(key, word)))
+            problems.append(Problem(_at(path, 'specify'), _no_such_kind(key, kind)))
         return [table[key]] if key in table else []
-    # A ramp or a bound names one variable, never a channel's worth — decided here, not
-    # by how many classes the kind's table happens to have (§17.5).
-    if words.hold is not None or word != 'hold':
-        problems.append(Problem(_at(path, word), _unplaced(words, word, allowed)))
+    # A value names one variable, never a channel's worth — decided here, not by how many
+    # classes the kind's table happens to have.
+    if words.value is not None or kind != 'value':
+        problems.append(
+            Problem(
+                _at(path, 'specify'),
+                f'say which variable {kind} is for, as `variable:` — '
+                f'{", ".join(allowed)}: a whole channel takes none.',
+            )
+        )
         return []
-    # Nothing set: a channel logged as a whole, one instruction per variable (§15.2).
+    # Nothing stated: a channel logged as a whole, one instruction per variable.
     return [table[key] for key in allowed if key in table]
 
 
 def _kind(words: _Words, cls) -> tuple[dict, str]:
-    """Which kind of instruction an entry is, as the table naming its classes and the word that
-    chose it. `ramp:` and `hold_below:` choose their kinds — and so does a `Ramp…` or
-    `HoldBelow…` class a bare archive names, which arrives without either word
-    (§15.14, §17.5)."""
+    """Which kind of instruction an entry is, as the table naming its classes and the
+    kind in words. The shape of `specify:` chooses it — and so does a `Ramp…` or
+    `HoldBelow…` class a bare archive names, which arrives without one."""
     if words.ramp is not None or cls in RAMP_KEYS:
-        return RAMP_INSTRUCTIONS, 'ramp'
+        return RAMP_INSTRUCTIONS, 'a ramp'
     if words.between is not None or cls in HOLD_BETWEEN_KEYS:
-        return HOLD_BETWEEN_INSTRUCTIONS, 'hold_between'
+        return HOLD_BETWEEN_INSTRUCTIONS, 'a range'
     if words.below is not None or cls in HOLD_BELOW_KEYS:
-        return HOLD_BELOW_INSTRUCTIONS, 'hold_below'
-    return VARIABLE_INSTRUCTIONS, 'hold'
+        return HOLD_BELOW_INSTRUCTIONS, 'a bound'
+    return VARIABLE_INSTRUCTIONS, 'value'
 
 
-def _unplaced(words: _Words, word: str, allowed: tuple) -> str:
-    """Why a value written on a channel of several variables could not be placed."""
-    if word == 'ramp':
-        return 'say which variable ramps: a whole channel cannot.'
-    if word in ('hold_below', 'hold_between'):
-        return 'say which variable is bounded: a whole channel cannot be.'
-    return (
-        f'could not place `hold` {words.hold!r}: say which variable it sets, '
-        f'as `variable:` or as the key itself — {", ".join(allowed)}.'
-    )
-
-
-def _no_such_kind(key: str, word: str) -> str:
-    if word == 'ramp':
-        return f'`{key}` does not ramp: it holds one value and nothing else.'
-    if word == 'hold_between':
-        return (
-            f'`{key}` takes no `hold_between`: no standard gives it a range yet (§22).'
-        )
-    return f'`{key}` takes no `{word}`: no standard bounds it yet (§17.5).'
-
-
-def _bound_fields(
-    words: _Words, classes: list, path: str, problems: list
-) -> dict | None:
-    """`hold_below: 55 %` as the field the schema stores (§17.5).
-
-    `None` where the instruction cannot be read at all, so the caller leaves it out.
-    """
-    where = _at(path, 'hold_below')
-    if words.hold is not None or words.tolerance is not None or words.keys:
-        problems.append(
-            Problem(
-                where,
-                'an instruction holds a value or keeps under a bound, not both; write one of them.',
-            )
-        )
-        return None
-    if isinstance(words.below, dict):
-        bound = _relative_humidity(words.below, classes[0], where, problems)
-    else:
-        bound = _value(words.below, classes[0], 'upper_bound', where, problems)
-    return {} if bound is None else {'upper_bound': bound}
-
-
-def _between_fields(
-    words: _Words, classes: list, path: str, problems: list
-) -> dict | None:
-    """`hold_between: {lower, upper}` as the fields the schema stores (§22). A bound
-    left out is reported by the instruction's own `normalize`, as a stored archive would be.
-
-    `None` where the instruction cannot be read at all, so the caller leaves it out.
-    """
-    where = _at(path, 'hold_between')
-    if (
-        words.hold is not None
-        or words.tolerance is not None
-        or words.below is not None
-        or words.keys
-    ):
-        problems.append(
-            Problem(
-                where,
-                'an instruction holds a value or keeps it in a range, not both; write one of '
-                'them.',
-            )
-        )
-        return None
-    if not isinstance(words.between, dict):
-        problems.append(
-            Problem(
-                where,
-                f'expected a section with `lower` and `upper`, got {words.between!r}.',
-            )
-        )
-        return None
-    bare = {}
-    for written, value in words.between.items():
-        if written not in BETWEEN_FIELDS:
-            problems.append(
-                Problem(
-                    _at(where, written),
-                    f'`{written}` is no part of a range; it has '
-                    f'{", ".join(BETWEEN_FIELDS)}.',
-                )
-            )
-            continue
-        field_name = BETWEEN_FIELDS[written]
-        read = _value(value, classes[0], field_name, _at(where, written), problems)
-        if read is not None:
-            bare[field_name] = read
-    return bare
+def _no_such_kind(key: str, kind: str) -> str:
+    if kind == 'a ramp':
+        return f'`{key}` does not ramp: it takes one value and nothing else.'
+    return f'`{key}` takes no {kind}: no standard gives it one yet.'
 
 
 def _allowed(words: _Words, cls, path: str, problems: list) -> tuple | None:
@@ -866,32 +815,20 @@ def _allowed(words: _Words, cls, path: str, problems: list) -> tuple | None:
 
 
 def _value_field(cls: type) -> str:
-    """Where a written value lands: `set_point`, unless the class keeps it elsewhere."""
-    return VALUE_FIELDS.get(cls, 'set_point')
+    """Where a written value lands: `value`, unless the class keeps it elsewhere."""
+    return VALUE_FIELDS.get(cls, 'value')
 
 
-def _set_point(words: _Words, cls: type, path: str, problems: list):
-    """The value as written: under the variable's own key, or as `hold`.
+def _written_value(words: _Words, cls: type, path: str, problems: list):
+    """What `specify:` states as a single value.
 
-    Usually it lands in `set_point`; a class whose value is no number says where instead
+    Usually it lands in `value`; a class whose value is no number says where instead
     (`BalanceGas` keeps a gas's name in `gas`, §15.15).
     """
-    field_name = _value_field(cls)
-    key = VARIABLE_KEYS.get(cls)
-    if key in words.keys and words.hold is not None:
-        problems.append(
-            Problem(
-                _at(path, 'hold'),
-                f'`hold` and `{key}` both set {key}; write one of them.',
-            )
-        )
-    if key in words.keys:
-        written, where = words.keys[key], _at(path, key)
-    else:
-        written, where = words.hold, _at(path, 'hold')
-    if isinstance(written, dict):
-        return _relative_humidity(written, cls, where, problems)
-    return _value(written, cls, field_name, where, problems)
+    where = _at(path, 'specify')
+    if isinstance(words.value, dict):
+        return _relative_humidity(words.value, cls, where, problems)
+    return _value(words.value, cls, _value_field(cls), where, problems)
 
 
 def _relative_humidity(written: dict, cls: type, where: str, problems: list):
@@ -904,7 +841,10 @@ def _relative_humidity(written: dict, cls: type, where: str, problems: list):
     axis = VARIABLE_KEYS.get(cls)
     if axis != 'absolute_humidity':
         problems.append(
-            Problem(where, f'`{axis or cls.__name__}` takes a value, not a section.')
+            Problem(
+                where,
+                f'could not read {written!r}: `specify` takes {SPECIFY_SHAPES}.',
+            )
         )
         return None
     if set(written) != {'rh', 'at'}:
@@ -916,18 +856,18 @@ def _relative_humidity(written: dict, cls: type, where: str, problems: list):
             )
         )
         return None
-    # Read through the water vapour's own hold: a bound has no `set_point` to ask.
+    # Read through the water vapour's own hold: a bound has no `value` to ask.
     relative = _value(
         written['rh'],
         VARIABLE_INSTRUCTIONS['absolute_humidity'],
-        'set_point',
+        'value',
         _at(where, 'rh'),
         problems,
     )
     kelvin = _value(
         written['at'],
         VARIABLE_INSTRUCTIONS['temperature'],
-        'set_point',
+        'value',
         _at(where, 'at'),
         problems,
     )
@@ -958,7 +898,7 @@ def _value(value, cls: type, key: str, where: str, problems: list):
     if VARIABLE_KEYS.get(cls) == 'relative_humidity':
         text = _RELATIVE_HUMIDITY_UNIT.sub('%', text)  # `85 %RH` is `85 %` here only
     standard = _standard_value(text, cls) if key in NAMED_FIELDS else None
-    read = parse_difference if key.endswith('_tolerance') else parse
+    read = parse_difference if key == 'tolerance' else parse
     try:
         number = standard().value.to(unit) if standard else read(text, unit)
         return float(number.m)
@@ -976,25 +916,24 @@ def _standard_value(text, cls: type):
 
 
 def _tolerance(words: _Words, cls: type, path: str, problems: list):
-    """`hold_tolerance`, or else the tolerance a named value brings with it (§17.4).
+    """`tolerance`, or else the tolerance a named value brings with it.
 
     Written explicitly, it wins: a lab stating a tighter tolerance than the standard's is
     stating a fact about its own run, not contradicting anything.
     """
-    where = _at(path, 'hold_tolerance')
-    if 'set_point_tolerance' not in cls.m_def.all_quantities:
+    where = _at(path, 'tolerance')
+    if 'tolerance' not in cls.m_def.all_quantities:
         if words.tolerance is not None:
             problems.append(
                 Problem(where, f'{cls.__name__} holds no value to be a tolerance of.')
             )
         return None
     if words.tolerance is not None:
-        return _value(words.tolerance, cls, 'set_point_tolerance', where, problems)
-    key = VARIABLE_KEYS.get(cls)
-    standard = _standard_value(words.keys.get(key, words.hold), cls)
+        return _value(words.tolerance, cls, 'tolerance', where, problems)
+    standard = _standard_value(words.value, cls)
     if standard is None or standard().tolerance is None:
         return None
-    unit = cls.m_def.all_quantities['set_point_tolerance'].unit
+    unit = cls.m_def.all_quantities['tolerance'].unit
     return float(standard().tolerance.to(unit).magnitude)
 
 

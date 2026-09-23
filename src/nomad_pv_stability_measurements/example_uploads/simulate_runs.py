@@ -393,8 +393,8 @@ def irradiance(instruction, clock: Clock) -> np.ndarray:
         high = instruction.upper_bound.to('W/m^2').magnitude
         drift = 0.4 * (high - low) / 2 * np.sin(2 * np.pi * t / 50)
         return np.clip((low + high) / 2 + drift + clock.noise(3), low, high)
-    if instruction.set_point is not None:
-        value = instruction.set_point.to('W/m^2').magnitude
+    if instruction.value is not None:
+        value = instruction.value.to('W/m^2').magnitude
         return value + (clock.noise(2) if value else 0 * t)
     # Not controlled and no value: the sun.
     clock.notes.add(
@@ -406,10 +406,10 @@ def irradiance(instruction, clock: Clock) -> np.ndarray:
 
 
 def temperature(instruction, clock: Clock, light: np.ndarray) -> np.ndarray:
-    if instruction.set_point is None:
+    if instruction.value is None:
         # Outdoors: the day, and the sun heating the cell.
         return 8 + 6 * daily(clock.of_day) + 0.025 * light + clock.noise(0.3)
-    value = instruction.set_point.to('degC').magnitude
+    value = instruction.value.to('degC').magnitude
     if instruction.control:
         return value + clock.noise(0.3)
     # An ambient room, warmed a little by a lamp.
@@ -417,8 +417,8 @@ def temperature(instruction, clock: Clock, light: np.ndarray) -> np.ndarray:
 
 
 def relative_humidity(instruction, clock: Clock, temp: np.ndarray) -> np.ndarray:
-    if instruction.set_point is not None:
-        value = instruction.set_point.to('percent').magnitude
+    if instruction.value is not None:
+        value = instruction.value.to('percent').magnitude
         return value + clock.noise(0.5)
     if instruction.m_root().environment == 'outdoor':
         return np.clip(70 - 1.5 * (temp - 15) + clock.noise(1), 15, 100)

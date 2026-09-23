@@ -8,10 +8,10 @@ data:
     point. The cell is tracked only while lit, and left at open circuit in the dark.
     Shows an instruction held only within one phase of a repetition.
   channel_settings:
-    temperature: {hold: 85 °C, control: true, monitor: true}
+    temperature: {specify: 85 °C, control: true, monitor: true}
     atmosphere:
-      - {variable: relative_humidity, hold: 85 %, control: true, monitor: true}
-      - {variable: oxygen, reference_point: ambient air}
+      - {variable: relative_humidity, specify: 85 %, control: true, monitor: true}
+      - {variable: oxygen, specify: ambient}
   routine:
     name: dark and light
     repeat: 4
@@ -20,11 +20,11 @@ data:
         repeat: 1
         mode: parallel
         instructions:
-          - {channel: irradiation, hold: dark, duration: 20 h}
-          - {channel: electrical_load, hold: open_circuit, duration: whole block}
+          - {channel: irradiation, specify: dark, duration: 20 h}
+          - {channel: electrical_load, specify: open_circuit, duration: whole block}
       - name: light soak
         repeat: 1
         mode: parallel
         instructions:
-          - {channel: irradiation, hold: 1000 W/m^2, control: true, monitor: true, duration: 4 h}
-          - {channel: electrical_load, hold: mpp, monitor: true, duration: whole block}
+          - {channel: irradiation, specify: 1000 W/m^2, control: true, monitor: true, duration: 4 h}
+          - {channel: electrical_load, specify: mpp, control: true, monitor: true, duration: whole block}

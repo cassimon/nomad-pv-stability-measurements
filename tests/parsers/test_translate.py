@@ -84,36 +84,53 @@ def only(translation) -> dict:
     return instruction
 
 
-# An instruction: a channel or variable names the class, a value becomes its field.
+# An instruction: a channel or variable names the class, `specify` states its value.
 
 
 @pytest.mark.parametrize(
     ('authored', 'expected'),
     [
         (
-            {'channel': 'temperature', 'hold': '65 °C'},
-            entry(HoldTemperature, control=True, set_point=approx(338.15)),
+            {'channel': 'temperature', 'specify': '65 °C', 'control': True},
+            entry(HoldTemperature, control=True, value=approx(338.15)),
         ),
         (
-            {'channel': 'electrical_load', 'voltage': '0.8 V'},
-            entry(HoldVoltage, control=True, set_point=0.8),
+            {'channel': 'electrical_load', 'variable': 'current', 'specify': '5 mA'},
+            entry(HoldCurrent, value=approx(0.005)),
         ),
         (
-            {'channel': 'electrical_load', 'variable': 'current', 'hold': '5 mA'},
-            entry(HoldCurrent, control=True, set_point=approx(0.005)),
+            {
+                'channel': 'mechanical',
+                'variable': 'bend_radius',
+                'specify': '2 m',
+                'duration': '1 h',
+            },
+            entry(HoldBendRadius, value=2.0, duration=HOUR),
         ),
         (
-            {'channel': 'mechanical', 'bend_radius': '2 m', 'duration': '1 h'},
-            entry(HoldBendRadius, control=True, set_point=2.0, duration=HOUR),
-        ),
-        (
-            {'channel': 'temperature', 'monitor': True, 'control': False},
-            entry(HoldTemperature, monitor=True, control=False),
+            {'channel': 'temperature', 'monitor': True},
+            entry(HoldTemperature, monitor=True),
         ),
     ],
 )
 def test_a_channel_and_a_value_become_one_instruction(authored, expected):
     assert only(instructions(authored)) == expected
+
+
+@pytest.mark.parametrize(
+    ('authored', 'expected'),
+    [
+        ({}, {}),
+        ({'control': True}, {'control': True}),
+        ({'monitor': True}, {'monitor': True}),
+    ],
+)
+def test_stating_a_value_claims_neither_control_nor_monitoring(authored, expected):
+    written = {'channel': 'temperature', 'specify': '65 °C', **authored}
+
+    assert only(instructions(written)) == entry(
+        HoldTemperature, value=approx(338.15), **expected
+    )
 
 
 def test_a_channel_logged_as_a_whole_is_one_instruction_per_variable():
@@ -130,26 +147,16 @@ def test_a_channel_logged_as_a_whole_is_one_instruction_per_variable():
     [
         # A word the standard defines is written as its numbers, tolerance included.
         (
-            {'channel': 'temperature', 'hold': 'RT'},
-            entry(
-                HoldTemperature,
-                control=True,
-                set_point=approx(296.15),
-                set_point_tolerance=approx(4),
-            ),
+            {'channel': 'temperature', 'specify': 'RT'},
+            entry(HoldTemperature, value=approx(296.15), tolerance=approx(4)),
         ),
         (
-            {'channel': 'irradiation', 'hold': 'dark'},
-            entry(HoldIrradiance, control=True, set_point=0.0),
+            {'channel': 'irradiation', 'specify': 'dark'},
+            entry(HoldIrradiance, value=0.0),
         ),
         (
-            {'channel': 'temperature', 'hold': '85 °C', 'hold_tolerance': '2 K'},
-            entry(
-                HoldTemperature,
-                control=True,
-                set_point=approx(358.15),
-                set_point_tolerance=approx(2),
-            ),
+            {'channel': 'temperature', 'specify': '85 °C', 'tolerance': '2 K'},
+            entry(HoldTemperature, value=approx(358.15), tolerance=approx(2)),
         ),
     ],
 )
@@ -161,16 +168,21 @@ def test_named_values_and_tolerances(authored, expected):
     ('authored', 'expected'),
     [
         (
-            {'channel': 'electrical_load', 'hold': 'mpp'},
+            {'channel': 'electrical_load', 'specify': 'mpp', 'control': True},
             entry(MPPTracking, control=True),
         ),
         (
-            {'channel': 'electrical_load', 'hold': 'open_circuit'},
-            entry(VOCTracking, control=True),
+            {'channel': 'electrical_load', 'specify': 'open_circuit'},
+            entry(VOCTracking),
+        ),
+        # A point on the device's own characteristic, measured on the fresh device.
+        (
+            {'channel': 'electrical_load', 'variable': 'voltage', 'specify': 'V_MPP'},
+            entry(HoldVoltage, reference_point='V_MPP'),
         ),
         (
-            {'channel': 'atmosphere', 'balance_gas': 'N2'},
-            entry(BalanceGas, gas='N2', control=True),
+            {'channel': 'atmosphere', 'variable': 'balance_gas', 'specify': 'N2'},
+            entry(BalanceGas, gas='N2'),
         ),
     ],
 )
@@ -186,12 +198,11 @@ def test_a_point_the_cell_decides_or_a_gas_is_named_not_given_a_number(
         (
             {
                 'channel': 'temperature',
-                'ramp': {'from': 'RT', 'to': '65 °C'},
+                'specify': {'from': 'RT', 'to': '65 °C'},
                 'end_of_ramp_behavior': 'cycle',
             },
             entry(
                 RampTemperature,
-                control=True,
                 start_point=approx(296.15),
                 end_point=approx(338.15),
                 end_of_ramp_behavior='cycle',
@@ -201,25 +212,24 @@ def test_a_point_the_cell_decides_or_a_gas_is_named_not_given_a_number(
             {
                 'channel': 'atmosphere',
                 'variable': 'relative_humidity',
-                'hold_below': '55 %',
+                'specify': {'below': '55 %'},
             },
-            entry(HoldBelowRelativeHumidity, control=True, upper_bound=approx(0.55)),
+            entry(HoldBelowRelativeHumidity, upper_bound=approx(0.55)),
         ),
         (
             {
                 'channel': 'irradiation',
-                'hold_between': {'lower': '800 W/m^2', 'upper': '1 sun'},
+                'specify': {'lower': '800 W/m^2', 'upper': '1 sun'},
             },
             entry(
                 HoldBetweenIrradiance,
-                control=True,
                 lower_bound=approx(800),
                 upper_bound=approx(1000),
             ),
         ),
     ],
 )
-def test_ramp_hold_below_and_hold_between_choose_their_kind(authored, expected):
+def test_the_shape_of_what_is_specified_chooses_the_kind(authored, expected):
     assert only(instructions(authored)) == expected
 
 
@@ -227,23 +237,26 @@ def test_ramp_hold_below_and_hold_between_choose_their_kind(authored, expected):
     ('authored', 'expected'),
     [
         (
-            {'channel': 'atmosphere', 'relative_humidity': '85 %RH'},
-            entry(HoldRelativeHumidity, control=True, set_point=approx(0.85)),
+            {
+                'channel': 'atmosphere',
+                'variable': 'relative_humidity',
+                'specify': '85 %RH',
+            },
+            entry(HoldRelativeHumidity, value=approx(0.85)),
         ),
         # The water as a volume ratio, from a relative humidity and its temperature.
         (
             {
                 'channel': 'atmosphere',
-                'absolute_humidity': {'rh': '85 %', 'at': '65 °C'},
+                'variable': 'absolute_humidity',
+                'specify': {'rh': '85 %', 'at': '65 °C'},
             },
-            entry(
-                HoldAbsoluteHumidity, control=True, set_point=approx(0.2109, rel=1e-3)
-            ),
+            entry(HoldAbsoluteHumidity, value=approx(0.2109, rel=1e-3)),
         ),
-        # The former key of the absolute humidity.
+        # The former name of the absolute humidity.
         (
-            {'channel': 'atmosphere', 'water_vapor': '500 ppm'},
-            entry(HoldAbsoluteHumidity, control=True, set_point=approx(5e-4)),
+            {'channel': 'atmosphere', 'variable': 'water_vapor', 'specify': '500 ppm'},
+            entry(HoldAbsoluteHumidity, value=approx(5e-4)),
         ),
     ],
 )
@@ -328,10 +341,10 @@ def test_settings_come_first_then_the_routine():
         {
             'data': {
                 'duration': '1000 h',
-                'channel_settings': {'temperature': {'hold': '65 °C'}},
+                'channel_settings': {'temperature': {'specify': '65 °C'}},
                 'routine': {
                     'instructions': [
-                        {'channel': 'irradiation', 'hold': 'dark', 'duration': '1 h'}
+                        {'channel': 'irradiation', 'specify': 'dark', 'duration': '1 h'}
                     ]
                 },
             }
@@ -354,8 +367,8 @@ def test_a_channel_of_several_variables_lists_one_setting_per_variable():
             'data': {
                 'channel_settings': {
                     'atmosphere': [
-                        {'relative_humidity': '85 %'},
-                        {'variable': 'oxygen', 'reference_point': 'ambient air'},
+                        {'variable': 'relative_humidity', 'specify': '85 %'},
+                        {'variable': 'oxygen', 'specify': 'ambient'},
                         'air',
                     ]
                 }
@@ -367,21 +380,13 @@ def test_a_channel_of_several_variables_lists_one_setting_per_variable():
         'data.channel_settings.atmosphere[2]'
     ]
     assert translation.archive['data']['instructions'] == [
-        entry(
-            HoldRelativeHumidity,
-            control=True,
-            set_point=approx(0.85),
-            duration=WHOLE_BLOCK,
-        ),
-        entry(HoldOxygenFraction, reference_point='ambient air', duration=WHOLE_BLOCK),
+        entry(HoldRelativeHumidity, value=approx(0.85), duration=WHOLE_BLOCK),
+        entry(HoldOxygenFraction, reference_point='ambient', duration=WHOLE_BLOCK),
     ]
 
 
-@pytest.mark.parametrize(
-    'archive', ['channels.archive.yaml', 'channels.setpoint.archive.yaml']
-)
-def test_a_bare_archive_reads_as_itself_even_in_the_old_spelling(archive):
-    translation = translate(read(archive))
+def test_a_bare_archive_reads_as_itself():
+    translation = translate(read('channels.archive.yaml'))
 
     assert (translation.archive, translation.problems) == (
         read('channels.archive.yaml'),
@@ -398,15 +403,20 @@ def test_a_bare_archive_reads_as_itself_even_in_the_old_spelling(archive):
     [
         ({'channel': 'temperature', 'duration': '500'}, 'duration', 'bare number'),
         ({'channel': 'temperature', 'duration': '10 Hz'}, 'duration', 'Cannot convert'),
-        ({'channel': 'temperature', 'hold': 'dark'}, 'hold', 'dark'),
+        ({'channel': 'temperature', 'specify': 'dark'}, 'specify', 'dark'),
+        (
+            {'channel': 'temperature', 'specify': {'up_to': '85 °C'}},
+            'specify',
+            '`specify` takes',
+        ),
         (
             {'channel': 'temperature', 'duraton': '1 h'},
             'duraton',
             'Did you mean `duration`?',
         ),
         (
-            {'channel': 'temperature', 'hold_tolerance': '4 °C', 'hold': 'RT'},
-            'hold_tolerance',
+            {'channel': 'temperature', 'tolerance': '4 °C', 'specify': 'RT'},
+            'tolerance',
             'kelvin',
         ),
     ],
@@ -426,14 +436,14 @@ def test_a_value_that_cannot_be_read_is_a_problem_and_the_instruction_stays(
     ('authored', 'reported'),
     [
         ({'channel': 'chuck_T'}, 'not a channel'),
-        ({'channel': 'electrical_load', 'hold': '0.8 V'}, 'say which variable'),
+        ({'channel': 'electrical_load', 'specify': '0.8 V'}, 'say which variable'),
         (
-            {'channel': 'electrical_load', 'voltage': '1 V', 'current': '1 A'},
-            'one variable',
-        ),
-        (
-            {'channel': 'temperature', 'hold': '65 °C', 'ramp': {'to': '85 °C'}},
-            'not both',
+            {
+                'channel': 'temperature',
+                'specify': {'from': '25 °C', 'to': '85 °C'},
+                'tolerance': '2 K',
+            },
+            'not to a ramp',
         ),
         ({'channel': 'atmosphere', 'humidity': '85 %RH'}, 'relative_humidity'),
         ({'m_def': 'no.such.Class'}, 'cannot find the class'),
@@ -459,6 +469,30 @@ def test_the_former_word_commands_is_reported_and_still_read():
     assert translation.archive['sub_instructions'] == [
         entry(HoldTemperature, duration=HOUR)
     ]
+
+
+@pytest.mark.parametrize(
+    ('authored', 'written', 'reported'),
+    [
+        ({'hold': '65 °C'}, 'hold', '`specify:`'),
+        ({'hold_below': '55 %'}, 'hold_below', '`specify: {below: …}`'),
+        ({'hold_between': {'lower': '1 sun'}}, 'hold_between', '{lower: …, upper: …}'),
+        ({'ramp': {'from': 'RT', 'to': '65 °C'}}, 'ramp', '{from: …, to: …}'),
+        ({'hold_tolerance': '2 K'}, 'hold_tolerance', '`tolerance`'),
+        # A value under the variable's or the point's own key.
+        ({'temperature': '65 °C'}, 'temperature', 'variable: temperature, specify'),
+        ({'mpp': True}, 'mpp', '`specify: mpp`'),
+    ],
+)
+def test_a_value_written_the_former_way_is_refused_with_the_way_now(
+    authored, written, reported
+):
+    translation = instructions({'channel': 'temperature', **authored})
+
+    [problem] = translation.problems
+    assert problem.path == f'instructions[0].{written}'
+    assert reported in problem.message
+    assert translation.archive.get('instructions', []) == []
 
 
 # Durations.
@@ -487,8 +521,8 @@ def test_a_setting_written_without_a_duration_lasts_as_long_as_the_protocol():
     translation = translate(
         {
             'data': {
-                'channel_settings': {'temperature': {'hold': '65 °C'}},
-                'instructions': [{'channel': 'irradiation', 'hold': 'dark'}],
+                'channel_settings': {'temperature': {'specify': '65 °C'}},
+                'instructions': [{'channel': 'irradiation', 'specify': 'dark'}],
             }
         }
     )
@@ -512,7 +546,9 @@ def test_an_instruction_in_the_routine_writes_its_duration(ramp, reported):
     translation = translate(
         {
             'data': {
-                'routine': {'instructions': [{'channel': 'temperature', 'ramp': ramp}]}
+                'routine': {
+                    'instructions': [{'channel': 'temperature', 'specify': ramp}]
+                }
             }
         }
     )

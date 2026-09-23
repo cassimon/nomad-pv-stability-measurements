@@ -62,8 +62,12 @@ class MPPTracking(ElectricalLoad, MonitorControlInstruction):
 class VOCTracking(ElectricalLoad, MonitorControlInstruction):
     """The load at open circuit, where the voltage settles with no current drawn.
 
-    No parameters and no set_point: open circuit is a state of the terminals, and the
+    No parameters and no value: open circuit is a state of the terminals, and the
     voltage there is the cell's answer. ISOS Table 1 writes it `OC`.
+
+    Usually specified and not controlled: the ISOS consensus has the cell
+    "disconnected", and nothing regulates a disconnected cell. An instrument that holds
+    the current at zero instead controls it.
     """
 
     #: No current, by disconnecting the terminals; the voltage follows.
@@ -75,11 +79,6 @@ class VOCTracking(ElectricalLoad, MonitorControlInstruction):
 
     def states_a_value(self) -> bool:
         return True
-
-    def role_for_plotting(self) -> str:
-        """Specified, never controlled: the cell is disconnected, and nothing regulates
-        it (ISOS consensus: "open-circuit (disconnected) conditions")."""
-        return 'specified'
 
     def quantity_name(self) -> str:
         return 'electrical load'

@@ -5,15 +5,12 @@ data:
   environment: indoor
   notes: Dark storage in ambient air.
   channel_settings:
-    irradiation:
-      hold: dark
-    temperature:
-      hold: RT
-      control: false
-      monitor: true
+    irradiation: {specify: dark}
+    # "monitored but not explicitly controlled (room temperature in the laboratory is
+    # assumed to be 23±4 °C)" (p.36)
+    temperature: {specify: RT, monitor: true}
     atmosphere:
-      - {variable: relative_humidity, control: false, monitor: true}
+      - {variable: relative_humidity, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
-      - {variable: oxygen, reference_point: ambient air}
-    electrical_load:
-      hold: open_circuit
+      - {variable: oxygen, specify: ambient}
+    electrical_load: {specify: open_circuit}

@@ -3,11 +3,13 @@ data:
   name: steady soak
   channel_settings:
     temperature:
-      hold: 65 °C
+      specify: 65 °C
+      control: true
       monitor: true
       sample_every: 60 s
     irradiation:
-      hold: 1 sun
+      specify: 1 sun
+      control: true
       spectrum: AM1.5G
       monitor: true
       sample_every: 60 s
@@ -19,18 +21,20 @@ data:
     repeat: 1
     instructions:
       - channel: temperature        # an episode: 500 h at 85 °C, logged fast
-        hold: 85 °C
+        specify: 85 °C
+        control: true
         duration: 500 h
         sampling_rate: 10 Hz
-      - channel: temperature        # no set_point: left to drift for 100 h
+      - channel: temperature        # nothing stated: left to drift for 100 h
         duration: 100 h
-      - channel: irradiation        # deliberately dark, and counted (D8a)
-        hold: dark
+      - channel: irradiation        # deliberately dark: stated, and regulated by nothing
+        specify: dark
         duration: 100 h
       - channel: electrical_load    # §8's form: the variable named beside the value
         variable: voltage
-        hold: 0.8 V
+        specify: 0.8 V
+        control: true
         duration: 24 h
-      - channel: electrical_load    # a word standing for no number at all (D8a)
-        hold: open_circuit
+      - channel: electrical_load    # a disconnected cell: stated, and regulated by nothing
+        specify: open_circuit
         duration: 1 h

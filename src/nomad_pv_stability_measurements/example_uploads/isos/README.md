@@ -29,9 +29,10 @@ belong to lists them under `options:`, and every combination becomes its own pro
 ```yaml
 channel_settings:
   temperature:
+    control: true
     options:
-      - hold: 65 °C                            # a single value is its own label
-      - hold: 85 °C
+      - specify: 65 °C                         # a single value is its own label
+      - specify: 85 °C
 ```
 
 Each alternative's keys are written into the section that lists it; a key is written beside the
@@ -55,22 +56,29 @@ Search for `standard` to find every variant of a protocol, and for `standard_var
 
 ```yaml
 channel_settings:          # conditions that hold for the whole test
-  temperature: {hold: RT, control: false, monitor: true}              # assumed 23 ± 4 °C
+  temperature: {specify: RT, monitor: true}                 # assumed 23 ± 4 °C, logged
   atmosphere:              # a channel of several variables: one setting each
-    - {variable: relative_humidity, control: false, monitor: true}       # ambient
-    - {variable: oxygen, reference_point: ambient air}
-  electrical_load: {hold: mpp}
+    - {variable: relative_humidity, monitor: true}          # ambient: logged, nothing stated
+    - {variable: oxygen, specify: ambient}                  # whatever the air holds
+  electrical_load: {specify: mpp, control: true, monitor: true}
 routine:                   # only what changes during the test
   repeat: indefinitely
   instructions:
-    - {channel: irradiation, control: true, hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}, duration: 8 h}
-    - {channel: irradiation, hold: dark, duration: 16 h}
+    - {channel: irradiation, specify: {lower: 800 W/m^2, upper: 1000 W/m^2}, control: true, duration: 8 h}
+    - {channel: irradiation, specify: dark, duration: 16 h}
 ```
 
 **Only what the standard states is written.** There is **no test duration, sampling interval or
 measurement schedule** in any file, because the standard fixes none — add your own. A light–dark
 cycle states its period, and repeats for as long as your test runs.
 
+- **Three things are said about each quantity, and each only where the standard says it.**
+  `specify` states its value: a number, a named value (`RT`, `dark`), a point (`mpp`,
+  `open_circuit`, `V_MPP`), a bound (`{below: 55 %}`), a range (`{lower: …, upper: …}`) or a
+  ramp (`{from: …, to: …}`). `control: true` says something regulates it, and `monitor: true`
+  that it is logged. None of them implies another: a hot plate set to 65 °C is stated and
+  controlled but need not be logged, the ambient humidity is logged but neither stated nor
+  regulated, and darkness is stated and nothing more.
 - **Every duration says what kind it is.** A setting, in `channel_settings` or `instructions`,
   lasts as long as the test unless it says otherwise. In the `routine`, every instruction writes
   its `duration`: a length (`1 h`), a typical one where the protocol fixes none
@@ -78,24 +86,29 @@ cycle states its period, and repeats for as long as your test runs.
   (the temperature cycles of ISOS-T and ISOS-LT), or `whole block` where it lasts as long as
   the parallel block it is in. A ramp given a `rate` works its duration out.
 - **Every test here runs in ambient air.** Only the protocols marked "I" run in an inert
-  atmosphere, so the oxygen is written as `reference_point: ambient air`, stated but neither
-  regulated nor measured. It is the atmosphere's second setting, beside the humidity.
+  atmosphere, so the oxygen is written `specify: ambient`: whatever the air around the sample
+  holds, which need not be the 21 % of fresh air in a laboratory with people and flames in it.
+  Stated, but neither regulated nor measured. It is the atmosphere's second setting, beside the
+  humidity.
+- **A humidity controlled only above 40 °C** (ISOS-T-3's "< 55%", ISOS-LT-2/-3's "controlled
+  at 50% beyond 40 °C") is stated and monitored, but not written as controlled: control that
+  depends on the temperature cannot be written yet, so the condition is in `notes`.
 - **Ambient means monitored, not regulated.** The standard assumes room temperature to be
-  23 ± 4 °C without controlling it, and asks for every uncontrolled condition to be monitored and
-  reported: `control: false`, `monitor: true`.
-- **What is measured is monitored, controlled or not.** The standard asks for the parameters of
-  its Table 3 to be monitored and reported "even if a parameter is not controlled" (p.43): a held
-  temperature (its sensor is reported), a light source (its exact irradiance, checked with a
-  reference cell, p.44), a controlled humidity, and MPP tracking, which measures the output while
-  it holds the point. They write `monitor: true` beside what they control. Darkness, open circuit
-  and a fixed bias are conditions to report, not readings, and are not monitored.
+  23 ± 4 °C without controlling it (p.36), and asks for every uncontrolled condition to be
+  monitored and reported "even if a parameter is not controlled" (p.43): `monitor: true`, and no
+  `control`. Outdoors, the weather is logged "preferably in tabulated format" (Table 3).
+- **What is controlled is not also logged, unless the standard says so.** The standard asks for
+  a controlled temperature's "sensor type" and for "RH (controlled or monitored)" (Table 3), and
+  for the exact irradiance to be reported and checked periodically with a reference cell
+  (p.43–44): things to report, not records. MPP tracking is monitored, since the tracker
+  "measures the output" while it holds the point (p.43).
 - **Humidity is relative humidity**, as the standard states it (`85 %`), with no temperature
   beside it.
-- **A bias measured on the device** says which point in `reference_point` (`V_MPP`, `-J_MPP`, …):
-  the protocol cannot know the number before the fresh device is measured.
+- **A bias measured on the device** is specified by its point (`V_MPP`, `-J_MPP`, …): the
+  protocol cannot know the number before the fresh device is measured.
 - **A solar simulator is held between 800 and 1000 W/m².** The standard recommends that range
   ("Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied", p.43), and
-  the files read it as what the light is held at: `hold_between: {lower: 800 W/m^2, upper:
+  the files read it as what the light is held at: `specify: {lower: 800 W/m^2, upper:
   1000 W/m^2}` — a range, with no target inside it.
 - **A cycle is a ramp that repeats.** Linear ramping up and down is `end_of_ramp_behavior:
   triangle`. Where the standard states the two ends and not the path — ISOS-T's "RT to 65 °C",

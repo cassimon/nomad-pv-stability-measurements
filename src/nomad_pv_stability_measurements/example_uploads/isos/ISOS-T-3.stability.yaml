@@ -5,21 +5,21 @@ data:
   environment: indoor
   notes: Thermal cycling in an environmental chamber; RH below 55 %, controlled only above 40 °C.
   channel_settings:
-    irradiation:
-      hold: dark
+    irradiation: {specify: dark}
     atmosphere:
-      - {variable: relative_humidity, monitor: true}
+      # "< 55%", "controlled at temperatures above 40 °C and is not controlled for the
+      # remainder of the cycle" (Table 1, footnote b): stated and monitored.
+      - {variable: relative_humidity, specify: {below: 55 %}, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
-      - {variable: oxygen, reference_point: ambient air}
-    electrical_load:
-      hold: open_circuit
+      - {variable: oxygen, specify: ambient}
+    electrical_load: {specify: open_circuit}
   routine:
     instructions:
       - channel: temperature
-        monitor: true
+        control: true
         # It goes on cycling until the test is stopped.
         duration: open-ended
-        ramp:
+        specify:
           from: -40 °C
           to: 85 °C
         end_of_ramp_behavior: cycle

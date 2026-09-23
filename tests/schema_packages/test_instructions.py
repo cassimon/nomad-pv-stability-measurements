@@ -60,16 +60,16 @@ def open_ended() -> Duration:
 @pytest.mark.parametrize(
     ('cls', 'field', 'unit'),
     [
-        (HoldTemperature, 'set_point', 'K'),
-        (HoldTemperature, 'set_point_tolerance', 'K'),
-        (HoldIrradiance, 'set_point', 'W/m^2'),
-        (HoldVoltage, 'set_point', 'V'),
-        (HoldCurrent, 'set_point', 'A'),
-        (HoldResistance, 'set_point', 'ohm'),
-        (HoldPressure, 'set_point', 'Pa'),
+        (HoldTemperature, 'value', 'K'),
+        (HoldTemperature, 'tolerance', 'K'),
+        (HoldIrradiance, 'value', 'W/m^2'),
+        (HoldVoltage, 'value', 'V'),
+        (HoldCurrent, 'value', 'A'),
+        (HoldResistance, 'value', 'ohm'),
+        (HoldPressure, 'value', 'Pa'),
         # The atmosphere as a volume ratio, the relative humidity as the fraction (§20.6).
-        (HoldAbsoluteHumidity, 'set_point', 'dimensionless'),
-        (HoldRelativeHumidity, 'set_point', 'dimensionless'),
+        (HoldAbsoluteHumidity, 'value', 'dimensionless'),
+        (HoldRelativeHumidity, 'value', 'dimensionless'),
         (HoldBelowRelativeHumidity, 'upper_bound', 'dimensionless'),
         (HoldBetweenIrradiance, 'lower_bound', 'W/m^2'),
         (RampTemperature, 'ramp_rate', 'K/s'),
@@ -93,8 +93,8 @@ def test_every_quantity_that_can_be_held_can_also_be_ramped():
 
 
 @pytest.mark.parametrize('cls', [MPPTracking, VOCTracking, BalanceGas])
-def test_what_the_cell_decides_or_names_takes_no_set_point(cls):
-    assert 'set_point' not in cls.m_def.all_quantities
+def test_what_the_cell_decides_or_names_takes_no_value(cls):
+    assert 'value' not in cls.m_def.all_quantities
 
 
 @pytest.mark.parametrize(
@@ -251,7 +251,7 @@ def test_dark_is_exactly_no_light():
     ('instruction', 'label'),
     [
         (
-            HoldTemperature(control=True, set_point=338.15 * K),
+            HoldTemperature(control=True, value=338.15 * K),
             'Hold temperature 65 °C',
         ),
         (
@@ -259,22 +259,32 @@ def test_dark_is_exactly_no_light():
             'Monitor relative humidity',
         ),
         (
-            HoldIrradiance(set_point=0 * ureg('W/m^2'), duration=fixed(4800 * ureg.s)),
-            'Hold irradiance 0 W/m² for 80 min',
+            HoldIrradiance(value=0 * ureg('W/m^2'), duration=fixed(4800 * ureg.s)),
+            'Irradiance 0 W/m² for 80 min',
         ),
-        (HoldVoltage(reference_point='near V_MPP'), 'Hold voltage at near V_MPP'),
+        (
+            HoldTemperature(value=296.15 * K, monitor=True),
+            'Monitor temperature 23 °C',
+        ),
+        (
+            HoldVoltage(reference_point='near V_MPP', control=True),
+            'Hold voltage at near V_MPP',
+        ),
         (
             HoldBelowRelativeHumidity(upper_bound=0.55 * ureg.dimensionless),
-            'Hold relative humidity below 55 %',
+            'Relative humidity below 55 %',
         ),
         (
             HoldBetweenIrradiance(
-                lower_bound=800 * ureg('W/m^2'), upper_bound=1000 * ureg('W/m^2')
+                lower_bound=800 * ureg('W/m^2'),
+                upper_bound=1000 * ureg('W/m^2'),
+                control=True,
             ),
             'Hold irradiance between 800 W/m² and 1000 W/m²',
         ),
         (
             RampTemperature(
+                control=True,
                 start_point=296.15 * K,
                 end_point=338.15 * K,
                 end_of_ramp_behavior='triangle',
@@ -290,7 +300,7 @@ def test_an_instruction_is_listed_by_what_it_does(normalized, instruction, label
 
 
 def test_a_hold_is_drawn_at_its_value_for_as_long_as_it_is_drawn():
-    times, values = HoldTemperature(set_point=338.15 * K).set_values_for_plotting(
+    times, values = HoldTemperature(value=338.15 * K).set_values_for_plotting(
         12 * ureg.hour
     )
 
@@ -349,7 +359,7 @@ def test_what_the_protocol_gives_no_value_is_written_as_text(instruction, text):
 
 
 def test_an_instruction_is_drawn_on_its_quantity_row_from_when_it_starts():
-    hold = HoldTemperature(set_point=338.15 * K, duration=fixed(12 * ureg.hour))
+    hold = HoldTemperature(value=338.15 * K, duration=fixed(12 * ureg.hour))
 
     [piece] = hold.time_series_for_plotting(start=7200, stop=10**6).pieces
 
@@ -372,20 +382,22 @@ def test_an_instruction_that_never_finishes_is_drawn_until_the_drawing_stops():
     'instruction, role',
     [
         # "controlled elevated temperatures of 65 or 85 °C" (Khenkin et al. 2020)
-        (HoldTemperature(set_point=338.15 * K, control=True), 'controlled'),
+        (HoldTemperature(value=338.15 * K, control=True), 'controlled'),
         (MPPTracking(control=True), 'controlled'),
         (HoldVoltage(reference_point='near V_MPP', control=True), 'controlled'),
-        # "Ambient (23 ± 4 °C)": stated, but not controlled
-        (HoldTemperature(set_point=296.15 * K, control=False), 'specified'),
-        # "open-circuit (disconnected)", and a light source "None"
-        (VOCTracking(control=True), 'specified'),
-        (HoldIrradiance(set_point=0 * ureg('W/m^2'), control=True), 'specified'),
-        # "monitored but not explicitly controlled"
-        (HoldRelativeHumidity(monitor=True, control=False), 'monitored'),
-        (HoldIrradiance(control=True, monitor=True), 'unspecified'),
+        # Controlled at a value the protocol leaves open: still controlled.
+        (HoldIrradiance(control=True, monitor=True), 'controlled'),
+        # "monitored but not explicitly controlled", with or without a value
+        (HoldRelativeHumidity(monitor=True), 'monitored'),
+        (HoldTemperature(value=296.15 * K, monitor=True), 'monitored'),
+        # "open-circuit (disconnected)", and a light source "None": stated, nothing more
+        (VOCTracking(), 'specified'),
+        (HoldIrradiance(value=0 * ureg('W/m^2')), 'specified'),
+        (HoldTemperature(value=296.15 * K), 'specified'),
+        (HoldTemperature(), 'unspecified'),
     ],
 )
-def test_an_instruction_is_coloured_by_what_the_protocol_states_about_it(
+def test_an_instruction_is_coloured_by_the_most_the_protocol_asks_of_it(
     instruction, role
 ):
     assert instruction.role_for_plotting() == role

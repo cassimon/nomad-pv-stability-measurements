@@ -6,10 +6,11 @@ its own:
 
     electrical_load:
       options:
-        - hold: mpp                 # a single value is its own label
+        - specify: open_circuit     # a single value is its own label
         - label: fixed voltage near MPP
           variable: voltage
-          reference_point: near V_MPP
+          specify: near V_MPP
+          control: true
 
 An alternative may hold `options` of its own. A key is written beside the options or in
 them, never both. A variant's `name` gets its labels in parentheses, in the order the file

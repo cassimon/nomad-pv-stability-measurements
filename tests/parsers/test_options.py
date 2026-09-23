@@ -17,12 +17,12 @@ def variants(data) -> dict:
 def test_every_combination_of_alternatives_is_a_variant_named_after_them():
     read = variants(
         {
-            'temperature': {'options': [{'hold': '65 °C'}, {'hold': '85 °C'}]},
+            'temperature': {'options': [{'specify': '65 °C'}, {'specify': '85 °C'}]},
             'electrical_load': {
                 'control': True,
                 'options': [
-                    {'label': 'MPP', 'hold': 'mpp'},
-                    {'label': 'fixed voltage', 'reference_point': 'near V_MPP'},
+                    {'label': 'MPP', 'specify': 'mpp'},
+                    {'label': 'fixed voltage', 'specify': 'near V_MPP'},
                 ],
             },
         }
@@ -31,8 +31,8 @@ def test_every_combination_of_alternatives_is_a_variant_named_after_them():
     assert read['P (85 °C, fixed voltage)'] == {
         'name': 'P (85 °C, fixed voltage)',
         'standard_variant': '85 °C, fixed voltage',
-        'temperature': {'hold': '85 °C'},
-        'electrical_load': {'control': True, 'reference_point': 'near V_MPP'},
+        'temperature': {'specify': '85 °C'},
+        'electrical_load': {'control': True, 'specify': 'near V_MPP'},
     }
     assert sorted(read) == [
         'P (65 °C, MPP)',
@@ -84,17 +84,17 @@ def test_a_file_without_options_stands_for_itself():
     ('data', 'path', 'reported'),
     [
         (
-            {'temperature': {'hold': 'RT', 'options': [{'hold': '65 °C'}]}},
-            'data.temperature.options[0].hold',
+            {'temperature': {'specify': 'RT', 'options': [{'specify': '65 °C'}]}},
+            'data.temperature.options[0].specify',
             'write it in one place',
         ),
         (
-            {'temperature': {'options': {'hold': '65 °C'}}},
+            {'temperature': {'options': {'specify': '65 °C'}}},
             'data.temperature.options',
             'a list',
         ),
         (
-            {'electrical_load': {'options': [{'hold': 'mpp', 'control': True}, {}]}},
+            {'electrical_load': {'options': [{'specify': 'mpp', 'control': True}, {}]}},
             'options',
             'give the alternatives a `label`',
         ),

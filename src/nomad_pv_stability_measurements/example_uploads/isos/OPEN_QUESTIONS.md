@@ -48,8 +48,9 @@ a path not stated** (`end_of_ramp_behavior: cycle`); the step option of LT-1 the
 
 ISOS-T-3 "< 55%" with footnote b ("controlled at temperatures above 40 °C and is not controlled
 for the remainder of the cycle"); ISOS-LT-2/-3 "Monitored, controlled at 50% beyond 40 °C".
-Control that depends on another quantity cannot be written yet, so **the files mark the humidity
-as monitored and state the condition in `notes`**.
+Control that depends on another quantity cannot be written yet, so **the files state the value
+(`{below: 55 %}`, `50 %`) and monitor it, without `control`, and state the condition in
+`notes`**.
 
 ### 6. E_g/q — a bias or a ceiling?
 
@@ -93,3 +94,16 @@ monitored. (Until 2026-09: a variant without an irradiance beside one with the r
   That is a preference among load options, which the files keep as separate variants.
 - The minimum ageing time, "at least 1000 h" when T80 is not reached (p.44), is a stop condition
   and not written yet.
+
+### 12. What is logged
+
+The paper asks for monitoring outright only where a condition is not controlled: the ambient
+temperature and humidity ("monitored but not explicitly controlled", p.36; "the temperature and
+RH are monitored, but not controlled", p.39; "even if a parameter is not controlled … it is still
+important to monitor and report", p.43), the outdoor weather ("preferably in tabulated format",
+Table 3), and ISOS-LT's humidity ("Monitored", Table 1). For what it controls, it asks for things
+to report: the temperature "sensor type", "RH (controlled or monitored)" (Table 3), the exact
+irradiance and a periodic check "with a reference cell" (p.43–44). **The files log only the
+first group**, and MPP tracking, which "measures the output" (p.43). ISOS-T-3's humidity is
+logged too: it goes uncontrolled below 40 °C. Is a controlled temperature meant to be logged
+after all?

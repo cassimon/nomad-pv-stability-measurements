@@ -5,16 +5,14 @@ data:
   environment: indoor
   notes: Dark storage in an oven in ambient air.
   channel_settings:
-    irradiation:
-      hold: dark
+    irradiation: {specify: dark}
     temperature:
-      monitor: true
+      control: true
       options:
-        - hold: 65 °C
-        - hold: 85 °C
+        - specify: 65 °C
+        - specify: 85 °C
     atmosphere:
-      - {variable: relative_humidity, control: false, monitor: true}
+      - {variable: relative_humidity, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
-      - {variable: oxygen, reference_point: ambient air}
-    electrical_load:
-      hold: open_circuit
+      - {variable: oxygen, specify: ambient}
+    electrical_load: {specify: open_circuit}

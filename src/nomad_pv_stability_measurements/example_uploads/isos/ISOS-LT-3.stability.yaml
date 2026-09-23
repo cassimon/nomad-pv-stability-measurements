@@ -6,24 +6,22 @@ data:
   notes: Solar-thermal cycling in a chamber with freezing; RH controlled at 50 % above 40 °C.
   channel_settings:
     irradiation:
-      control: true
-      monitor: true
       # "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied" (p.43)
-      hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}
+      specify: {lower: 800 W/m^2, upper: 1000 W/m^2}
+      control: true
     atmosphere:
-      - {variable: relative_humidity, monitor: true}
+      # "Monitored, controlled at 50% beyond 40 °C" (Table 1): stated and monitored.
+      - {variable: relative_humidity, specify: 50 %, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
-      - {variable: oxygen, reference_point: ambient air}
-    electrical_load:
-      hold: mpp
-      monitor: true
+      - {variable: oxygen, specify: ambient}
+    electrical_load: {specify: mpp, control: true, monitor: true}
   routine:
     instructions:
       - channel: temperature
-        monitor: true
+        control: true
         # It goes on cycling until the test is stopped.
         duration: open-ended
-        ramp:
+        specify:
           from: -25 °C
           to: 65 °C
         end_of_ramp_behavior: triangle

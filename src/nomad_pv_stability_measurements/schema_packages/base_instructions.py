@@ -54,21 +54,26 @@ class MonitorControlInstruction(SingleInstruction):
     )
     reference_point = Quantity(
         type=str,
-        description="A point on the device's own characteristic that the value is taken "
-        'from, where the protocol names one instead of a number — e.g. `V_MPP`, measured '
-        'on the fresh device. Free text here; an instruction class that has such points narrows '
-        'it to the ones it takes (Design.md §20.3).',
+        description='Where the value is taken from, where the protocol names it instead of '
+        "giving a number: a point on the device's own characteristic, as `V_MPP` measured "
+        'on the fresh device, or the surroundings, as `ambient`. Free text here; an '
+        'instruction class that has such points narrows it to the ones it takes.',
     )
 
     def describe(self) -> str:
-        """`Hold temperature 65 °C`; `Monitor relative humidity` where the quantity is
-        only logged."""
+        """`Hold temperature 65 °C` where the quantity is controlled, `Monitor relative
+        humidity` where it is only logged, and `Temperature 23 °C` where it is only
+        stated."""
         name = type(self).__name__
         if not self.kind or not name.startswith(self.kind):
             return words(name) + self.describe_values()
-        verb = 'Monitor' if self.monitor and not self.control else 'Hold'
-        if self.kind == 'Ramp' and verb == 'Hold':
-            verb = 'Ramp'
+        if self.control:
+            verb = 'Ramp' if self.kind == 'Ramp' else 'Hold'
+        else:
+            verb = 'Monitor' if self.monitor else ''
+        if not verb:
+            quantity = self.quantity_name()
+            return f'{quantity[0].upper()}{quantity[1:]}{self.describe_values()}'
         return f'{verb} {self.quantity_name()}{self.describe_values()}'
 
     def quantity_name(self) -> str:
@@ -107,16 +112,15 @@ class MonitorControlInstruction(SingleInstruction):
         return self.reference_point is not None
 
     def role_for_plotting(self) -> str:
-        """In the words of the ISOS consensus (Khenkin et al. 2020): `controlled` to
-        what the protocol states ("controlled elevated temperatures of 65 or 85 °C");
-        `specified` but not controlled ("Ambient (23 ± 4 °C)"); only `monitored`
-        ("monitored but not explicitly controlled"); or `unspecified`: regulated to
-        nothing the protocol states."""
-        if self.states_a_value():
-            return 'controlled' if self.control else 'specified'
-        if self.monitor and not self.control:
+        """The strongest of what the protocol asks of the quantity: `controlled`, else
+        `monitored`, else `specified` where it states a value, else `unspecified`. What
+        is controlled is usually logged and what is logged usually stated, but neither
+        follows from the other, so only the drawing ranks them."""
+        if self.control:
+            return 'controlled'
+        if self.monitor:
             return 'monitored'
-        return 'unspecified'
+        return 'specified' if self.states_a_value() else 'unspecified'
 
     def annotation_for_plotting(self) -> str:
         """What is written in place of a value, where `set_values_for_plotting` gives none."""
@@ -206,37 +210,37 @@ class ElectricalLoad(DependentMonitorControl):
 class HoldInstruction(MonitorControlInstruction):
     """One value, held for as long as the instruction lasts (§15.11)."""
 
-    set_point = Quantity(
+    value = Quantity(
         type=np.float64,
         description='The value to hold. Each instruction class declares it in its own unit.',
     )
-    set_point_tolerance = Quantity(
+    tolerance = Quantity(
         type=np.float64,
-        description='How far either side of `set_point` still counts: `set_point ± '
-        'set_point_tolerance`. A difference, so a temperature tolerance is in kelvin — '
+        description='How far either side of `value` still counts: `value ± '
+        'tolerance`. A difference, so a temperature tolerance is in kelvin — '
         '`4 K`, never `4 °C` (§17.4). Each instruction class declares it in its own unit.',
     )
 
     kind = 'Hold'
 
     def describe_values(self) -> str:
-        value = f' {shown(self.set_point)}' if self.set_point is not None else ''
+        value = f' {shown(self.value)}' if self.value is not None else ''
         return value + super().describe_values() + held_for(self)
 
     def states_a_value(self) -> bool:
-        return self.set_point is not None or super().states_a_value()
+        return self.value is not None or super().states_a_value()
 
     def bounds_for_plotting(self):
-        """`set_point ± set_point_tolerance`, drawn around the value."""
-        if self.set_point is None or self.set_point_tolerance is None:
+        """`value ± tolerance`, drawn around the value."""
+        if self.value is None or self.tolerance is None:
             return None
-        tolerance = self.set_point_tolerance.to(self.set_point.units)
-        return self.set_point - tolerance, self.set_point + tolerance
+        tolerance = self.tolerance.to(self.value.units)
+        return self.value - tolerance, self.value + tolerance
 
     def set_values_for_plotting(self, length):
-        if self.set_point is None:
+        if self.value is None:
             return None
-        return line([0, length.to('s').magnitude], [0, 0], self.set_point, 0)
+        return line([0, length.to('s').magnitude], [0, 0], self.value, 0)
 
 
 class HoldBelowInstruction(MonitorControlInstruction):

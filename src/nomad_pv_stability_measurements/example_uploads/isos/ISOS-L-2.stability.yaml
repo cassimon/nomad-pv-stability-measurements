@@ -6,23 +6,22 @@ data:
   notes: Light soaking under a solar simulator, at elevated temperature.
   channel_settings:
     irradiation:
-      control: true
-      monitor: true
       # "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied" (p.43)
-      hold_between: {lower: 800 W/m^2, upper: 1000 W/m^2}
+      specify: {lower: 800 W/m^2, upper: 1000 W/m^2}
+      control: true
     temperature:
-      monitor: true
+      control: true
       options:
-        - hold: 65 °C
-        - hold: 85 °C
+        - specify: 65 °C
+        - specify: 85 °C
     atmosphere:
-      - {variable: relative_humidity, control: false, monitor: true}
+      - {variable: relative_humidity, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
-      - {variable: oxygen, reference_point: ambient air}
+      - {variable: oxygen, specify: ambient}
     electrical_load:
       # "options of exposure under open-circuit condition or using a fixed voltage bias near
       # the MPP (instead of active MPP tracking)" (p.37)
       options:
-        - {label: MPP, hold: mpp, monitor: true}
-        - {label: OC, hold: open_circuit}
-        - {label: fixed voltage near MPP, variable: voltage, control: true, reference_point: near V_MPP}
+        - {label: MPP, specify: mpp, control: true, monitor: true}
+        - {label: OC, specify: open_circuit}
+        - {label: fixed voltage near MPP, variable: voltage, specify: near V_MPP, control: true}

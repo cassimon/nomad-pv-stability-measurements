@@ -5,22 +5,21 @@ data:
   environment: indoor
   notes: In an environmental chamber. Bias from a light J–V curve of the fresh device; a positive voltage stays below E_g/q.
   channel_settings:
-    irradiation:
-      hold: dark
+    irradiation: {specify: dark}
     temperature:
-      monitor: true
+      control: true
       options:
-        - hold: 65 °C
-        - hold: 85 °C
+        - specify: 65 °C
+        - specify: 85 °C
     atmosphere:
-      - {relative_humidity: 85 %, monitor: true}
+      - {variable: relative_humidity, specify: 85 %, control: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
-      - {variable: oxygen, reference_point: ambient air}
+      - {variable: oxygen, specify: ambient}
     electrical_load:
       control: true
       options:
-        - {label: V_MPP, variable: voltage, reference_point: V_MPP}
-        - {label: V_oc, variable: voltage, reference_point: V_oc}
-        - {label: J_SC, variable: current, reference_point: J_SC}
-        - {label: −V_oc, variable: voltage, reference_point: -V_oc}
-        - {label: −J_MPP, variable: current, reference_point: -J_MPP}
+        - {label: V_MPP, variable: voltage, specify: V_MPP}
+        - {label: V_oc, variable: voltage, specify: V_oc}
+        - {label: J_SC, variable: current, specify: J_SC}
+        - {label: −V_oc, variable: voltage, specify: -V_oc}
+        - {label: −J_MPP, variable: current, specify: -J_MPP}

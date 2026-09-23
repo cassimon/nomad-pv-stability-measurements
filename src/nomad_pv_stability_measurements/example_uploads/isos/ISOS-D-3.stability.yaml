@@ -5,16 +5,14 @@ data:
   environment: indoor
   notes: Damp heat, dark storage in an environmental chamber.
   channel_settings:
-    irradiation:
-      hold: dark
+    irradiation: {specify: dark}
     temperature:
-      monitor: true
+      control: true
       options:
-        - hold: 65 °C
-        - hold: 85 °C
+        - specify: 65 °C
+        - specify: 85 °C
     atmosphere:
-      - {relative_humidity: 85 %, monitor: true}
+      - {variable: relative_humidity, specify: 85 %, control: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
-      - {variable: oxygen, reference_point: ambient air}
-    electrical_load:
-      hold: open_circuit
+      - {variable: oxygen, specify: ambient}
+    electrical_load: {specify: open_circuit}

@@ -5,21 +5,19 @@ data:
   environment: indoor
   notes: Thermal cycling on a hot plate or in an oven.
   channel_settings:
-    irradiation:
-      hold: dark
+    irradiation: {specify: dark}
     atmosphere:
-      - {variable: relative_humidity, control: false, monitor: true}
+      - {variable: relative_humidity, monitor: true}
       # Ambient air: only the protocols marked "I" run in an inert atmosphere (p.42).
-      - {variable: oxygen, reference_point: ambient air}
-    electrical_load:
-      hold: open_circuit
+      - {variable: oxygen, specify: ambient}
+    electrical_load: {specify: open_circuit}
   routine:
     instructions:
       - channel: temperature
-        monitor: true
+        control: true
         # It goes on cycling until the test is stopped.
         duration: open-ended
-        ramp:
+        specify:
           from: RT
           options:
             - to: 65 °C

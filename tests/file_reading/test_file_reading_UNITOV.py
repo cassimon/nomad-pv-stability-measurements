@@ -190,7 +190,7 @@ def test_a_run_describes_its_test_holding_the_mean_voltage_under_assumed_conditi
 
     [phase] = data['routine']['instructions']
     *holds, scans = phase['instructions']
-    held = {each['channel']: each['hold'] for each in holds}
+    held = {each['channel']: each['specify'] for each in holds}
     assert held == {
         'electrical_load': '1.400 V',
         'temperature': 'RT',

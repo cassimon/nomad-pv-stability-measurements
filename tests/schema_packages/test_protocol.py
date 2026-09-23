@@ -146,7 +146,7 @@ def test_executed_it_fills_in_what_the_caller_leaves_out(normalized):
     # One step per instruction, all starting with the test: they run in parallel.
     assert [(step.name, step.start_time) for step in activity.steps] == [
         ('hot', START),
-        ('Hold irradiance for 1 h', START),
+        ('Irradiance for 1 h', START),
     ]
 
 

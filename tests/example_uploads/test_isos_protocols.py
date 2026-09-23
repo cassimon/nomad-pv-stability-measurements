@@ -26,6 +26,7 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     IndefiniteRepeatingBlock,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
+    HoldBelowRelativeHumidity,
     HoldBetweenIrradiance,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
@@ -49,7 +50,7 @@ EXAMPLES = Path(example_uploads.__file__).parent / 'isos'
 #: "Very short" (§18.3): one or two sentences of what the standard says.
 NOTES_AT_MOST = 120
 #: What only a design decision would mention, and so no `notes` may (§18.3).
-SCHEMA_WORDS = ('`', 'schema', 'set_point', 'hold:', 'file')
+SCHEMA_WORDS = ('`', 'schema', 'specify:', 'file')
 ZERO_CELSIUS = 273.15
 HOUR = 3600
 MINUTE = 60
@@ -78,42 +79,51 @@ def kelvin(celsius: float):
 
 # The table's cells, as the instructions they are — read with the paper's text (§18.7, §20).
 
-DARK = instruction(HoldIrradiance, control=True, set_point=0.0)
-#: What is measured is monitored, controlled or not: "even if a parameter is not controlled
-#: … it is still important to monitor and report the parameters listed in Table 3" (p.43).
-#: Light: "the exact irradiance … should be reported" (p.43), checked "with a reference
-#: cell" (p.44). Darkness, open circuit and a fixed bias are conditions to report, not
-#: readings (Table 3).
+#: Stating a value claims nothing about regulating or logging it: `control` and `monitor`
+#: are each written only where the paper asks for them.
+#: Light source "None": stated, and regulated by nothing.
+DARK = instruction(HoldIrradiance, value=0.0)
 #: "Ideally, light sources with an irradiance of 800–1000 W m–² … should be applied"
 #: (p.43): read as what every solar simulator is held at — a range, never a target (§22).
+#: Not logged: "the exact irradiance … should be reported" (p.43), and a periodic check
+#: "with a reference cell" is recommended (p.44), which is no continuous record.
 SOLAR_SIMULATOR = instruction(
     HoldBetweenIrradiance,
     control=True,
-    monitor=True,
     lower_bound=pytest.approx(800),
     upper_bound=pytest.approx(1000),
 )
-#: Table 3 has an outdoor test report the sunlight irradiance, so it is monitored.
-SUNLIGHT = instruction(HoldIrradiance, control=False, monitor=True)
+#: Table 3 has an outdoor test report its weather "preferably in tabulated format".
+SUNLIGHT = instruction(HoldIrradiance, monitor=True)
+AMBIENT_TEMPERATURE = instruction(HoldTemperature, monitor=True)
 #: "Ambient (23 ± 4 °C)": "monitored but not explicitly controlled (room temperature in
 #: the laboratory is assumed to be 23±4 °C)" (p.36) — the figure, not regulated.
 ROOM_TEMPERATURE = instruction(
     HoldTemperature,
-    control=False,
     monitor=True,
-    set_point=kelvin(23),
-    set_point_tolerance=pytest.approx(4),
+    value=kelvin(23),
+    tolerance=pytest.approx(4),
 )
 #: Bare "Ambient": "even if a parameter is not controlled … it is still important to
 #: monitor and report" it (p.43). Humidity is stated as RH throughout (§20.6).
-AMBIENT_TEMPERATURE = instruction(HoldTemperature, control=False, monitor=True)
-AMBIENT_HUMIDITY = instruction(HoldRelativeHumidity, control=False, monitor=True)
+#: ISOS-LT-1's "Monitored, uncontrolled" reads the same.
+AMBIENT_HUMIDITY = instruction(HoldRelativeHumidity, monitor=True)
+#: Controlled only above 40 °C, which cannot be written: stated and monitored, and not
+#: controlled, the condition in `notes`. ISOS-LT-2/-3: "Monitored, controlled at 50%
+#: beyond 40 °C" (Table 1); ISOS-T-3: "< 55%", "controlled at temperatures above 40 °C"
+#: (footnote b).
+HUMIDITY_AT_50 = instruction(
+    HoldRelativeHumidity, monitor=True, value=pytest.approx(0.5)
+)
+HUMIDITY_BELOW_55 = instruction(
+    HoldBelowRelativeHumidity, monitor=True, upper_bound=pytest.approx(0.55)
+)
 #: Every protocol not marked "I" is run in ambient air: "protocols to address the intrinsic
 #: stability of solar cells in inert atmospheres … labelled by the index 'I'" (p.42).
-AMBIENT_AIR = instruction(HoldOxygenFraction, reference_point='ambient air')
-#: Monitored, and controlled only above 40 °C: the condition stays in `notes` (§20.8).
-HUMIDITY_MONITORED = instruction(HoldRelativeHumidity, monitor=True)
-OPEN_CIRCUIT = instruction(VOCTracking, control=True)
+#: Its oxygen is whatever the air holds, stated and regulated by nothing.
+AMBIENT_AIR = instruction(HoldOxygenFraction, reference_point='ambient')
+#: Open circuit is "disconnected" (p.40): stated, and regulated by nothing.
+OPEN_CIRCUIT = instruction(VOCTracking)
 #: MPP tracking "holds the device at its normal operating voltage and measures the output"
 #: (p.43).
 MPP = ('MPP', instruction(MPPTracking, control=True, monitor=True))
@@ -150,19 +160,16 @@ LIGHT_CYCLES = {
 
 
 def held(celsius: float) -> dict:
-    """A held temperature, measured: Table 3 asks for the "temperature sensor type"."""
-    return instruction(
-        HoldTemperature, control=True, monitor=True, set_point=kelvin(celsius)
-    )
+    """A controlled temperature. Not logged: Table 3 asks for the "temperature sensor
+    type" to be reported, not for a record."""
+    return instruction(HoldTemperature, control=True, value=kelvin(celsius))
 
 
 def humidity(percent: float) -> dict:
-    """A relative humidity, stored as the fraction itself — no temperature (§20.6)."""
+    """A controlled relative humidity, stored as the fraction itself — no temperature
+    . Not logged: Table 3 asks for "RH (controlled or monitored)", either one."""
     return instruction(
-        HoldRelativeHumidity,
-        control=True,
-        monitor=True,
-        set_point=pytest.approx(percent / 100),
+        HoldRelativeHumidity, control=True, value=pytest.approx(percent / 100)
     )
 
 
@@ -175,7 +182,6 @@ def ramping(start, end) -> dict:
     ramp = instruction(
         RampTemperature,
         control=True,
-        monitor=True,
         start_point=start,
         end_point=end,
         end_of_ramp_behavior='triangle',
@@ -192,7 +198,6 @@ def cycling(start, end) -> dict:
     cycle = instruction(
         RampTemperature,
         control=True,
-        monitor=True,
         start_point=start,
         end_point=end,
         end_of_ramp_behavior='cycle',
@@ -231,7 +236,8 @@ def protocol(standard, options, instructions, environment='indoor'):
     humid = next(
         index
         for index, each in enumerate(instructions)
-        if each['m_def'] == m_def(HoldRelativeHumidity)
+        if each['m_def']
+        in (m_def(HoldRelativeHumidity), m_def(HoldBelowRelativeHumidity))
     )
     written = [*instructions[: humid + 1], AMBIENT_AIR, *instructions[humid + 1 : at]]
     settings = [{**each, 'duration': WHOLE_BLOCK} for each in written]
@@ -318,11 +324,10 @@ for token, (label, celsius) in TEMPERATURES.items():
                 cycling(kelvin(23), kelvin(celsius)),
             ],
         )
-# "< 55%", controlled only above 40 °C (footnote b): monitored, the condition in `notes`.
 protocol(
     'ISOS-T-3',
     [],
-    [DARK, HUMIDITY_MONITORED, OPEN_CIRCUIT, cycling(kelvin(-40), kelvin(85))],
+    [DARK, HUMIDITY_BELOW_55, OPEN_CIRCUIT, cycling(kelvin(-40), kelvin(85))],
 )
 
 # ISOS-LC — the light is what varies, so it alone is the routine (§16.2, Rule 2). LC-3's
@@ -358,13 +363,13 @@ for l_token, (l_label, load) in LOWER_LEVEL_LOADS.items():
     protocol(
         'ISOS-LT-2',
         [(l_token, l_label)],
-        [SOLAR_SIMULATOR, HUMIDITY_MONITORED, load, ramping(kelvin(5), kelvin(65))],
+        [SOLAR_SIMULATOR, HUMIDITY_AT_50, load, ramping(kelvin(5), kelvin(65))],
     )
 # Level 3, where MPP tracking is mandatory: the table's "MPP or OC" is no option.
 protocol(
     'ISOS-LT-3',
     [],
-    [SOLAR_SIMULATOR, HUMIDITY_MONITORED, MPP[1], ramping(kelvin(-25), kelvin(65))],
+    [SOLAR_SIMULATOR, HUMIDITY_AT_50, MPP[1], ramping(kelvin(-25), kelvin(65))],
 )
 
 

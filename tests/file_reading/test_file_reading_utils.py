@@ -181,9 +181,9 @@ def test_assumed_conditions_fill_only_what_a_phase_leaves_out_and_are_said():
     data = document['data']
     [phase] = data['routine']['instructions']
     held = {each['channel']: each for each in phase['instructions']}
-    assert held['temperature']['hold'] == '65 °C'
+    assert held['temperature']['specify'] == '65 °C'
     # Assumed, so never recorded: held, not monitored.
-    assert (held['irradiation']['hold'], 'monitor' in held['irradiation']) == (
+    assert (held['irradiation']['specify'], 'monitor' in held['irradiation']) == (
         '1000 W/m^2',
         False,
     )

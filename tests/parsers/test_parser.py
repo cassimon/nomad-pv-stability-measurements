@@ -25,7 +25,7 @@ def test_nomad_reads_an_authored_file_into_a_protocol_entry():
 
     assert isinstance(archive.data, StabilityProtocol)
     assert isinstance(soak.sub_instructions[3], HoldVoltage)
-    assert soak.sub_instructions[3].set_point.to(ureg.volt).magnitude == (
+    assert soak.sub_instructions[3].value.to(ureg.volt).magnitude == (
         pytest.approx(0.8)
     )
     # One pass of the routine: 500 h + 100 h + 100 h + 24 h + 1 h. The settings last as
@@ -40,7 +40,7 @@ def test_a_file_with_options_is_one_entry_per_variant(tmp_path):
         'data:\n'
         '  name: P\n'
         '  channel_settings:\n'
-        '    temperature: {options: [{hold: 65 °C}, {hold: 85 °C}]}\n'
+        '    temperature: {options: [{specify: 65 °C}, {specify: 85 °C}]}\n'
     )
 
     main, *children = parse(str(mainfile))
