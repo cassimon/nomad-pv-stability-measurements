@@ -9,9 +9,9 @@ A run file names the protocol file the run followed, in the same upload, or desc
 the test itself. Then the file makes two entries: the run, and a child entry keyed
 `PROTOCOL_KEY` for the protocol it describes, which the run refers to.
 
-To read a new institution's runs: write its module from the template, add it to
-`INSTITUTIONS`, and widen the entry point's `mainfile_name_re` if its run files are
-named otherwise than `*.run.yaml`.
+To read a new institution's runs: write its module from the template and add it to
+`INSTITUTIONS`. The parser is offered every file of an upload, so each module's
+`is_protocol_file` should look at the name before the content.
 """
 
 from collections.abc import Iterable

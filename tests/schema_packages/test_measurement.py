@@ -202,6 +202,37 @@ def test_a_measurement_shows_its_series_over_time_since_it_started(normalized):
     assert [mark['x0'] for mark in figure.figure['layout']['shapes']] == [0.0, 4.0]
 
 
+def test_the_power_each_scan_reported_is_shown_beside_the_tracked_power(normalized):
+    measurement = normalized(
+        StabilityMeasurement(
+            datetime=START,
+            steps=[
+                StabilitySeriesStep(
+                    name='ageing',
+                    start_time=START,
+                    time=HOURS,
+                    power_density=ELECTRICAL['power_density'],
+                ),
+                JVSweepStep(
+                    start_time=START + timedelta(hours=1),
+                    figures_of_merit=[
+                        JVFiguresOfMerit(
+                            direction='reverse',
+                            power_density_at_maximum_power_point=190 * ureg('W/m^2'),
+                        )
+                    ],
+                ),
+            ],
+        )
+    )
+
+    [figure] = measurement.figures
+    tracked, reported = figure.figure['data']
+    assert reported['yaxis'] == tracked['yaxis']  # the same row
+    assert (reported['mode'], reported['x']) == ('markers', [1.0])
+    assert reported['y'] == pytest.approx([19.0])  # mW/cm²
+
+
 def test_a_step_without_a_start_is_left_out_of_the_overview(normalized, log):
     normalized(
         StabilityMeasurement(

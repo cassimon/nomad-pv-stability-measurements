@@ -128,3 +128,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# macOS folder metadata
+.DS_Store

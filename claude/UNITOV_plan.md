@@ -41,10 +41,9 @@ marked **(decided)**. Open points are in the last section.
 |---|---|
 | one run folder | one `StabilityMeasurement` entry. Its **anchor** (mainfile) is the Tracking file |
 | `User` | `operator` |
-| `Device` (`AI14-1A`) | `samples: [{name: 'AI14-1A'}]` |
 | `Note` (`SMU 1A`) | `instruments: [{name: 'SMU 1A'}]` |
 | `Start-up Time` (dd/mm/yyyy, Europe/Rome) | `datetime` |
-| `Cell area`, `Tipology` | -> create these as new fields in a boiler blade sample dataschema Reference it in the activity. Comment this will later be replaced. |
+| `Device` (`AI14-1A`), `[Cell Settings]` (`Tipology`, `Cell Area`, `#Cells`, …) | a **placeholder sample entry** `SolarCellSample` (§5.0), one per pixel, which `samples[].reference` of the run and the collection points to. The class says it is to be replaced by the lab's real sample schema |
 | Tracking data | `StabilitySeriesStep`: `time`, `voltage`, `current_density`, `power_density`, `controlled: [voltage]` |
 | Tracking settings | the new tracker fields of the series step (§5.2) |
 | each J–V file | `JVSweepStep`: FW/RV turned into long form with `direction`, FOM rows into `figures_of_merit`, J–V settings into the new sweep fields (§5.2) |
@@ -103,14 +102,14 @@ plan it never had. There are two kinds of entry, both of class `StabilityMeasure
 | Entry | `plan` | Holds |
 |---|---|---|
 | **run** (one per run folder) | the protocol it followed | its own steps, as in §2 |
-| **collection** (one per **pixel**, the physical device) **(decided)** | the general protocol *Storage and irregular measurements* (below) | `sub_activities` → every run of the pixel, and the **loose J–V scans as its own steps** |
+| **collection** (one per **pixel**, the physical device) **(decided)** | the general protocol *CumulativeStabilityMeasurements* (below) | `sub_activities` → every run of the pixel, and the **loose J–V scans as its own steps** |
 
 - `StabilityActivity` gets `sub_activities = Quantity(type=Reference(StabilityActivity),
   shape=['*'])`. It is to be replaced by the subactivities of Activity v2 once those
   exist.
-- **The general protocol *Storage and irregular measurements*:** no instructions, no
+- **The general protocol *CumulativeStabilityMeasurements*:** no instructions, no
   conditions, no holds, and an **open-ended** duration. It states only that nothing
-  between the measurements was specified. A shared helper, `irregular_protocol()` in
+  between the measurements was specified. A shared helper, `cumulative_protocol()` in
   `file_reading_utils.py`, returns it in the authored form, so every institution's
   collections use the same one. *Verified:* `{'data': {'name': …, 'duration':
   'open-ended'}}` translates without problems and normalizes without errors, warnings or
@@ -132,6 +131,17 @@ plan it never had. There are two kinds of entry, both of class `StabilityMeasure
   there, and stores only the references. This needs verifying before step 6.
 
 ## 5. Schema changes
+
+### 5.0 A placeholder sample (decided)
+- `SolarCellSample(System)` in a new `schema_packages/sample.py`, with the fields the
+  files state: `cell_area` (cm²), `typology` (text, `Cell`/`Module`), `number_of_cells`.
+  Its description says it is a **placeholder**, to be replaced by the real sample schema
+  (Device and Substrate from processing entries).
+- One sample entry per pixel: a child `'sample'` of the pixel's anchor (§7). The run and
+  the collection fill `samples: [{name, reference}]`, with the reference built from
+  `generate_entry_id`, like `plan`. No `lab_id` is set: `EntityReference.normalize`
+  would search the whole NOMAD for it.
+- `W cell area` and `#W cells` have no place yet; they are reported, not dropped.
 
 ### 5.1 `P_MPP` (decided)
 - Add `JVFiguresOfMerit.power_density_at_maximum_power_point` (W/m²), taken as reported.
@@ -196,52 +206,78 @@ which is still open.
 ## 7. Parser: which entries one anchor file makes
 
 - A run's anchor (the Tracking file) makes the run entry and its `'protocol'` child.
-- A pixel's collection needs a mainfile of its own: **the anchor of the pixel's earliest
-  run** also makes the children `'collection'` and `'collection protocol'` (the general
-  protocol of §4). That is deterministic from the folder listing, so it needs no second
-  pass.
+- A pixel's sample and collection need a mainfile of their own: **the anchor of the
+  pixel's earliest run** also makes the children `'sample'`, `'collection'` and
+  `'collection protocol'` (the general protocol of §4). That is deterministic from the
+  folder listing, so it needs no second pass.
   - `read_collection(anchor)` returns `None`, or
-    `{'name', 'samples', 'runs': [anchor paths], 'steps': [loose steps]}` where this anchor
-    is the pixel's first run.
-  - `sub_activities` are filled with
-    `../upload/archive/{generate_entry_id(upload_id, run_anchor)}#/data`. Entry ids are
+    `{'name', 'sample': {...}, 'runs': [anchor paths], 'steps': [loose steps]}` where
+    this anchor is the pixel's first run.
+  - `sub_activities` and `samples[].reference` are filled with
+    `../upload/archive/{generate_entry_id(upload_id, anchor, key)}#/data`. Entry ids are
     deterministic, so it does not matter which entry is processed first.
-  - `is_mainfile` returns `['protocol', 'collection', 'collection protocol']`,
+  - `is_mainfile` returns `['collection', 'collection protocol', 'protocol', 'sample']`,
     `['protocol']`, or `True`.
 - A pixel with loose scans but **no** run still gets a collection, because no data is lost
   **(decided)**. Its anchor is the first loose file (sorted by path). That file makes the
-  main entry, which is the collection itself, and its `'collection protocol'` child.
+  main entry, which is the collection itself, and its `'collection protocol'` and
+  `'sample'` children.
 - With one general protocol per collection, the 6 collections make 6 identical protocol
   entries. Keeping one entry per protocol is Design.md §35, which is still open.
+- **NOMAD rewrites a matched Latin-1 mainfile as UTF-8** (`match_parser` in
+  `nomad/parsing/parsers.py`), but not the other files of the run. The anchor is therefore
+  UTF-8 once uploaded and its siblings stay Latin-1: every UNITOV reader tries UTF-8 first
+  and falls back to Latin-1.
 
 ## 8. Steps (each one reviewed before the next)
 
-0. Remove the `.DS_Store` files from `institutes/` and add them to `.gitignore`.
-1. **Matching:** entry point `.*`, the reworded template, and `ASSUMED_CONDITIONS` and
-   `read_collection` in the template and in SIM. SIM must behave exactly as before.
-2. **UNITOV readers:**
-   - the Latin-1 header/table reader, `read_stability_series` and `read_jv_file`;
-   - the helpers `rename_columns` and `jv_from_side_by_side`;
-   - Rs and R// read as Ω·cm², FF and Eff from %;
-   - `tests/file_reading/test_file_reading_UNITOV.py` on one real folder.
-3. **Schema §5.1 and §5.2:** the P_MPP field and its markers in the overview, and the
-   settings of the J–V sweep and the tracker, each with a test.
-4. **Runs:** `read_protocol` for UNITOV (the folder as the run, Parameters rows without a
-   file as FOM-only scans), and inline `figures_of_merit` in `read_files`.
-   *Test:* the run with a missing J–V file still has two scans.
-5. **Embedded protocol:** `ASSUMED_CONDITIONS`, the mean voltage, and `notes`.
-   *Test:* the protocol entry, and the run's `plan` pointing to it.
-6. **Collections:** `sub_activities`, `irregular_protocol()`, the `'collection'` and
-   `'collection protocol'` children, loose steps, a collection anchored at a loose file,
-   and the cumulative figure. Verify the reference and ordering question of §4 first.
-   The example batch has no loose scans, so a test adds a folder of loose files.
-7. **§5.3 `JVScan`:** schema, translator word, timeline, and use in the UNITOV protocol.
-8. **Example upload and docs:**
-   - an entry point for `institutes/UNITOV/*`;
-   - an upload test like `test_simulated_runs.py`: every run and collection through NOMAD's
-     `parse` and `normalize_all` with no errors, and each `plan` and `sub_activities`
-     pointing to entries in the upload;
-   - Design.md gets a new §37 (and amendments to §34.4a and §20.8); CLAUDE.md is updated.
+Each step ends with the full test suite and ruff passing, and a stop for review.
+
+**A. Groundwork, no UNITOV yet**
+1. **Matching every file name** *(done)*. Remove the `.DS_Store` files and ignore them in
+   `.gitignore`. The entry point's `mainfile_name_re` becomes `.*`; the institutions'
+   `is_protocol_file` decide, name first. Parser docstring updated. *Test:* a UNITOV-named
+   file or a `.stability.yaml` file is not taken; SIM runs still are.
+2. **Interface additions** *(done)*. The template reworded (the run file is the run's
+   anchor, and may collect the step files beside it; collections), `ASSUMED_CONDITIONS = {}`
+   and `read_collection(path) -> None` in the template and SIM. SIM behaves as before.
+3. **Placeholder sample** *(done)* (§5.0): `SolarCellSample` in `sample.py`, registered in the
+   entry point. *Test:* it loads and normalizes.
+4. **P_MPP** *(done)* (§5.1): the field and its markers on the power-density row.
+5. **Sweep settings** (§5.2): the five `JVSweepStep` fields, filled through the step dict.
+6. **Tracker settings** (§5.2): the three flat `StabilitySeriesStep` fields.
+7. **Inline figures of merit** in `read_files`, and the template's `read_protocol` says a
+   step may carry `figures_of_merit` without `file`. *Test:* a step with FOMs and no file.
+
+**B. UNITOV's readers**
+8. **Shared helpers** in utils: `encoding` for the readers, `rename_columns`,
+   `jv_from_side_by_side`.
+9. **UNITOV header and table reader**, and `read_jv_file`. *Test:* one real J–V file.
+10. **`read_stability_series`.** *Test:* one real Tracking file.
+11. **`read_protocol`**: the folder as the run, Parameters rows without a file as FOM-only
+    scans, `is_protocol_file`, and UNITOV listed in `INSTITUTIONS`. *Test:* the run with a
+    missing J–V file still has two scans.
+12. **Embedded protocol**: `ASSUMED_CONDITIONS`, the mean voltage, `notes`. *Test:* the
+    protocol entry, and the run's `plan` pointing to it.
+
+**C. Samples and collections**
+13. **Sample entries**: the `'sample'` child and `samples[].reference` of the run.
+14. **`sub_activities`** on `StabilityActivity`, and `cumulative_protocol()`.
+15. **Collections in the parser**: `read_collection` for UNITOV, the `'collection'` and
+    `'collection protocol'` children, loose steps, and a collection anchored at a loose
+    file. *Test:* a fixture folder of loose files, as the example batch has none.
+16. **The cumulative figure.** Verify the reference/ordering question of §4 first.
+
+**D. Periodic J–V in the protocol**
+17. **`JVScan`** (§5.3): the schema class and its normalize.
+18. The translator word `jv_scan`, the timeline ticks, and use in UNITOV's protocol.
+
+**E. Example upload and docs**
+19. The entry point for `institutes/UNITOV/*`, and an upload test like
+    `test_simulated_runs.py`: every entry through NOMAD's `parse` and `normalize_all` with
+    no errors, and each `plan`, `sub_activities` and sample reference pointing into the
+    upload.
+20. Design.md §37 marked built (and §34.4a, §20.8 amended); CLAUDE.md updated.
 
 ## 9. Open points
 
@@ -250,4 +286,5 @@ which is still open.
 
 Decided (2026-09-23): a collection per pixel (§4); Parameters-only scans belong to the run
 (§4); a collection even without a run (§7); tracker settings as flat fields (§5.2); the
-general protocol *Storage and irregular measurements* (§4).
+general protocol *CumulativeStabilityMeasurements* (§4); a placeholder
+`SolarCellSample` instead of the description (§5.0).

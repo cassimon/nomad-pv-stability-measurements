@@ -30,6 +30,7 @@ measurement_parser_entry_point = StabilityMeasurementParserEntryPoint(
     description='Reads a PV stability run, the file that says how a stability test '
     'went and the files of its steps, into a StabilityMeasurement entry. Recognizes '
     'which institution wrote it.',
-    # Every institution's run file names; the parser then asks which one it is.
-    mainfile_name_re=r'.*\.run\.ya?ml$',
+    # Institutions name their run files in their own ways, so every file is offered
+    # and each institution's `is_protocol_file` decides.
+    mainfile_name_re=r'.*',
 )

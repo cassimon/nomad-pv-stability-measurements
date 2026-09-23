@@ -4214,6 +4214,9 @@ becomes *the one file per run that stands for it* (its anchor; here the Tracking
 - The parser's entry point matches every file (`mainfile_name_re=r'.*'`), and each
   institution's `is_protocol_file` decides. Adding an institution then means its module and one
   line in `INSTITUTIONS`, with no regex to widen.
+- NOMAD rewrites a matched mainfile that is not UTF-8 (it decodes it as Latin-1) as UTF-8, but not
+  the other files of the run. A reader of a Latin-1 format therefore tries UTF-8 first and falls
+  back to Latin-1.
 - A step may carry its `figures_of_merit` inline, without a `file`: a scan whose curve file is
   missing but whose figures of merit the station logged. Many set-ups log only figures of merit
   over time, so this is generic, not specific to UNITOV.
@@ -4228,14 +4231,14 @@ following a plan it never had.
 - **Two kinds of entry**, both `StabilityMeasurement`:
   - a **run**, whose `plan` is the protocol it followed;
   - a **collection**, one per **pixel** (the physical device), whose `plan` is the general
-    protocol *Storage and irregular measurements*. It holds the runs as `sub_activities` and the
+    protocol *CumulativeStabilityMeasurements*. It holds the runs as `sub_activities` and the
     loose J–V scans as its own steps.
 - `StabilityActivity.sub_activities` is a reference list to other `StabilityActivity` entries.
   It stands in for the subactivities of Activity v2 and is to be replaced by them once they
   exist.
-- **Storage and irregular measurements:** a protocol with **no instructions, no conditions, no
+- **CumulativeStabilityMeasurements:** a protocol with **no instructions, no conditions, no
   holds**, and an **open-ended** duration. It says exactly that nothing between the measurements
-  was specified. It is authored once (`file_reading_utils.irregular_protocol()`) and used for
+  was specified. It is authored once (`file_reading_utils.cumulative_protocol()`) and used for
   every institution's collections. *Verified:* it translates without problems and normalizes
   without errors, warnings or figure.
 - **Which scans are loose** is decided by the institution's reader from where the files lie,
@@ -4250,8 +4253,12 @@ following a plan it never had.
 - **Figure:** the collection draws all its runs' steps and its own steps on one time axis, each
   placed by its `start_time`. It uses the same function as a run's overview, which is widened to
   a list of step lists.
+- **Samples:** until a real sample schema exists, a placeholder `SolarCellSample(System)` holds
+  what the files state of the device (cell area, typology, number of cells). One sample entry is
+  made per pixel, beside its collection, and runs and collections refer to it from `samples`.
+  No `lab_id` is set, since `EntityReference.normalize` would search all of NOMAD for it.
 - **Later:** a collection links the Device and Substrate it measured, once they exist as results
-  of processing entries.
+  of processing entries; they replace the placeholder sample.
 
 ### 37.3 Values an institution assumes
 

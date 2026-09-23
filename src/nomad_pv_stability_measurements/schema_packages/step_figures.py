@@ -82,7 +82,7 @@ def over_time_figure_for_plotting(
     pieces: list[tuple[str, list[float], dict, list[str]]],
     title: str,
     marks: list[tuple[float, str]] = (),
-    scans: dict[str, tuple[list[float], object]] | None = None,
+    scans: dict[str, dict[str, tuple[list[float], object]]] | None = None,
 ) -> dict:
     """Quantities over time, one row each, all on one time axis in hours.
 
@@ -91,11 +91,17 @@ def over_time_figure_for_plotting(
     two, a quantity in `controlled` in the colour of the controlled, any other in that
     of the monitored. `marks` are
     `(hours, text)`: moments marked by a dashed line through every row. `scans` are
-    the efficiencies of J–V scans by direction, `(hours, efficiency)`, drawn in a row
-    above the others as dots joined by lines, one line per direction."""
-    rows = [name for name in ROWS if any(name in each[2] for each in pieces)]
+    what J–V scans reported, by row and then by direction, `(hours, values)`: in the
+    row `efficiency`, above the others, as dots joined by lines, one line per
+    direction; in a row of `ROWS`, as dots beside what the series recorded there."""
+    scans = scans or {}
+    rows = [
+        name
+        for name in ROWS
+        if name in scans or any(name in each[2] for each in pieces)
+    ]
     roles = set()
-    if scans:
+    if 'efficiency' in scans:
         rows.insert(0, 'efficiency')
     height = (1 - ROW_GAP * (len(rows) - 1)) / len(rows)
     traces = []
@@ -120,7 +126,7 @@ def over_time_figure_for_plotting(
                     'marker': {'size': 8, 'color': DIRECTION_COLORS[direction]},
                     **axes,
                 }
-                for direction, (hours, efficiency) in scans.items()
+                for direction, (hours, efficiency) in scans['efficiency'].items()
             ]
         else:
             label, unit, written = ROWS[row]
@@ -140,6 +146,18 @@ def over_time_figure_for_plotting(
                         **axes,
                     }
                 )
+            traces += [
+                {
+                    'type': 'scatter',
+                    'mode': 'markers',
+                    'name': f'{direction} scan · {label}',
+                    'x': hours,
+                    'y': values.to(unit).magnitude.tolist(),
+                    'marker': {'size': 8, 'color': DIRECTION_COLORS[direction]},
+                    **axes,
+                }
+                for direction, (hours, values) in scans.get(row, {}).items()
+            ]
         top = 1 - index * (height + ROW_GAP)
         last = index == len(rows) - 1
         layout[f'xaxis{suffix}'] = {
@@ -167,7 +185,13 @@ def over_time_figure_for_plotting(
         for at, _ in marks
     ]
     keys = {role: ROLE_COLORS[role] for role in ROLE_COLORS if role in roles}
-    keys.update({direction: DIRECTION_COLORS[direction] for direction in scans or {}})
+    keys.update(
+        {
+            direction: DIRECTION_COLORS[direction]
+            for by_direction in scans.values()
+            for direction in by_direction
+        }
+    )
     layout['annotations'] = [_legend(keys)] + [
         {
             'text': text,

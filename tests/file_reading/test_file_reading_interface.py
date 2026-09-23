@@ -8,6 +8,7 @@ import pytest
 
 from nomad_pv_stability_measurements import file_reading
 from nomad_pv_stability_measurements.file_reading import file_reading_TEMPLATE
+from nomad_pv_stability_measurements.file_reading.file_reading_utils import SET_POINTS
 
 INSTITUTIONS = sorted(
     path.stem.removeprefix('file_reading_')
@@ -32,4 +33,6 @@ def test_an_institution_has_the_functions_of_the_template(institution):
     )
 
     assert module.INSTITUTION == institution
+    # Conditions are assumed only for what a phase of a protocol can hold.
+    assert set(module.ASSUMED_CONDITIONS) <= set(SET_POINTS)
     assert interface(module) == interface(file_reading_TEMPLATE)

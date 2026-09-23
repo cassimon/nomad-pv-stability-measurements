@@ -205,6 +205,12 @@ class JVFiguresOfMerit(ArchiveSection):
         unit='A/m^2',
         description='The current density at the maximum power point, J_mpp.',
     )
+    power_density_at_maximum_power_point = Quantity(
+        type=np.float64,
+        unit='W/m^2',
+        description='The power per area at the maximum power point, P_mpp: what the '
+        'cell delivers at its best, comparable with the power a series tracked.',
+    )
     series_resistance = Quantity(
         type=np.float64,
         unit='ohm*m^2',
@@ -306,11 +312,20 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         super().normalize(archive, logger)
         self.figures = self.figures_for_plotting(logger)
 
+    #: What the overview shows of each J–V scan, as the station reported it, and in
+    #: which row: the efficiency on top, the power at the maximum power point beside
+    #: the power the series tracked.
+    reported_for_plotting = {
+        'efficiency': 'efficiency',
+        'power_density_at_maximum_power_point': 'power_density',
+    }
+
     def figures_for_plotting(self, logger) -> list[PlotlyFigure]:
         """The whole test on one time axis, in hours since it started: on top the
         efficiency of each J–V scan as the station reported it, one line per direction,
         then the output and the conditions the series recorded, each in the colour of
-        its role, controlled or only monitored, and a dashed line where
+        its role, controlled or only monitored, with each scan's power at the maximum
+        power point as dots on the power density row, and a dashed line where
         each J–V sweep was taken. Nothing where there is nothing to draw. A step with no
         `start_time` has no place on the axis and is left out, with a warning."""
         placed = [step for step in self.steps if step.start_time is not None]
@@ -344,16 +359,21 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         reported = {}
         for step in sweeps:
             for scan in step.figures_of_merit:
-                if scan.direction is not None and scan.efficiency is not None:
-                    reported.setdefault(scan.direction, []).append(
-                        (since_start(step), scan.efficiency.to('').magnitude)
-                    )
+                for name, row in self.reported_for_plotting.items():
+                    value = getattr(scan, name)
+                    if scan.direction is not None and value is not None:
+                        reported.setdefault(row, {}).setdefault(
+                            scan.direction, []
+                        ).append((since_start(step), value))
         scans = {
-            direction: (
-                [at for at, _ in points],
-                [value for _, value in points] * ureg(''),
-            )
-            for direction, points in reported.items()
+            row: {
+                direction: (
+                    [at for at, _ in points],
+                    ureg.Quantity.from_list([value for _, value in points]),
+                )
+                for direction, points in by_direction.items()
+            }
+            for row, by_direction in reported.items()
         }
         if not pieces and not scans:
             return []

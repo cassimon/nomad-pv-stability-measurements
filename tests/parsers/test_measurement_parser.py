@@ -1,5 +1,7 @@
 """How a stability run is recognized, and which protocol entry it refers to."""
 
+import re
+
 import pytest
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.utils import generate_entry_id
@@ -29,6 +31,13 @@ def test_the_parser_takes_the_run_files_of_institutions_it_knows(
     matched = PARSER.is_mainfile(name, 'text/plain', content.encode(), content)
 
     assert bool(matched) is recognized
+
+
+def test_every_file_is_offered_and_the_institutions_decide():
+    # Institutions name their run files in their own ways.
+    name_re = re.compile(measurement_parser_entry_point.mainfile_name_re)
+
+    assert name_re.fullmatch('A/0000_2025-11-20_Stability (Tracking)_A-1.txt')
 
 
 @pytest.mark.parametrize(

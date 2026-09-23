@@ -11,10 +11,17 @@ from `nomad.units.ureg`. Helpers that more than one institution can use, such as
 reading a CSV that names each column's unit in its header, are in
 `file_reading_utils.py`. `file_reading_SIM.py` is a complete example.
 
-A run is one file that says how the run went (`read_protocol`) and one file per step
-that holds the step's data: a stability series (`read_stability_series`) or a J–V sweep
+A run has one **run file**, the file that stands for it: its entry is made from that
+file. Some institutions write a file that says how the run went and lists its steps;
+others write only the steps' files, in a folder of their own or under a common name.
+Then choose one of them as the run file, and `read_protocol` collects the others around
+it. Each step's data is a stability series (`read_stability_series`) or a J–V sweep
 (`read_jv_file`). The run file either names the protocol file the run followed, in the
 same upload, or describes the test itself (`read_embedded_protocol`).
+
+Data taken outside any run, such as J–V scans in the time between runs, belongs to a
+**collection**: one entry per device, which refers to all of the device's runs and holds
+the rest as its own steps (`read_collection`).
 """
 
 from pathlib import Path
@@ -25,6 +32,12 @@ import pint
 #: `file_reading_SIM.py`.
 INSTITUTION = 'TEMPLATE'
 
+#: The conditions this institution's tests run under where its files state none, as
+#: `{name in SET_POINTS: value as text}`, for example
+#: `{'temperature': 'RT', 'irradiance': '1000 W/m^2'}`. Leave it empty where the files
+#: state everything. A protocol that uses one of them says so in its `notes`.
+ASSUMED_CONDITIONS: dict[str, str] = {}
+
 
 def is_protocol_file(path: str | Path, content: str) -> bool:
     """Whether the file at `path`, whose text is `content`, is this institution's run
@@ -32,7 +45,7 @@ def is_protocol_file(path: str | Path, content: str) -> bool:
 
     Decide it from the file's name, its content, or both, for example a naming pattern
     and a line that names the institution. Another institution's run file must give
-    `False`.
+    `False`. Every file of an upload is asked, so look at the name first.
     """
     raise NotImplementedError
 
@@ -84,6 +97,9 @@ def read_protocol(path: str | Path) -> dict:
             ],
         }
 
+    Where the run file does not list the steps, find them beside it, for example the
+    other files in its folder, using `is_stability_series_file` and `is_jv_file`.
+
     Leave out what the file does not say. List the steps in the order they ran, and
     give each step's `file` as a path that can be opened as it is. A series' optional
     `controlled` names the recorded quantities that were controlled, by their names in
@@ -129,4 +145,24 @@ def read_jv_file(path: str | Path) -> dict[str, object]:
     `figures_of_merit`: a table of one row per scan, one array per column by the name
     of the `JVFiguresOfMerit` quantity it fills (`direction`, `efficiency`,
     `open_circuit_voltage`, ...). They are taken as reported, never worked out again."""
+    raise NotImplementedError
+
+
+def read_collection(path: str | Path) -> dict | None:
+    """The collection the file at `path` stands for, or `None` if it stands for none.
+
+    A collection is one device's whole history: all its runs, and the steps taken
+    outside any run, whose conditions in between nobody specified. Exactly one file per
+    device stands for its collection, for example the run file of its first run, or,
+    for a device without runs, its first other file. For it, return
+
+        {
+            'name': 'AI14-1A',
+            'samples': [{'name': 'AI14-1A'}],
+            'runs': ['/full/path/to/run/file', ...],  # the run files of its runs
+            'steps': [...],  # the steps outside any run, as in `read_protocol`
+        }
+
+    For every other file, and where the institution keeps no collections, `return None`.
+    """
     raise NotImplementedError

@@ -42,6 +42,8 @@ from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
 )
 
 INSTITUTION = 'SIM'
+#: SIM's files state every condition.
+ASSUMED_CONDITIONS: dict[str, str] = {}
 
 _PROTOCOL_FILE_NAME = re.compile(r'.*\.run\.ya?ml')
 _SAYS_INSTITUTION = re.compile(
@@ -96,6 +98,11 @@ def read_embedded_protocol(path: str | Path) -> dict | None:
     document = yaml.safe_load(Path(path).read_text(encoding='utf-8')) or {}
     conditions = document.get('test conditions')
     return None if conditions is None else protocol_from_phases(**conditions)
+
+
+def read_collection(path: str | Path) -> dict | None:
+    """`None`: every SIM run stands alone, and SIM has no data outside its runs."""
+    return None
 
 
 def read_stability_series(path: str | Path) -> dict[str, pint.Quantity]:
