@@ -1,6 +1,6 @@
 """The runs measured at UNITOV load through NOMAD as an upload: each run with the
-protocol it describes, and each cell as a sample and a collection of its history, every
-reference pointing to an entry of the same upload."""
+protocol derived from its files, and each cell as a sample and a collection of its
+history, every reference pointing to an entry of the same upload."""
 
 from collections import Counter
 from pathlib import Path
@@ -59,8 +59,9 @@ def processed(upload: Path, log) -> dict[str, EntryArchive]:
 
 
 def referred(data) -> list[str]:
-    """The entries `data` refers to: its plan, its samples and its parts."""
-    references = [data.plan] if getattr(data, 'plan', None) is not None else []
+    """The entries `data` refers to: its plans, its samples and its parts."""
+    plans = (getattr(data, name, None) for name in ('plan', 'derived_plan'))
+    references = [each for each in plans if each is not None]
     references += [each.reference for each in getattr(data, 'samples', None) or []]
     references += list(getattr(data, 'sub_activities', None) or [])
     return [
@@ -79,13 +80,17 @@ def test_every_run_and_cell_loads_and_refers_only_into_its_upload(tmp_path, log)
     ]
     collections = [each for each in measurements if each.sub_activities]
     assert log.errors == []
-    # Each run and each cell's collection with its protocol.
+    # Each run with the protocol derived for it, and each cell's collection.
     assert kinds == {
         'StabilityMeasurement': RUNS + CELLS,
-        'StabilityProtocol': RUNS + CELLS,
+        'StabilityProtocol': RUNS,
         'SolarCellSample': CELLS,
     }
     assert sum(len(each.sub_activities) for each in collections) == RUNS
-    assert all(each.plan is not None and each.samples for each in measurements)
+    runs = [each for each in measurements if not each.sub_activities]
+    # No UNITOV file names a protocol, so none is given; a collection has none at all.
+    assert all(each.plan is None and each.samples for each in measurements)
+    assert all(each.derived_plan is not None for each in runs)
+    assert all(each.derived_plan is None for each in collections)
     for each in entries.values():
         assert set(referred(each.data)) <= set(entries), each.metadata.mainfile

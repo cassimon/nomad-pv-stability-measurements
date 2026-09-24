@@ -10,7 +10,6 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
     as_datetime,
-    cumulative_protocol,
     jv_from_side_by_side,
     protocol_from_phases,
     read_csv_with_units_in_header,
@@ -158,17 +157,6 @@ def test_phases_make_a_protocol_run_in_sequence_and_repeated(log):
     assert protocol.notes == 'A lab test.'
     # Held and monitored, except the light in the dark.
     assert monitored == [True, None]
-
-
-def test_a_collection_follows_a_protocol_that_specifies_nothing(log):
-    translation = translate(cumulative_protocol())
-    protocol = StabilityProtocol.m_from_dict(translation.archive['data'])
-    for section in protocol.m_all_contents(depth_first=True, include_self=True):
-        section.normalize(EntryArchive(), log)
-
-    assert translation.problems == [] and log.errors == [] and log.warnings == []
-    assert protocol.instructions == []
-    assert protocol.duration.kind == 'open_ended'
 
 
 def test_assumed_conditions_fill_only_what_a_phase_leaves_out_and_are_said():

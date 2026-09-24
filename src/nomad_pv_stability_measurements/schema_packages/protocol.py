@@ -122,7 +122,17 @@ class StabilityActivity(Measurement, Planned):
 
     plan = Quantity(
         type=Reference(StabilityProtocol),
-        description='The protocol this test runs.',
+        aliases=['given_plan'],
+        description='The protocol this test runs, as whoever ran it states it: a '
+        'protocol file the run names, or the test its run file describes. Empty where '
+        'none was given; it may be linked once it is known.',
+    )
+    derived_plan = Quantity(
+        type=Reference(StabilityProtocol),
+        description='A protocol worked out afterwards from the files of the run, where '
+        'none was given: from how the files lie, what they recorded, and conditions '
+        'the institution assumes. Its `notes` name every value assumed or worked out. '
+        'It describes the test; nobody followed it.',
     )
     sub_activities = Quantity(
         type=Reference(SectionProxy('StabilityActivity')),

@@ -17,7 +17,9 @@ others write only the steps' files, in a folder of their own or under a common n
 Then choose one of them as the run file, and `read_protocol` collects the others around
 it. Each step's data is a stability series (`read_stability_series`) or a J–V sweep
 (`read_jv_file`). The run file either names the protocol file the run followed, in the
-same upload, or describes the test itself (`read_embedded_protocol`).
+same upload, or describes the test itself (`read_embedded_protocol`). Where it does
+neither, a protocol may be worked out from the run's files (`derive_protocol`): it
+describes the run, but it is never taken for the protocol the run followed.
 
 Data taken outside any run, such as J–V scans in the time between runs, belongs to a
 **collection**: one entry per device, which refers to all of the device's runs and holds
@@ -33,7 +35,8 @@ INSTITUTION = 'TEMPLATE'
 #: The conditions this institution's tests run under where its files state none, as
 #: `{name in SET_POINTS: value as text}`, for example
 #: `{'temperature': 'RT', 'irradiance': '1000 W/m^2'}`. Leave it empty where the files
-#: state everything. A protocol that uses one of them says so in its `notes`.
+#: state everything. Only a protocol `derive_protocol` works out uses them, and says so
+#: in its `notes`.
 ASSUMED_CONDITIONS: dict[str, str] = {}
 
 
@@ -125,8 +128,29 @@ def read_embedded_protocol(path: str | Path) -> dict | None:
     phases and the values held in each, `file_reading_utils.protocol_from_phases` builds
     it. Otherwise, `return None`.
 
+    Only what the file states the test was to be: a protocol that assumes a value, or
+    works one out from the data, comes from `derive_protocol`.
+
     Called when the parser decides which entries a file makes, so it must not fail on a
     run file that names a protocol file.
+    """
+    raise NotImplementedError
+
+
+def derive_protocol(path: str | Path) -> dict | None:
+    """A protocol worked out from the run whose run file is at `path`, where the run's
+    files neither name a protocol nor describe one; otherwise `None`.
+
+    Return it as `read_embedded_protocol` does. It may use what the files show (how they
+    lie, how the station was set up, what was recorded), `ASSUMED_CONDITIONS` where they
+    show nothing (`protocol_from_phases(..., assumed=ASSUMED_CONDITIONS)`), and set
+    points worked out from the data where no header states them. Its `notes` name every
+    value that was assumed or worked out rather than read. The run's entry and an entry
+    for this protocol are both made from the run file, and the run refers to it as its
+    `derived_plan`: it describes the run, and nobody followed it.
+
+    Called when the parser decides which entries a file makes, so it must not fail on
+    any run file.
     """
     raise NotImplementedError
 
@@ -181,9 +205,9 @@ def read_collection(path: str | Path) -> dict | None:
             'steps': [...],  # the steps outside any run, as in `read_protocol`
         }
 
-    The file makes entries of the collection, of the protocol it follows, which
-    specifies nothing, and of the sample. A run refers to that sample by naming this
-    file as its sample's `file` (see `read_protocol`).
+    The file makes entries of the collection and of the sample. A collection follows no
+    protocol: its runs have their own. A run refers to that sample by naming this file
+    as its sample's `file` (see `read_protocol`).
 
     For every other file, and where the institution keeps no collections, `return None`.
     """

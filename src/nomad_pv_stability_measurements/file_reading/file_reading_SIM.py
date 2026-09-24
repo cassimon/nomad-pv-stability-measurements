@@ -100,6 +100,11 @@ def read_embedded_protocol(path: str | Path) -> dict | None:
     return None if conditions is None else protocol_from_phases(**conditions)
 
 
+def derive_protocol(path: str | Path) -> dict | None:
+    """`None`: a SIM run file names its protocol or describes it."""
+    return None
+
+
 def read_collection(path: str | Path) -> dict | None:
     """`None`: every SIM run stands alone, and SIM has no data outside its runs."""
     return None

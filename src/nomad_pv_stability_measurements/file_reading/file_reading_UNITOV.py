@@ -186,7 +186,12 @@ def read_protocol(path: str | Path) -> dict:
 
 
 def read_embedded_protocol(path: str | Path) -> dict | None:
-    """The test the Tracking file at `path` describes: one phase, as long as its
+    """`None`: no UNITOV file states the test a run was to be (`derive_protocol`)."""
+    return None
+
+
+def derive_protocol(path: str | Path) -> dict | None:
+    """The test the Tracking file at `path` shows: one phase, as long as its
     `Test duration`, holding the load as its `Algorithm` says, under UNITOV's
     `ASSUMED_CONDITIONS`. No file states the voltage a `Fixed Voltage` run holds, so
     it is the mean of the recorded voltage, rounded to 1 mV; the `notes` say so, and

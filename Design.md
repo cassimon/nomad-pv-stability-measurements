@@ -4206,6 +4206,8 @@ resistance V/I or the power V·I, are never listed as dependents.
 and protocols described in run files) and §20.8 (periodic J–V characterization, until now
 deferred). 461 tests, ruff clean; the UNITOV example upload (52 entries) goes through NOMAD's
 `match_parser`, `parse` and `normalize_all` with no errors, every reference into the upload.
+*Amended by §39:* a protocol worked out from a run's files is its `derived_plan`, no longer its
+`plan`, and *CumulativeStabilityMeasurements* is gone: a collection has no plan.
 The first case is UNITOV (`example_uploads/institutes/UNITOV/`), whose files differ from SIM's
 in every way §34 assumed.
 
@@ -4534,3 +4536,93 @@ The temperature sensor's type and position
 temperature in ISOS-L-1 and the light of ISOS-LC-1; wind speed for ISOS-O; ISOS-V's recovery
 in the dark "until it reaches saturation" (p.40); equipment classes (oven, hot plate,
 chambers); renaming the `Hold…` classes.
+
+## 39. The plan given and the plan derived
+
+**Status: steps 1–3 built, step 4 open.** Amends §34.4a (protocols described in run files),
+§37.2 (*CumulativeStabilityMeasurements*, the collection's protocol) and §37.3 (values an
+institution assumes). 518 tests, ruff clean; the UNITOV upload (46 entries) goes through NOMAD
+with no errors, every reference into the upload.
+
+### 39.1 Why
+
+`plan` made two claims. For a SIM run, or a run file that names its protocol, it said *the lab
+states it followed this*. For a UNITOV run it said *this is what we worked out from how the
+files lie, what they recorded, and what UNITOV usually does*. The claims differ in who makes
+them, when (before the test or after it) and how far they can be trusted, and nothing but the
+protocol's `notes` told them apart. It matters:
+
+- **Deviations become empty by construction.** The UNITOV fixed voltage is the mean of the
+  recorded voltage; a run compared with a plan made from its own data never deviates from it.
+- **A protocol found later would overwrite the reconstruction.** Once a lab's real protocol is
+  known, the one worth keeping is both: comparing them is exactly what deviations are for.
+- **Search misleads.** "Runs whose plan holds 65 °C" would count assumed conditions as intended
+  ones.
+- **Ontology.** `Planned` is OBI's *planned process*, which realizes a *plan specification*. A
+  description built from the process's own data is a data item about the process, not a plan
+  specification.
+
+*CumulativeStabilityMeasurements* (§37.2) was the same confusion from the other side: a protocol
+made only to say that there was none. It came out empty every time; an empty `plan` says the
+same, and a collection's history is already in its `sub_activities` and its own steps, with
+their times.
+
+### 39.2 Decided
+
+- **`plan`** (alias **`given_plan`**) holds only a protocol a source states was intended: the
+  protocol file a run file names, or the test a run file describes (`read_embedded_protocol`),
+  or a link made once the protocol is known. Where none is given, it stays empty.
+- **`derived_plan`** holds a protocol worked out afterwards from the run's files: how they lie,
+  how the station was set up, what was recorded, `ASSUMED_CONDITIONS`, set points worked out
+  from the data. Its `notes` name every such value (§37.3). It describes the run; nobody
+  followed it, so a run is never compared with it for deviations.
+- Both are generic, on `Planned` in `general.py` (`Reference(Plan)`), narrowed to
+  `StabilityProtocol` on `StabilityActivity`. The alias is NOMAD's `aliases`: an archive may
+  write `given_plan`, and it is read into `plan` and written back as `plan`.
+- **The dividing rule:** a protocol is *given* only where everything in it was stated by the lab.
+  As soon as one value is assumed or worked out, it is *derived*. So `protocols_in_run_files`
+  (SIM, `test conditions`) gives a `plan`; UNITOV gives a `derived_plan`. §37.3's exceptions
+  are no longer exceptions to "a protocol holds only what was planned": they belong to derived
+  protocols only.
+- **CumulativeStabilityMeasurements is dropped.** A collection has neither `plan` nor
+  `derived_plan`. Its runs carry theirs.
+
+### 39.3 Reading — built (steps 2, 3)
+
+- The institution interface gains **`derive_protocol(path)`** beside `read_embedded_protocol`,
+  with the same return value, `None` where the run has a protocol named or described.
+  `ASSUMED_CONDITIONS` are used only there. SIM returns `None`; UNITOV's former
+  `read_embedded_protocol` became its `derive_protocol`, and its `read_embedded_protocol`
+  returns `None`: no UNITOV file states what a test was to be.
+- The parser keeps the two apart as child entries: `'protocol'` for a stated protocol (the run's
+  `plan`) and `'derived protocol'` (the run's `derived_plan`), both referred to through
+  `generate_entry_id`. A run may have both, one, or neither.
+- The collection's keys are `'collection'` and `'sample'`; `'collection protocol'` and
+  `file_reading_utils.cumulative_protocol()` are gone. The UNITOV upload makes 46 entries
+  instead of 52.
+- Not changed: `populate_from_plan` reads only `plan`, since a derived protocol states no
+  standard and nobody ran its instructions as steps. Nothing calls it yet.
+
+### 39.4 Step 4 — a history over dates (open)
+
+A collection spans days to months, and its runs start at different dates, so hours since the
+first step say little. The measurement's overview (`figures_for_plotting`,
+`step_figures.over_time_figure_for_plotting`) is to draw its time axis as dates and times,
+where the measurement has a start (`datetime`), in the time zone the files give. The protocol's
+timeline stays in hours since it starts: a plan has no date.
+
+- *To decide:* dates for every measurement's overview, or only a collection's. The
+  recommendation is every one: a run has a start as well, and a run's overview and its
+  collection's then read alike. Hover would still give the hours since the run started.
+- The protocol-timeline helpers that the overview shares (`plan_timeline`) take hours; the
+  overview converts its datetimes itself, so the timeline code does not change.
+
+### 39.5 Open
+
+- **Linking a given plan later.** A run entry is made by the parser, and NOMAD writes a parsed
+  entry again when it is reprocessed, so a `plan` set by hand in the GUI would be lost (to
+  verify in nomad-FAIR). A lasting link needs a source that survives reprocessing: a small file
+  in the upload that names a run's protocol, which the parser reads like a run file's
+  `protocol`, or an ELN entry of its own that assigns a protocol to a run. The first fits the
+  design (every reference from `generate_entry_id`); the second allows a link across uploads.
+- **Deviations** between a `plan` and a `derived_plan`, once a run has both.

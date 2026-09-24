@@ -10,6 +10,7 @@ from nomad.units import ureg
 
 import nomad_pv_stability_measurements
 from nomad_pv_stability_measurements.file_reading.file_reading_UNITOV import (
+    derive_protocol,
     is_jv_file,
     is_protocol_file,
     is_stability_series_file,
@@ -185,8 +186,8 @@ def test_a_scan_whose_file_is_missing_keeps_what_the_parameters_logged():
     assert kept.voltage is not None
 
 
-def test_a_run_describes_its_test_holding_the_mean_voltage_under_assumed_conditions():
-    data = read_embedded_protocol(TRACKING)['data']
+def test_a_runs_test_is_derived_holding_the_mean_voltage_under_assumed_conditions():
+    data = derive_protocol(TRACKING)['data']
 
     [phase] = data['routine']['instructions']
     *holds, scans = phase['instructions']
@@ -205,8 +206,10 @@ def test_a_run_describes_its_test_holding_the_mean_voltage_under_assumed_conditi
     assert 'temperature RT' in data['notes']
 
 
-def test_only_the_tracking_file_describes_a_test():
-    assert read_embedded_protocol(JV) is None
+def test_no_file_states_a_test_and_only_the_tracking_file_derives_one():
+    # UNITOV's files say how the station was set up, not what the test was to be.
+    assert read_embedded_protocol(TRACKING) is None
+    assert derive_protocol(JV) is None
 
 
 def loose(folder: Path) -> Path:

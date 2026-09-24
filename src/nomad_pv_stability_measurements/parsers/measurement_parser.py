@@ -5,15 +5,18 @@ Institutions write their runs in formats of their own. Each has a module
 parser asks each module in `INSTITUTIONS` whether a file is its run file, and reads the
 run with the functions of the first that says yes.
 
-A run file names the protocol file the run followed, in the same upload, or describes
-the test itself. Then the file makes two entries: the run, and a child entry keyed
-`PROTOCOL_KEY` for the protocol it describes, which the run refers to.
+A run's `plan` is the protocol it was given: the protocol file its run file names, in
+the same upload, or the test the run file describes itself. Then the file makes two
+entries: the run, and a child entry keyed `PROTOCOL_KEY` for the protocol it describes.
+Where a run was given none, the institution may work one out from the run's files; it
+becomes a child entry keyed `DERIVED_PROTOCOL_KEY`, which the run refers to as its
+`derived_plan`, never as its `plan`.
 
 A device's whole history is its **collection**: all its runs, and the measurements
-taken outside any run. The one file that stands for it, as the institution's
-`read_collection` says, also makes the collection (`COLLECTION_KEY`), the protocol it
-follows, which specifies nothing (`COLLECTION_PROTOCOL_KEY`), and the device's sample
-(`SAMPLE_KEY`). Where that file is no run file, the collection is its own entry.
+taken outside any run. It follows no protocol; its runs follow their own. The one file
+that stands for it, as the institution's `read_collection` says, also makes the
+collection (`COLLECTION_KEY`) and the device's sample (`SAMPLE_KEY`). Where that file
+is no run file, the collection is its own entry.
 Entry ids follow from the file and the key, so every entry can refer to another before
 it is processed.
 
@@ -35,9 +38,6 @@ from nomad_pv_stability_measurements.file_reading import (
     file_reading_SIM,
     file_reading_UNITOV,
 )
-from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
-    cumulative_protocol,
-)
 from nomad_pv_stability_measurements.parsers.parser import load_protocol, stem
 from nomad_pv_stability_measurements.schema_packages.measurement import (
     StabilityMeasurement,
@@ -52,9 +52,10 @@ if TYPE_CHECKING:
 INSTITUTIONS: tuple[ModuleType, ...] = (file_reading_SIM, file_reading_UNITOV)
 #: The key of the child entry for a protocol a run file describes itself.
 PROTOCOL_KEY = 'protocol'
+#: The key of the child entry for a protocol worked out from a run's files.
+DERIVED_PROTOCOL_KEY = 'derived protocol'
 #: The keys of the child entries of the file that stands for a device's collection.
 COLLECTION_KEY = 'collection'
-COLLECTION_PROTOCOL_KEY = 'collection protocol'
 SAMPLE_KEY = 'sample'
 
 
@@ -94,13 +95,13 @@ def protocol_reference(run: dict, archive: 'EntryArchive') -> str | None:
     return f'../upload/archive/{generate_entry_id(upload_id, protocol, key)}#/data'
 
 
-def embedded_protocol_reference(archive: 'EntryArchive') -> str | None:
-    """The child entry of the run file itself that holds the protocol it describes.
-    `None` outside an upload."""
+def child_reference(archive: 'EntryArchive', key: str) -> str | None:
+    """The child entry keyed `key` of the file whose entry `archive` is. `None`
+    outside an upload."""
     metadata = archive.metadata
     if metadata is None or metadata.upload_id is None:
         return None
-    entry_id = generate_entry_id(metadata.upload_id, metadata.mainfile, PROTOCOL_KEY)
+    entry_id = generate_entry_id(metadata.upload_id, metadata.mainfile, key)
     return f'../upload/archive/{entry_id}#/data'
 
 
@@ -123,8 +124,9 @@ def entry_reference(
 
 class StabilityMeasurementParser(MatchingParser):
     """A stability run of any institution in `INSTITUTIONS`, read into a
-    `StabilityMeasurement` whose `plan` is the protocol it followed, and a device's
-    collection, where the file stands for one."""
+    `StabilityMeasurement` whose `plan` is the protocol it was given, or whose
+    `derived_plan` is one worked out from its files, and a device's collection, where
+    the file stands for one."""
 
     creates_children = True
 
@@ -142,16 +144,20 @@ class StabilityMeasurementParser(MatchingParser):
         _, collection = collection_of(filename)
         keys = []
         if collection is not None:
-            keys += [COLLECTION_PROTOCOL_KEY, SAMPLE_KEY]
+            keys.append(SAMPLE_KEY)
         if institution is None:
             return keys or False
         if collection is not None:
             keys.append(COLLECTION_KEY)
-        try:
-            if institution.read_embedded_protocol(filename) is not None:
-                keys.append(PROTOCOL_KEY)
-        except Exception:  # parsing the file reports it
-            pass
+        for key, read in (
+            (PROTOCOL_KEY, institution.read_embedded_protocol),
+            (DERIVED_PROTOCOL_KEY, institution.derive_protocol),
+        ):
+            try:
+                if read(filename) is not None:
+                    keys.append(key)
+            except Exception:  # parsing the file reports it
+                pass
         return sorted(keys) or True
 
     def parse(
@@ -199,14 +205,18 @@ class StabilityMeasurementParser(MatchingParser):
         )
         for problem in problems:
             logger.error(problem, institution=institution.INSTITUTION)
-        embedded = _embedded_protocol(institution, mainfile, logger)
+        embedded = _protocol(institution, 'read_embedded_protocol', mainfile, logger)
         if embedded is None:
             measurement.plan = protocol_reference(
                 institution.read_protocol(mainfile)['run'], archive
             )
         else:
-            _load_embedded(embedded, children.get(PROTOCOL_KEY), logger)
-            measurement.plan = embedded_protocol_reference(archive)
+            _load_protocol(embedded, children, PROTOCOL_KEY, logger)
+            measurement.plan = child_reference(archive, PROTOCOL_KEY)
+        derived = _protocol(institution, 'derive_protocol', mainfile, logger)
+        if derived is not None:
+            _load_protocol(derived, children, DERIVED_PROTOCOL_KEY, logger)
+            measurement.derived_plan = child_reference(archive, DERIVED_PROTOCOL_KEY)
         return measurement
 
     def collection(
@@ -218,15 +228,12 @@ class StabilityMeasurementParser(MatchingParser):
         logger: 'BoundLogger',
     ) -> StabilityMeasurement:
         """The collection the file at `mainfile` stands for: its own steps, its runs
-        as `sub_activities`, and one figure of all their steps; with the protocol it
-        follows and its sample as child entries. `found` is the institution and the
-        collection, as `collection_of` finds them."""
+        as `sub_activities`, and one figure of all their steps; with its sample as a
+        child entry. `found` is the institution and the collection, as
+        `collection_of` finds them."""
         institution, collection = found
         sample = dict(collection.get('sample') or {})
         _load_sample(sample, children.get(SAMPLE_KEY), logger)
-        _load_embedded(
-            cumulative_protocol(), children.get(COLLECTION_PROTOCOL_KEY), logger
-        )
         measurement = StabilityMeasurement()
         reference = {'name', 'lab_id'}
         run = {
@@ -248,9 +255,6 @@ class StabilityMeasurementParser(MatchingParser):
         )
         for problem in problems:
             logger.error(problem, institution=institution.INSTITUTION)
-        measurement.plan = entry_reference(
-            archive, mainfile, mainfile, COLLECTION_PROTOCOL_KEY
-        )
         runs = collection.get('runs', [])
         references = [entry_reference(archive, mainfile, each, None) for each in runs]
         if all(references):
@@ -307,27 +311,34 @@ def _steps_of_run(institution: ModuleType, path: str) -> list:
     return list(run.steps)
 
 
-def _embedded_protocol(
-    institution: ModuleType, mainfile: str, logger: 'BoundLogger'
+def _protocol(
+    institution: ModuleType, reader: str, mainfile: str, logger: 'BoundLogger'
 ) -> dict | None:
+    """The protocol the institution's `reader`, `read_embedded_protocol` or
+    `derive_protocol`, finds for the run file at `mainfile`; `None` where it fails,
+    reported."""
     try:
-        return institution.read_embedded_protocol(mainfile)
+        return getattr(institution, reader)(mainfile)
     except Exception as error:  # an institution's reader may raise anything
         logger.error(
-            f'the protocol the run file describes cannot be read: {error}',
+            f'the protocol of the run cannot be read by `{reader}`: {error}',
             institution=institution.INSTITUTION,
         )
         return None
 
 
-def _load_embedded(
-    document: dict, child: 'EntryArchive | None', logger: 'BoundLogger'
+def _load_protocol(
+    document: dict,
+    children: dict[str, 'EntryArchive'],
+    key: str,
+    logger: 'BoundLogger',
 ) -> None:
+    child = children.get(key)
     if child is None:
-        logger.error('no entry was made for the protocol the run file describes.')
+        logger.error(f'no entry was made for the {key} of the run.')
         return
     child.metadata.entry_name = (document.get('data') or {}).get('name')
-    load_protocol(document, child, logger.bind(entry=PROTOCOL_KEY))
+    load_protocol(document, child, logger.bind(entry=key))
 
 
 def _load_sample(

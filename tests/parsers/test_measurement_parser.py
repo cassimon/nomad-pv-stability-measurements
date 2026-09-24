@@ -12,10 +12,10 @@ import nomad_pv_stability_measurements
 from nomad_pv_stability_measurements.parsers import measurement_parser_entry_point
 from nomad_pv_stability_measurements.parsers.measurement_parser import (
     COLLECTION_KEY,
-    COLLECTION_PROTOCOL_KEY,
+    DERIVED_PROTOCOL_KEY,
     PROTOCOL_KEY,
     SAMPLE_KEY,
-    embedded_protocol_reference,
+    child_reference,
     protocol_reference,
 )
 
@@ -104,7 +104,9 @@ def test_a_run_describing_its_test_refers_to_the_protocol_entry_of_its_own_file(
     )
     entry_id = generate_entry_id('upload', 'a/x.run.yaml', PROTOCOL_KEY)
 
-    assert embedded_protocol_reference(archive) == f'../upload/archive/{entry_id}#/data'
+    assert (
+        child_reference(archive, PROTOCOL_KEY) == f'../upload/archive/{entry_id}#/data'
+    )
 
 
 def test_outside_an_upload_a_run_refers_to_no_protocol():
@@ -115,11 +117,8 @@ def test_outside_an_upload_a_run_refers_to_no_protocol():
     ('run', 'keys'),
     [
         # The device's first run stands for its collection too.
-        (
-            '21.28.49',
-            [COLLECTION_KEY, COLLECTION_PROTOCOL_KEY, PROTOCOL_KEY, SAMPLE_KEY],
-        ),
-        ('17.23.47', [PROTOCOL_KEY]),
+        ('21.28.49', [COLLECTION_KEY, DERIVED_PROTOCOL_KEY, SAMPLE_KEY]),
+        ('17.23.47', [DERIVED_PROTOCOL_KEY]),
     ],
 )
 def test_the_first_run_of_a_device_also_makes_its_collection_and_sample(run, keys):
@@ -128,7 +127,7 @@ def test_the_first_run_of_a_device_also_makes_its_collection_and_sample(run, key
     assert list(matched(tracking)) == keys
 
 
-def test_a_device_without_runs_is_its_collection_with_its_protocol_and_sample(
+def test_a_device_without_runs_is_its_collection_with_its_sample_and_no_plan(
     tmp_path, log
 ):
     [jv] = (DEVICE / '17.23.47').glob('0001_*(JV)*')
@@ -145,13 +144,31 @@ def test_a_device_without_runs_is_its_collection_with_its_protocol_and_sample(
 
     PARSER.parse(str(scan), archive, log, children)
 
-    assert list(keys) == [COLLECTION_PROTOCOL_KEY, SAMPLE_KEY]
+    assert list(keys) == [SAMPLE_KEY]
     assert log.errors == []
     collection = archive.data
     assert [step.name for step in collection.steps] == ['J–V 1, 09.00.00']
-    protocol = generate_entry_id('u', mainfile, COLLECTION_PROTOCOL_KEY)
-    assert collection.plan.m_proxy_value == f'../upload/archive/{protocol}#/data'
+    # A device's history follows no protocol, and none is made up for it.
+    assert collection.plan is None and collection.derived_plan is None
     assert children[SAMPLE_KEY].data.name == 'AI14-1A'
-    assert children[COLLECTION_PROTOCOL_KEY].data.name == (
-        'CumulativeStabilityMeasurements'
-    )
+
+
+def test_a_run_given_no_protocol_refers_to_the_one_derived_as_its_derived_plan(log):
+    [tracking] = (DEVICE / '17.23.47').glob('*(Tracking)*')
+    mainfile = tracking.relative_to(DEVICE.parent).as_posix()
+    keys = matched(tracking)
+    archive = EntryArchive(metadata=EntryMetadata(upload_id='u', mainfile=mainfile))
+    children = {
+        key: EntryArchive(metadata=EntryMetadata(upload_id='u', mainfile=mainfile))
+        for key in keys
+    }
+
+    PARSER.parse(str(tracking), archive, log, children)
+
+    assert log.errors == []
+    run = archive.data
+    derived = generate_entry_id('u', mainfile, DERIVED_PROTOCOL_KEY)
+    # Worked out from the files, so never taken for the protocol the run was given.
+    assert run.plan is None
+    assert run.derived_plan.m_proxy_value == f'../upload/archive/{derived}#/data'
+    assert children[DERIVED_PROTOCOL_KEY].data.instructions

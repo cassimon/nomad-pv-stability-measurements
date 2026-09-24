@@ -145,29 +145,6 @@ def as_datetime(value) -> datetime:
     return value if isinstance(value, datetime) else datetime.fromisoformat(value)
 
 
-#: The name of the protocol every collection follows.
-CUMULATIVE_PROTOCOL = 'CumulativeStabilityMeasurements'
-
-
-def cumulative_protocol() -> dict:
-    """The protocol of a collection: a device's whole history, its runs and the
-    measurements in between, taken at no planned times. It holds nothing and lasts
-    until stopped, since nothing between the measurements was specified.
-
-    Returns what a `*.stability.yaml` file holds, as plain data, like
-    `protocol_from_phases`."""
-    return {
-        'data': {
-            'name': CUMULATIVE_PROTOCOL,
-            'duration': 'open-ended',
-            'notes': 'The history of one device: stability runs, each following a '
-            'protocol of its own, and measurements taken between them at no planned '
-            'times. Nothing between the measurements was specified: not the '
-            'conditions, not the load, not how long.',
-        }
-    }
-
-
 def protocol_from_phases(
     name: str,
     phases: list[dict],
@@ -176,7 +153,8 @@ def protocol_from_phases(
     **fields,
 ) -> dict:
     """A protocol, for a run file that describes its test instead of naming a protocol
-    file: phases run one after another, the whole sequence `repeat` times.
+    file, or for one worked out from a run's files: phases run one after another, the
+    whole sequence `repeat` times.
 
     Each phase is a dict of its `name`, its `duration` as text (`'20 h'`), and the
     value each quantity is held at, by the quantity's name in `SET_POINTS`, as text or

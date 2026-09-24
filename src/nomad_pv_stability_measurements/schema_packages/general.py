@@ -697,7 +697,10 @@ class Planned(ArchiveSection):
     """A mixin for an activity based on a plan: inherit it next to an `Activity`, e.g.
     `class StabilityActivity(Measurement, Planned)`.
 
-    A subclass narrows `plan` to the kind of plan it runs.
+    Two plans, which say different things: `plan` is the plan the activity was given,
+    as whoever ran it states it; `derived_plan` is a plan worked out afterwards from
+    what the activity recorded, where none was given. Either may be empty. A subclass
+    narrows both to the kind of plan it runs.
     """
 
     m_def = Section(
@@ -707,7 +710,16 @@ class Planned(ArchiveSection):
 
     plan = Quantity(
         type=Reference(Plan),
-        description='The plan that this activity is based on.',
+        aliases=['given_plan'],
+        description='The plan that this activity is based on, as whoever ran it states '
+        'it. Empty where none was given; it may be linked once it is known.',
+    )
+    derived_plan = Quantity(
+        type=Reference(Plan),
+        description='A plan worked out afterwards from what the activity recorded, and '
+        'from values assumed where nothing was recorded, where no plan was given. It '
+        'describes the activity; nobody followed it, so the activity is never compared '
+        'with it for deviations.',
     )
 
     deviations_from_plan = SubSection(

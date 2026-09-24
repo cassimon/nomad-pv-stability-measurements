@@ -145,6 +145,20 @@ def test_a_stability_test_runs_a_stability_protocol_only():
         StabilityActivity(plan=Plan())
 
 
+def test_the_plan_given_is_also_called_given_plan_and_kept_apart_from_one_derived():
+    activity = StabilityActivity.m_from_dict(
+        {
+            'given_plan': '../upload/archive/given#/data',
+            'derived_plan': '../upload/archive/derived#/data',
+        }
+    )
+
+    assert activity.plan.m_proxy_value == '../upload/archive/given#/data'
+    assert activity.derived_plan.m_proxy_value == '../upload/archive/derived#/data'
+    # Written under its own name.
+    assert 'plan' in activity.m_to_dict() and 'given_plan' not in activity.m_to_dict()
+
+
 def test_a_bare_archive_file_loads_through_nomad():
     archive = parse(os.path.join(DATA_DIR, 'tree.archive.yaml'))[0]
     normalize_all(archive)
