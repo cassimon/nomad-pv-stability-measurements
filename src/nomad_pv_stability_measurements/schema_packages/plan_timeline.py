@@ -63,6 +63,11 @@ BAR_OPACITY = 0.25
 #: px between two bars side by side, so each reads as its own.
 BAR_GAP = 3
 BAND_OPACITY = 0.3
+#: px: the marks of what is a moment, not a stretch, as a J–V scan.
+MARK_SIZE = 12
+#: Of a row's height, from its foot: where the marks stand, at the top edge of a bar,
+#: clear of its text.
+MARK_HEIGHT = 0.8
 #: What hovering over a piece shows lies over it, all but transparent: Plotly finds a
 #: fill only where it is drawn.
 HOVER_FILL = 'rgba(128, 128, 128, 0.01)'
@@ -87,7 +92,7 @@ TOP_ROWS = (
     'absolute humidity',
     'oxygen fraction',
 )
-BOTTOM_ROWS = ('electrical load', 'J–V scan')
+BOTTOM_ROWS = ('electrical load',)
 
 
 def axis_sections(end: float, breaks: list[AxisBreak]):
@@ -209,6 +214,7 @@ def figure_for_plotting(
         }
         layout[_axis('yaxis', i)]['range'] = drawing.value_range() if unit else [0, 1]
         drawing.hover_areas(layout[_axis('yaxis', i)]['range'])
+        drawing.marks(layout[_axis('yaxis', i)]['range'])
         if not _monitored(row):  # its bars say what they are, in the row's colour
             drawing.notes.append(_row_label(row, unit, domain))
     drawing.notes += _break_notes(labels, x_domains)
@@ -237,6 +243,9 @@ class _Drawing:
         #: `(axes, span, text)` of the current row's pieces: where hovering tells all
         #: of a piece, placed once the row's range is known.
         self.hovered = []
+        #: `(axes, times, piece)` of the current row's marks, placed once its range is
+        #: known.
+        self.marked = []
 
     def frame(self, i: int) -> None:
         """An invisible trace in each section of the `i`-th row: Plotly draws only the
@@ -261,6 +270,7 @@ class _Drawing:
         unit = ''
         self.lowest = self.highest = 0.0
         self.hovered = []
+        self.marked = []
         noted = set()
         self.size = text_size(sized, self.sections, self.x_domains)
         for k, (a, b) in enumerate(self.sections):
@@ -268,6 +278,9 @@ class _Drawing:
             left, right = self.x_domains[k]
             self.px_per_second = (right - left) * PLOT_WIDTH / (b - a)
             for piece in pieces:
+                if piece.marks is not None:
+                    self.moments(axes, (a, b), piece, noted)
+                    continue
                 span = max(piece.start, a), min(piece.end, b)
                 if span[1] <= span[0]:
                     continue
@@ -319,6 +332,49 @@ class _Drawing:
                     'hoverinfo': 'name',
                     'hoverlabel': {'namelength': -1},
                     'name': text,
+                }
+            )
+
+    def moments(self, axes, section, piece, noted: set) -> None:
+        """The marks of `piece` in `section`, kept to be placed once the row's range is
+        known, and what the drawing assumes, once, in red above the row."""
+        a, b = section
+        times = [time for time in piece.marks if a <= time <= b]
+        if not times:
+            return
+        self.marked.append((axes, times, piece))
+        if piece.assumption and id(piece) not in noted:
+            noted.add(id(piece))
+            span = max(piece.start, a), min(piece.end, b)
+            self.assumption(axes, span, piece.assumption)
+
+    def marks(self, value_range) -> None:
+        """The row's marks, near its top, over everything else drawn in it; each tells
+        all of its moment where it is hovered."""
+        low, high = value_range
+        height = low + MARK_HEIGHT * (high - low)
+        for (x, y), times, piece in self.marked:
+            color = ROLE_COLORS.get(piece.role, ROLE_COLORS['unspecified'])
+            self.data.append(
+                {
+                    'type': 'scatter',
+                    'mode': 'markers',
+                    'x': [time / HOUR for time in times],
+                    'y': [height] * len(times),
+                    'xaxis': x,
+                    'yaxis': y,
+                    'marker': {
+                        'symbol': 'diamond',
+                        'size': MARK_SIZE,
+                        'color': color,
+                        'line': {'width': 1, 'color': AXIS_COLOR},
+                    },
+                    'name': _subscripts(piece.label),
+                    'hovertext': [_hover_text(piece, at=time) for time in times],
+                    'hoverinfo': 'text',
+                    'hoverlabel': {'namelength': -1},
+                    # Whole, where a scan is at the very start or end.
+                    'cliponaxis': False,
                 }
             )
 
@@ -425,15 +481,16 @@ class _Drawing:
         }
 
 
-def _hover_text(piece) -> str:
+def _hover_text(piece, at: float | None = None) -> str:
     """All of a piece in a few lines: what it is, when it starts and how long it runs,
-    and what the drawing assumes."""
+    or the moment `at` of one of its marks, and what the drawing assumes."""
     start = shown(piece.start * ureg.s)
-    when = (
-        f'from {start} on'
-        if piece.endless or piece.end == inf
-        else f'from {start} for {shown((piece.end - piece.start) * ureg.s)}'
-    )
+    if at is not None:
+        when = f'at {shown(at * ureg.s)}'
+    elif piece.endless or piece.end == inf:
+        when = f'from {start} on'
+    else:
+        when = f'from {start} for {shown((piece.end - piece.start) * ureg.s)}'
     lines = [piece.label, when, piece.typical, piece.assumption]
     return '<br>'.join(_subscripts(line) for line in lines if line)
 

@@ -68,6 +68,9 @@ class PlotPiece:
     assumption: str | None = None
     #: What it typically lasts, where the protocol fixes no length, written in red.
     typical: str | None = None
+    #: s: where it is a moment rather than a stretch, as a J–V scan, the moments it is
+    #: drawn at: marks on its row, over whatever else the row holds.
+    marks: np.ndarray | None = None
 
 
 @dataclass

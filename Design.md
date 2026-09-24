@@ -4301,13 +4301,13 @@ quantity for is reported.
 | `JVFiguresOfMerit` | `power_density_at_maximum_power_point` (P_MPP), taken as reported; drawn as markers on the power density row of the overview, beside the tracked power |
 | `JVSweepStep` | `voltage_start`, `voltage_stop` (the range set, which the data may not reach, where V_oc is detected automatically), `voltage_step`, `scan_rate`, `scan_order` |
 | `StabilitySeriesStep` | flat fields for the tracker: `tracking_algorithm` (text), `tracking_step`, `tracking_delay` |
-| protocol | `JVScan` (`characterization_instructions.py`), a periodic J–V characterization (amends §20.8): the scan's settings, the light it is measured under, and `interval`, one instruction lasting its block and scanning every `interval`. Preferred over a repeating block of scan and pause: it is what standards and labs write, it needs no `Pause` instruction, and it needs no scan duration, which a protocol rarely knows. Authored as `jv_scan: {every: 10 min, from: -0.1 V, to: 1.2 V, step: 20 mV, rate: 200 mV/s, order: forward then reverse}` (each field also by its own name); a phase of `protocol_from_phases` takes the same `jv_scan`. Drawn as a bar in its own row, `J–V scan`, under the electrical load, labelled `J–V scan every 33 s`, in the colour of the monitored: it measures the cell and regulates nothing. Not drawn as one tick per scan: a 1000 h test every 10 min would be 6000 shapes. |
+| protocol | `JVScan` (`characterization_instructions.py`), a periodic J–V characterization (amends §20.8): the scan's settings, the light it is measured under, and `interval`, one instruction lasting its block and scanning every `interval`. Preferred over a repeating block of scan and pause: it is what standards and labs write, it needs no `Pause` instruction, and it needs no scan duration, which a protocol rarely knows. Authored as `jv_scan: {every: 10 min, from: -0.1 V, to: 1.2 V, step: 20 mV, rate: 200 mV/s, order: forward then reverse}` (each field also by its own name); a phase of `protocol_from_phases` takes the same `jv_scan`. Drawn as a bar in its own row, `J–V scan`, under the electrical load, labelled `J–V scan every 33 s`, in the colour of the monitored: it measures the cell and regulates nothing. Not drawn as one tick per scan: a 1000 h test every 10 min would be 6000 shapes. *Amended by §38.7: marks on the electrical load's row.* |
 | `StabilityActivity` | `sub_activities`, references to other stability activities (§37.2) |
 | `sample.py` | `SolarCellSample(System)`, the placeholder sample (§37.2) |
 
 ## 38. Stated, controlled, monitored — `specify`; light sources; periods
 
-**Status: steps A–D built, and the runs regenerated** (513 tests, ruff clean; all 118 ISOS variants compared whole). Amends §15.2 (a written value no longer
+**Status: steps A–D built, the runs regenerated, J–V scans drawn on the load** (515 tests, ruff clean; all 118 ISOS variants compared whole). Amends §15.2 (a written value no longer
 sets `control`), §17.4 (`set_point` → `value`), §26 (monitoring), §29 (roles), §34.10 (open
 circuit) and §36.3.
 
@@ -4502,7 +4502,22 @@ All 25 runs regenerated from their seeds. The custom runs now follow the protoco
 (scans of 2 min, no changeovers), and their dark recovery no longer lists the irradiance as
 controlled.
 
-### 38.7 Later
+### 38.7 J–V scans on the electrical load — built
+
+A scan takes the cell's terminals, interrupting whatever holds them (MPP tracking, a bias,
+open circuit), so it is drawn on the electrical load's row and no longer has a row of its own.
+Each scan is a mark at the moment it is taken, not a stretch: `PlotPiece.marks` (s), drawn by
+`plan_timeline` as green diamonds (the scan's role, monitored) near the top of the row, over
+whatever else the row holds, with no gap cut into it; each tells its moment where hovered, and
+is drawn whole at the very start or end. `JVScan.marks_for_plotting`: one scan, one mark at its
+start (replacing the 2 min bar, `ONE_SCAN_FOR_PLOTTING`); a periodic one, a mark every
+`interval`; `not_stated`, `MARKS_FOR_PLOTTING` = 4 marks evenly over its stretch, with
+`interval not stated: drawn 4 times` in red. One scatter trace per section, so a dense
+schedule costs one trace, not a shape per scan. That the scan preempts the load stays a matter
+of the drawing: at protocol level the routine already overrides the settings, and the plan
+still runs a protocol-level scan beside the load.
+
+### 38.8 Later
 
 The temperature sensor's type and position
 ("In shadow and/or under illumination", Table 3), which also tells an ambient from a device

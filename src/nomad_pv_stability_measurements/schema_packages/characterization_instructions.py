@@ -1,25 +1,25 @@
 """Instructions that characterize the cell during a test, rather than hold a condition."""
 
+from math import inf
+
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
-    FIXED,
     NOT_STATED,
     TYPICAL,
     Period,
     SingleInstruction,
-    kind_of,
 )
 from nomad_pv_stability_measurements.schema_packages.light_sources import LightSource
 from nomad_pv_stability_measurements.schema_packages.utils import shown
 
 m_package = SchemaPackage()
 
-#: How long one scan is drawn where the plan states no length for it, in seconds: about
-#: what a reverse and a forward sweep take. Only for the drawing, which says so.
-ONE_SCAN_FOR_PLOTTING = 120
+#: How many scans are drawn where the plan repeats them without saying how often:
+#: evenly over the stretch they are taken in. Only for the drawing, which says so.
+MARKS_FOR_PLOTTING = 4
 
 
 class JVScan(SingleInstruction):
@@ -99,20 +99,33 @@ class JVScan(SingleInstruction):
         return f' every {typically}{shown(interval.value.to(ureg.second))}'
 
     def time_series_for_plotting(self, start: float, stop: float):
-        """One scan, with no length of its own, is drawn as one scan at the start, not
-        across all the time it runs beside."""
+        """Each scan a mark at the moment it is taken, not a stretch: one at the start,
+        or one every `interval`."""
         series = super().time_series_for_plotting(start, stop)
-        if self.interval is not None or kind_of(self) in (FIXED, TYPICAL):
-            return series
         for piece in series.pieces:
-            piece.end = min(stop, start + ONE_SCAN_FOR_PLOTTING)
-            piece.endless = False
-            piece.cycle = None
-            piece.typical = 'one scan, its length not stated: drawn as 2 min'
+            piece.text = None
+            piece.marks, piece.assumption = self.marks_for_plotting(
+                piece.start, piece.end
+            )
         return series
 
+    def marks_for_plotting(self, start: float, end: float):
+        """`(times, assumption)`: when the scans are taken between `start` and `end`, in
+        seconds, and what the drawing assumes. Where the interval is not stated, a few
+        are drawn evenly, and the drawing says so; where nothing ends the drawing yet,
+        only the first, since only the extent is needed."""
+        interval = self.interval
+        if interval is None or end == inf:
+            return np.array([start]), None
+        if interval.kind == NOT_STATED or interval.value is None:
+            times = np.linspace(start, end, MARKS_FOR_PLOTTING, endpoint=False)
+            return times, f'interval not stated: drawn {MARKS_FOR_PLOTTING} times'
+        return np.arange(start, end, interval.value.to('s').magnitude), None
+
     def row_for_plotting(self) -> str:
-        return 'J–V scan'
+        """The electrical load's: a scan takes the cell's terminals, whatever else
+        holds them, so it is drawn over what the load does."""
+        return 'electrical load'
 
     def role_for_plotting(self) -> str:
         """Monitored: a scan measures the cell, and regulates no condition."""

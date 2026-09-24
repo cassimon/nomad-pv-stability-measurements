@@ -462,13 +462,15 @@ def test_control_regulates_what_is_set_and_monitor_logs_what_follows(
     assert instruction.monitored_quantities() == monitored
 
 
-def test_jv_scans_are_listed_by_how_often_and_drawn_on_their_own_row(normalized, log):
+def test_jv_scans_are_marks_at_their_moments_on_the_electrical_load(normalized, log):
     every = Period(kind='fixed', value=10 * ureg.minute)
     scans = normalized(JVScan(duration=fixed(1 * ureg.hour), interval=every))
 
     [piece] = scans.time_series_for_plotting(0, 7200).pieces
     assert scans.label == 'J–V scan every 10 min'
-    assert (piece.row, piece.role, piece.end) == ('J–V scan', 'monitored', 3600)
+    # A scan takes the cell's terminals, whatever else holds them.
+    assert (piece.row, piece.role) == ('electrical load', 'monitored')
+    assert piece.marks.tolist() == [0, 600, 1200, 1800, 2400, 3000]
     assert log.errors == []
 
 
@@ -488,12 +490,22 @@ def test_jv_scans_say_how_their_interval_is_known(normalized, interval, label):
     assert scans.label == label
 
 
-def test_one_scan_is_drawn_as_one_scan_at_the_start_and_says_so():
-    once = JVScan(duration=Duration(kind='whole_block'))
+@pytest.mark.parametrize(
+    ('interval', 'marks', 'assumed'),
+    [
+        (None, [0], None),
+        (Period(kind='not_stated'), [0, 900, 1800, 2700], 'interval not stated'),
+    ],
+)
+def test_one_scan_is_one_mark_and_scans_without_an_interval_are_drawn_as_assumed(
+    interval, marks, assumed
+):
+    scans = JVScan(duration=Duration(kind='whole_block'), interval=interval)
 
-    [piece] = once.time_series_for_plotting(0, 7200).pieces
-    assert (piece.start, piece.end, piece.endless) == (0, 120, False)
-    assert 'length not stated' in piece.typical
+    [piece] = scans.time_series_for_plotting(0, 3600).pieces
+    assert piece.marks.tolist() == marks
+    assert (piece.assumption or '').startswith(assumed or '')
+    assert bool(piece.assumption) == bool(assumed)
 
 
 @pytest.mark.parametrize(

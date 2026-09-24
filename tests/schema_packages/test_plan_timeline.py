@@ -6,11 +6,15 @@ from math import inf
 import pytest
 from nomad.units import ureg
 
+from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
+    JVScan,
+)
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
     Duration,
     IndefiniteRepeatingBlock,
     InstructionBlock,
+    Period,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBetweenIrradiance,
@@ -282,6 +286,31 @@ def test_the_electrical_load_is_one_row_whichever_quantity_is_set(normalized):
 
     # The terminals are one port, in one state at a time.
     assert [note['text'] for note in row_labels(layout)] == ['electrical load<br>(V)']
+
+
+def test_jv_scans_are_marks_over_what_holds_the_load(normalized):
+    protocol = normalized(
+        StabilityProtocol(
+            instructions=[
+                MPPTracking(control=True, duration=one_hour()),
+                JVScan(
+                    duration=whole_block(),
+                    interval=Period(kind='fixed', value=30 * ureg.minute),
+                ),
+            ]
+        )
+    )
+    figure = protocol.figures[0].figure
+    [marks] = [trace for trace in figure['data'] if trace['mode'] == 'markers']
+    [bar] = figure['layout']['shapes']
+
+    # No row of their own: the scans stand on the load's row, at their moments.
+    assert [note['text'] for note in row_labels(figure['layout'])] == [
+        'electrical load'
+    ]
+    assert marks['x'] == [0, 0.5]
+    assert marks['yaxis'] == bar['yref'].removesuffix(' domain')
+    assert 'at 30 min' in marks['hovertext'][1]
 
 
 def test_values_in_different_units_on_one_row_are_written_not_drawn(normalized):
