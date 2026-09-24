@@ -14,7 +14,8 @@ run:
   - name: oven
   - name: temperature and humidity logger
   - name: J–V station
-  notes: 'Simulated data: nothing was measured.'
+  notes: 'Simulated data: nothing was measured. The protocol repeats its J–V scans without
+    saying how often: they are assumed 24 h apart.'
 steps:
 - name: initial J–V
   kind: jv
@@ -26,7 +27,31 @@ steps:
   start: '2026-03-09T09:12:00+01:00'
   controlled:
   - temperature
+- name: J–V at 24 h
+  kind: jv
+  file: 03_jv_at_24_h.csv
+  start: '2026-03-10T09:12:00+01:00'
+- name: J–V at 48 h
+  kind: jv
+  file: 04_jv_at_48_h.csv
+  start: '2026-03-11T09:12:00+01:00'
+- name: J–V at 72 h
+  kind: jv
+  file: 05_jv_at_72_h.csv
+  start: '2026-03-12T09:12:00+01:00'
+- name: J–V at 96 h
+  kind: jv
+  file: 06_jv_at_96_h.csv
+  start: '2026-03-13T09:12:00+01:00'
+- name: J–V at 120 h
+  kind: jv
+  file: 07_jv_at_120_h.csv
+  start: '2026-03-14T09:12:00+01:00'
+- name: J–V at 144 h
+  kind: jv
+  file: 08_jv_at_144_h.csv
+  start: '2026-03-15T09:12:00+01:00'
 - name: final J–V
   kind: jv
-  file: 03_jv_final.csv
+  file: 09_jv_final.csv
   start: '2026-03-16T09:22:00+01:00'

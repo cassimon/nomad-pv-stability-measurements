@@ -13,8 +13,14 @@ from nomad_pv_stability_measurements.example_uploads import (
     protocols_in_run_files_example_upload_entry_point,
     simulated_runs_example_upload_entry_point,
 )
+from nomad_pv_stability_measurements.example_uploads.simulate_runs import (
+    first_variant,
+)
 from nomad_pv_stability_measurements.parsers import parser_entry_point
 from nomad_pv_stability_measurements.parsers.parser import stem
+from nomad_pv_stability_measurements.schema_packages.base_instructions import (
+    MonitorControlInstruction,
+)
 from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
     JVScan,
 )
@@ -108,3 +114,33 @@ def test_the_custom_protocols_load_repeat_and_measure_between_phases(tmp_path, l
 
     assert log.errors == []
     assert {CountingRepeatingBlock, TimedRepeatingBlock, JVScan} <= blocks
+
+
+#: A quantity a protocol controls, by the column a run records it in.
+COLUMN_OF = {'current': 'current_density'}
+
+
+@pytest.mark.parametrize(
+    ('entry_point', 'protocols'),
+    [
+        (simulated_runs_example_upload_entry_point, 'isos/'),
+        (custom_protocols_example_upload_entry_point, ''),
+    ],
+)
+def test_a_run_records_what_its_protocol_controls_and_says_so(
+    entry_point, protocols, tmp_path
+):
+    # A controller logs what it regulates, whether or not the protocol asks for it.
+    upload = built(entry_point, tmp_path)
+
+    for run_file in sorted(upload.glob('*/*.run.yaml')):
+        run = yaml.safe_load(run_file.read_text(encoding='utf-8'))
+        protocol = first_variant(upload / run['run']['protocol'], protocols).protocol
+        controls = {
+            COLUMN_OF.get(quantity, quantity).replace(' ', '_')
+            for each in protocol.m_all_contents()
+            if isinstance(each, MonitorControlInstruction) and each.control
+            for quantity in each.controlled_quantities()
+        }
+        said = {name for step in run['steps'] for name in step.get('controlled', [])}
+        assert said == controls, run_file.name

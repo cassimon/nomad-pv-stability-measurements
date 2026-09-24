@@ -87,6 +87,7 @@ def test_only_a_lamp_whose_light_holds_uv_takes_a_uv_filter(cls, filters):
             XenonLamp(solar_simulator=True, simulator_classification='AAA'),
             'xenon lamp solar simulator AAA',
         ),
+        (NaturalLightSource(spectrum='AM1.5G'), 'sunlight, AM1.5G'),
     ],
 )
 def test_a_source_says_what_it_is(source, said):
@@ -123,11 +124,15 @@ def test_naming_the_source_states_something_about_the_light(monitor, role, writt
     assert (sun.role_for_plotting(), sun.annotation_for_plotting()) == (role, written)
 
 
-def test_a_j_v_scan_names_the_light_it_is_measured_under():
+def test_a_j_v_scan_says_the_light_it_is_measured_under():
     scans = JVScan(
         interval=Period(kind='fixed', value=10 * ureg.minute),
         irradiance=1000 * W_PER_M2,
-        light_source=XenonLamp(solar_simulator=True, simulator_classification='AAA'),
+        light_source=XenonLamp(
+            solar_simulator=True, simulator_classification='AAA', spectrum='AM1.5G'
+        ),
     )
 
-    assert scans.describe() == 'J–V scan every 10 min (xenon lamp solar simulator AAA)'
+    assert scans.describe() == (
+        'J–V scan every 10 min at 1000 W/m² (xenon lamp solar simulator AAA, AM1.5G)'
+    )

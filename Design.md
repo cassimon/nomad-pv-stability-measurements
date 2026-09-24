@@ -4307,7 +4307,7 @@ quantity for is reported.
 
 ## 38. Stated, controlled, monitored — `specify`; light sources; periods
 
-**Status: steps A–D built** (510 tests, ruff clean; all 118 ISOS variants compared whole). Amends §15.2 (a written value no longer
+**Status: steps A–D built, and the runs regenerated** (513 tests, ruff clean; all 118 ISOS variants compared whole). Amends §15.2 (a written value no longer
 sets `control`), §17.4 (`set_point` → `value`), §26 (monitoring), §29 (roles), §34.10 (open
 circuit) and §36.3.
 
@@ -4348,9 +4348,9 @@ independent things, none implied by another.
   humidity, the outdoor weather, ISOS-LT's humidity, ISOS-T-3's (uncontrolled below 40 °C) and
   MPP tracking. Controlled temperatures and humidities, the thermal cycles and the solar
   simulator are controlled and not logged. OPEN_QUESTIONS.md #12 records the reading.
-- **Not regenerated:** the simulated runs. `simulate_runs.monitored()` writes only monitored
-  columns, so regenerating would drop temperature and irradiance from runs that control them;
-  making the simulator record controlled quantities too is a later task.
+- **The simulated runs, regenerated after step D (see 38.6).** At first they were not:
+  `simulate_runs.monitored()` wrote only monitored columns, so regenerating would have dropped
+  temperature and irradiance from runs that control them.
 
 ### 38.3 Step B — values `specify` can now state — built
 
@@ -4430,8 +4430,10 @@ and *Day and night at 45 °C*, whose run file names its light in the phase
 without an irradiance). UNITOV's real files name no light, and are left so. Built as needed
 and no further: `ArtificialLightSource.lamp_power` (W), as lamps are named ("1,700 W
 air-cooled xenon lamp", Table 4), and `JVScan.light_source` beside its `irradiance`, the
-characterization light apart from the ageing light; the label says it (`J–V scan every 10 min
-(xenon lamp solar simulator AAA)`). The ISOS files get their J–V scans, and with them
+characterization light apart from the ageing light; the label says it, with the irradiance
+and the spectrum where stated (`J–V scan every 10 min at 1000 W/m² (xenon lamp solar simulator
+AAA, AM1.5G)`; after the plot review). A light source's description names its spectrum
+wherever it is used, on an irradiance too. The ISOS files get their J–V scans, and with them
 Table 1's characterization light source, in step D.
 
 **J–V scans as instructions of the sequence** (after review). No new word: `jv_scan:` without
@@ -4472,9 +4474,37 @@ start with a note in red, not across the whole test (`ONE_SCAN_FOR_PLOTTING`), a
 without a pace is drawn at an assumed one; and an endless protocol is drawn for at least an
 hour, as `drawing_end` always said and did not do once something ended sooner.
 
-### 38.6 Later
+### 38.6 The simulator — built
 
-The simulator records controlled quantities too; the temperature sensor's type and position
+After a review of the plots against the schema: every drawn piece's colour, verb and text
+agreed with `control`, `monitor` and what is stated, but the runs lagged the protocols.
+`simulate_runs.py` now
+
+- **records what is controlled as well as what is monitored** (`recorded()`), since a
+  controller logs what it regulates; a series' `controlled` still names only what the
+  protocol controls. `test_a_run_records_what_its_protocol_controls_and_says_so` holds every
+  run to it.
+- **simulates a bias** (`HoldVoltage`, `HoldCurrent`): its value, or the point it names
+  (`V_MPP`, `near V_MPP`, `V_oc`, `-V_oc`, `J_SC`, `-J_MPP`) from the reverse scan of the
+  initial sweep (`fresh_points()`), and what the cell answers on its J–V curve, lit or dark
+  (`cell_current`, `cell_voltage`); the power is negative where the bias drives the cell.
+  ISOS-V's runs now record the voltage, current and power, the voltage controlled, and a
+  source meter. A current bias written in A is refused: SIM knows no cell area.
+- **places J–V scans as the protocol does** (`planned_steps`): a sequence's scans become its
+  sweeps, at the protocol's times; only where it places none is one added before the first
+  series, between two, or after the last, with the changeovers as before. Scans the protocol
+  repeats (`periodic_scans`) are taken inside a series, every `interval`, or every
+  `SCAN_EVERY` = 24 h where it is `not_stated`, noted in the run. Steps are written in the
+  order they started.
+- keeps a humidity below a bound (ISOS-T-3) as the room's, dried under the bound.
+
+All 25 runs regenerated from their seeds. The custom runs now follow the protocols' own timing
+(scans of 2 min, no changeovers), and their dark recovery no longer lists the irradiance as
+controlled.
+
+### 38.7 Later
+
+The temperature sensor's type and position
 ("In shadow and/or under illumination", Table 3), which also tells an ambient from a device
 temperature in ISOS-L-1 and the light of ISOS-LC-1; wind speed for ISOS-O; ISOS-V's recovery
 in the dark "until it reaches saturation" (p.40); equipment classes (oven, hot plate,

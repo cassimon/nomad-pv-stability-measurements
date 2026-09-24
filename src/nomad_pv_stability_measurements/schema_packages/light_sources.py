@@ -71,6 +71,11 @@ class LightSource(ArchiveSection):
     )
 
     def describe(self) -> str:
+        """What it is, and its spectrum where stated: `xenon lamp`, `solar simulator,
+        AM1.5G`."""
+        return ', '.join(filter(None, (self.what_it_is(), self.spectrum)))
+
+    def what_it_is(self) -> str:
         """What it is, in words: `xenon lamp`, `sunlight`."""
         return words(type(self).__name__).lower()
 
@@ -110,7 +115,7 @@ class NaturalLightSource(LightSource):
         'two, which turns it away from its `tilt` and `azimuth`.',
     )
 
-    def describe(self) -> str:
+    def what_it_is(self) -> str:
         return 'sunlight'
 
     def normalize(self, archive, logger):
@@ -158,9 +163,9 @@ class ArtificialLightSource(LightSource):
 
     def lamp_name(self) -> str:
         """The lamp, in words; empty where the kind is not stated."""
-        return '' if type(self) is ArtificialLightSource else super().describe()
+        return '' if type(self) is ArtificialLightSource else super().what_it_is()
 
-    def describe(self) -> str:
+    def what_it_is(self) -> str:
         """`xenon lamp`, `solar simulator`, `LED solar simulator AAA`."""
         name = self.lamp_name()
         if not self.solar_simulator:

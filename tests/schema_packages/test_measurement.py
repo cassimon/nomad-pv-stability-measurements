@@ -499,9 +499,12 @@ def test_a_simulated_run_is_read_with_the_functions_of_its_institution():
 
     assert problems == []
     assert measurement.method == 'ISOS-L-2'
-    assert [type(step) for step in measurement.steps] == [
-        JVSweepStep,
-        StabilitySeriesStep,
-        JVSweepStep,
+    # One series, and sweeps before it, during it where the protocol repeats them,
+    # and after it.
+    [series] = [
+        step for step in measurement.steps if isinstance(step, StabilitySeriesStep)
     ]
-    assert measurement.steps[1].power_density is not None
+    first, *during, last = [step for step in measurement.steps if step is not series]
+    assert all(isinstance(step, JVSweepStep) for step in (first, *during, last))
+    assert during
+    assert series.power_density is not None

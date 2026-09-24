@@ -76,7 +76,11 @@ class JVScan(SingleInstruction):
     )
 
     def describe(self) -> str:
+        """`J–V scan every 10 min at 1000 W/m² (xenon lamp, AM1.5G)`: how often, and
+        the light it is measured under."""
         said = 'J–V scan' + self.describe_interval()
+        if self.irradiance is not None:
+            said += f' at {shown(self.irradiance)}'
         if self.light_source is not None:
             said += f' ({self.light_source.describe()})'
         return said

@@ -21,7 +21,6 @@ test conditions:
   - name: day
     duration: 12 h
     irradiance: 1000 W/m^2
-    light_source: {type: LED, solar_simulator: true}
     temperature: 45 °C
     electrical_load: mpp
   - name: night
@@ -42,7 +41,6 @@ steps:
   - temperature
   - irradiance
   - voltage
-  - current_density
 - name: final J–V
   kind: jv
   file: 03_jv_final.csv

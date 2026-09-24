@@ -5,7 +5,7 @@ run:
   variant: damp-heat-light-soaks
   operator: A. Researcher
   start: '2026-07-20T09:00:00+01:00'
-  end: '2026-07-24T09:24:00+01:00'
+  end: '2026-07-24T09:04:00+01:00'
   location: Berlin, lab 2.14
   samples:
   - name: cell A
@@ -21,17 +21,16 @@ steps:
   kind: jv
   file: 01_jv_initial.csv
   start: '2026-07-20T09:00:00+01:00'
-- name: ageing
+- name: damp heat
   kind: stability_series
   file: 02_stability_series.csv
-  start: '2026-07-20T09:12:00+01:00'
+  start: '2026-07-20T09:02:00+01:00'
   controlled:
   - temperature
   - irradiance
   - relative_humidity
   - voltage
-  - current_density
 - name: final J–V
   kind: jv
   file: 03_jv_final.csv
-  start: '2026-07-24T09:22:00+01:00'
+  start: '2026-07-24T09:02:00+01:00'

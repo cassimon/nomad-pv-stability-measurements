@@ -14,19 +14,25 @@ the standard, or else after the protocol file or the test:
     ISOS-L-2/
       ISOS-L-2.run.yaml         who ran what, when, on which samples, and the steps
       01_jv_initial.csv         J–V sweep of the fresh device, reverse then forward
-      02_stability_series.csv   every monitored quantity in one table, one row per sample
+      02_stability_series.csv   every quantity logged, in one table, one row per sample
       03_jv_final.csv           J–V sweep after the ageing
 
 A protocol whose routine is a sequence of phases, run once, gets one stability series
-per phase and a J–V sweep between them. `file_reading/file_reading_SIM.py` reads the format.
+per phase, and a J–V sweep wherever it places a J–V scan; where it places none, before
+the first phase, between two and after the last. J–V scans the protocol repeats are
+taken inside the series, every `interval`, or every `SCAN_EVERY` where it leaves that
+open. `file_reading/file_reading_SIM.py` reads the format.
 
 The stability series has a `time` column and one column per quantity the protocol
-monitors, the unit in the header. What is simulated follows the protocol's instruction
-tree: phases one after another, conditions side by side, blocks repeated a number of
-times, for a time or indefinitely, held values with noise, ramps, the band a solar
-simulator is kept in, an ambient room and an outdoor day. MPP tracking reads the cell's
-output; where the protocol does not track, a lit cell sits at open circuit. What the
-protocol leaves open is assumed and written into the run's `notes`.
+monitors or controls, since a controller logs what it regulates, the unit in the
+header. What is simulated follows the protocol's instruction tree: phases one after
+another, conditions side by side, blocks repeated a number of times, for a time or
+indefinitely, held values with noise, ramps, the band a solar simulator is kept in, an
+ambient room and an outdoor day. MPP tracking reads the cell's output; a bias at a
+voltage or a current reads what the cell answers, the points it names taken from the
+initial J–V sweep; where the protocol neither tracks nor biases, a lit cell sits at
+open circuit. What the protocol leaves open is assumed and written into the run's
+`notes`.
 
 Nothing here is measured. The output is fixed by a seed per run, so running the script
 again reproduces the same files.
@@ -37,6 +43,7 @@ import re
 import zlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import cache
 from math import inf
 from pathlib import Path
 
@@ -54,7 +61,12 @@ from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     MonitorControlInstruction,
     RampInstruction,
 )
+from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
+    JVScan,
+)
 from nomad_pv_stability_measurements.schema_packages.general import (
+    FIXED,
+    TYPICAL,
     InstructionBlock,
     seconds_of,
 )
@@ -116,6 +128,9 @@ START = datetime(2026, 3, 2, 9, 0, tzinfo=timezone(timedelta(hours=1)))
 #: Between a J–V sweep and the ageing, either way round.
 CHANGEOVER = timedelta(minutes=10)
 JV_LENGTH = timedelta(minutes=2)
+
+#: J–V scans the protocol repeats without saying how often are assumed this far apart.
+SCAN_EVERY = 24.0  # h
 
 #: A cycling ramp whose rate the protocol does not state is assumed to take this.
 CYCLE_PERIOD = 6.0  # h
@@ -223,11 +238,20 @@ def described(designation: str, conditions: dict) -> Source:
     )
 
 
+#: The electrical loads the simulation knows, by class: the cell tracked at its
+#: maximum power point, or biased at a voltage or a current.
+LOADS = {
+    'MPPTracking': 'mpp',
+    'HoldVoltage': 'bias_voltage',
+    'HoldCurrent': 'bias_current',
+}
+
+
 def quantity_of(instruction) -> str | None:
     """Which quantity an instruction is about, if one the simulation knows."""
     name = type(instruction).__name__
-    if name == 'MPPTracking':
-        return 'mpp'
+    if name in LOADS:
+        return LOADS[name]
     for suffix, quantity in (
         ('Temperature', 'temperature'),
         ('Irradiance', 'irradiance'),
@@ -275,32 +299,95 @@ def run_together(instructions, mode: str, start: float, stop: float) -> list[tup
     return found
 
 
-def monitored(protocol) -> set[str]:
+def recorded(protocol) -> set[str]:
+    """What the run logs: what the protocol monitors, and what it controls, since a
+    controller logs what it regulates."""
     return {
         quantity_of(each)
         for each in protocol.m_all_contents()
-        if isinstance(each, MonitorControlInstruction) and each.monitor
+        if isinstance(each, MonitorControlInstruction)
+        and (each.monitor or each.control)
     } - {None}
 
 
-def phases(protocol, length: float) -> list[tuple[str, float, float]]:
-    """The phases the run is recorded in, as `(name, start, end)` in hours: those of a
-    routine that runs a sequence once, each with a length; else the whole run."""
+@dataclass
+class Step:
+    """A step of the run: a stability series (`series`) or a J–V sweep (`jv`), from
+    `start` to `end` in hours of the protocol. `placed`: where the protocol puts it;
+    a J–V sweep the simulation adds takes none of the protocol's time."""
+
+    kind: str
+    name: str
+    start: float
+    end: float
+    placed: bool = True
+
+
+def planned_steps(protocol, length: float) -> list[Step]:
+    """The steps of a routine that runs a sequence once, each with a length, J–V scans
+    where it places them and every other part a stability series of its own; else one
+    series over the whole run. A J–V sweep is added where the protocol places none:
+    before the first series, between two, and after the last."""
+    found = [Step('series', 'ageing', 0.0, length)]
     for block in protocol.instructions:
-        if not (
+        if (
             isinstance(block, InstructionBlock)
             and block.repetitions() == 1
             and block.sub_instruction_execution_mode == 'sequential'
             and len(block.sub_instructions) > 1
             and all(hours(each) < inf for each in block.sub_instructions)
         ):
+            found, time = [], 0.0
+            for each in block.sub_instructions:
+                kind = 'jv' if isinstance(each, JVScan) else 'series'
+                name = each.name or each.describe()
+                if time < length:
+                    found.append(
+                        Step(kind, name, time, min(length, time + hours(each)))
+                    )
+                time += hours(each)
+            break
+    steps = []
+    for each in found:
+        if each.kind == 'series' and (not steps or steps[-1].kind == 'series'):
+            if steps:
+                after = steps[-1]
+                name, at = f'J–V after {after.name}', after.end
+            else:
+                name, at = 'initial J–V', 0.0
+            steps.append(Step('jv', name, at, at, placed=False))
+        steps.append(each)
+    if steps[-1].kind == 'series':
+        at = steps[-1].end
+        steps.append(Step('jv', 'final J–V', at, at, placed=False))
+    return steps
+
+
+def periodic_scans(protocol, series: list[Step], length: float, clock) -> list[Step]:
+    """The J–V scans the protocol repeats, every `interval` from where they start,
+    inside a stability series and not at its ends, where the sweeps of `planned_steps`
+    already are. An interval the protocol leaves open is assumed, and noted."""
+    found = []
+    for start, end, instruction in run_together(
+        protocol.instructions, 'parallel', 0.0, length
+    ):
+        interval = getattr(instruction, 'interval', None)
+        if not isinstance(instruction, JVScan) or interval is None:
             continue
-        found, time = [], 0.0
-        for each in block.sub_instructions:
-            found.append((each.name or each.describe(), time, time + hours(each)))
-            time += hours(each)
-        return found
-    return [('ageing', 0.0, length)]
+        if interval.kind in (FIXED, TYPICAL) and interval.value is not None:
+            every = interval.value.to('hour').magnitude
+        else:
+            every = SCAN_EVERY
+            clock.notes.add(
+                f'The protocol repeats its J–V scans without saying how often: they '
+                f'are assumed {SCAN_EVERY:g} h apart.'
+            )
+        time = start + every
+        while time < end - 1e-9:
+            if any(each.start < time < each.end for each in series):
+                found.append(Step('jv', f'J–V at {time:g} h', time, time))
+            time += every
+    return found
 
 
 def controlled(protocol, start: float, end: float, length: float) -> list[str]:
@@ -417,6 +504,10 @@ def temperature(instruction, clock: Clock, light: np.ndarray) -> np.ndarray:
 
 
 def relative_humidity(instruction, clock: Clock, temp: np.ndarray) -> np.ndarray:
+    if getattr(instruction, 'upper_bound', None) is not None:
+        # Kept below a bound: the room's, dried where it would rise above it.
+        bound = instruction.upper_bound.to('percent').magnitude
+        return np.minimum(ambient_humidity(clock), bound - 2 + clock.noise(0.5))
     if instruction.value is not None:
         value = instruction.value.to('percent').magnitude
         return value + clock.noise(0.5)
@@ -430,9 +521,26 @@ def ambient_humidity(clock: Clock) -> np.ndarray:
     return 40 - 5 * daily(clock.of_day) + drift + clock.noise(0.8)
 
 
+def bias(instruction, clock: Clock) -> float:
+    """The voltage (V) or current density (mA/cm²) a bias holds: its value, or the
+    point of the fresh device's J–V curve it names, taken from the initial scan."""
+    point = instruction.reference_point
+    if point is not None:
+        clock.notes.add(
+            'The bias points are taken from the reverse scan of the initial J–V sweep.'
+        )
+        return fresh_points()[point]
+    if instruction.value is None:
+        return np.nan
+    if type(instruction).__name__ == 'HoldCurrent':
+        raise ValueError('a current bias in A needs the cell area, which SIM has not.')
+    return instruction.value.to('V').magnitude
+
+
 def conditions(protocol, clock: Clock, length: float) -> dict[str, np.ndarray]:
     """Irradiance, temperature and relative humidity over the run, whether monitored
-    or not, since the cell ages under all of them; and `mpp`, where it is tracked.
+    or not, since the cell ages under all of them; `mpp`, where it is tracked; and
+    `bias_voltage` or `bias_current`, where the cell is biased, NaN where not.
     Where instructions overlap, the one written later holds."""
     t = clock.t
     found = run_together(protocol.instructions, 'parallel', 0.0, length)
@@ -462,11 +570,18 @@ def conditions(protocol, clock: Clock, length: float) -> dict[str, np.ndarray]:
         ambient_humidity(clock),
     )
     tracked = over_time('mpp', lambda each: np.ones_like(t), 0 * t) > 0
+    biased = {
+        quantity: over_time(
+            quantity, lambda each: np.full(t.shape, bias(each, clock)), np.nan * t
+        )
+        for quantity in ('bias_voltage', 'bias_current')
+    }
     return {
         'irradiance': light,
         'temperature': temp,
         'relative_humidity': humidity,
         'mpp': tracked,
+        **biased,
     }
 
 
@@ -484,9 +599,31 @@ def remaining(values: dict[str, np.ndarray]) -> np.ndarray:
     return np.clip(1 - 0.04 * (1 - np.exp(-stress / 20)) - 0.0003 * stress, 0, 1)
 
 
+def cell_current(voltage, light, kept):
+    """mA/cm²: what the cell gives at `voltage` (V) under `light` (W/m²), aged to
+    `kept`: the J–V curve of `jv_sweep`, lit or dark."""
+    jsc = JSC * kept**0.4
+    voc = VOC + IDEALITY * THERMAL_VOLTAGE * np.log(kept**0.6)
+    dark = jsc / (np.exp(voc / (IDEALITY * THERMAL_VOLTAGE)) - 1)
+    diode = dark * (np.exp(voltage / (IDEALITY * THERMAL_VOLTAGE)) - 1)
+    return jsc * np.clip(light, 0, None) / SUN - diode - 1000 * voltage / SHUNT
+
+
+def cell_voltage(current, light, kept):
+    """V: where the cell gives `current` (mA/cm²), by bisection, since the current
+    falls as the voltage rises."""
+    low, high = np.full(np.shape(light), -3.0), np.full(np.shape(light), 1.5)
+    for _ in range(50):
+        middle = (low + high) / 2
+        above = cell_current(middle, light, kept) > current
+        low, high = np.where(above, middle, low), np.where(above, high, middle)
+    return (low + high) / 2
+
+
 def electrical(values, kept, clock: Clock) -> dict[str, np.ndarray]:
-    """What the load reads: the maximum power point where it is tracked, open circuit
-    where it is not, and nothing in the dark."""
+    """What the load reads: the bias where the cell is biased, the maximum power point
+    where it is tracked, open circuit where it is neither, and nothing in the dark
+    unbiased. The power is what the cell gives, negative where the bias drives it."""
     light = values['irradiance']
     lit = light > 1
     tracked = lit & values['mpp']
@@ -499,6 +636,18 @@ def electrical(values, kept, clock: Clock) -> dict[str, np.ndarray]:
     power = EFFICIENCY * kept * heat * light / 10  # W/m^2 → mW/cm^2
     power = np.where(tracked, power * (1 + clock.noise(0.005)), 0)
     current = np.divide(power, voltage, out=np.zeros_like(power), where=tracked)
+    at_voltage = ~np.isnan(values['bias_voltage'])
+    at_current = ~np.isnan(values['bias_current'])
+    if at_voltage.any() or at_current.any():
+        held = np.where(at_voltage, values['bias_voltage'], 0.0)
+        voltage = np.where(at_voltage, held, voltage)
+        current = np.where(at_voltage, cell_current(held, light, kept), current)
+        held = np.where(at_current, values['bias_current'], 0.0)
+        voltage = np.where(at_current, cell_voltage(held, light, kept), voltage)
+        current = np.where(at_current, held, current)
+        biased = at_voltage | at_current
+        current = current + np.where(biased, clock.noise(0.002), 0)
+        power = np.where(biased, voltage * current, power)
     return {'voltage': voltage, 'current_density': current, 'power_density': power}
 
 
@@ -517,6 +666,24 @@ def jv_sweep(kept: float) -> list[tuple[float, float, str]]:
             diode = dark * (np.exp(voltage / (IDEALITY * THERMAL_VOLTAGE)) - 1)
             rows.append((voltage, jsc - diode - 1000 * voltage / SHUNT, direction))
     return rows
+
+
+@cache
+def fresh_points() -> dict[str, float]:
+    """The points of the fresh device's J–V curve a bias names, from the reverse scan
+    of the initial sweep: voltages in V, current densities in mA/cm²."""
+    scan = [row for row in jv_sweep(1.0) if row[2] == 'reverse']
+    voltage = np.round([row[0] for row in scan], 3)
+    current = np.round([row[1] for row in scan], 4)
+    _, voc, jsc, _, _, vmpp, jmpp, _, _ = figures_of_merit(voltage, current)
+    return {
+        'V_MPP': vmpp,
+        'near V_MPP': vmpp,
+        'V_oc': voc,
+        '-V_oc': -voc,
+        'J_SC': jsc,
+        '-J_MPP': -jmpp,
+    }
 
 
 # --- Writing a run -----------------------------------------------------------------
@@ -544,6 +711,8 @@ def instruments(protocol, quantities: set[str]) -> list[dict]:
         names.append('oven')
     if 'mpp' in quantities:
         names.append('MPP tracker')
+    if quantities & {'bias_voltage', 'bias_current'}:
+        names.append('source meter')
     names += ['temperature and humidity logger', 'J–V station']
     return [{'name': name} for name in names]
 
@@ -634,12 +803,96 @@ def slug(text: str) -> str:
     return re.sub(r'\W+', '_', text.lower()).strip('_')
 
 
+@dataclass
+class Recording:
+    """What a run recorded: the stability series' `columns` over the `clock`, the
+    fraction of its efficiency the cell `kept`, from `started` for `length` hours."""
+
+    clock: Clock
+    columns: dict[str, np.ndarray]
+    kept: np.ndarray
+    started: datetime
+    length: float
+
+
+def ageing_offset(planned: list[Step]) -> timedelta:
+    """Where the protocol places no first sweep, the ageing starts after one."""
+    return timedelta(0) if planned[0].placed else JV_LENGTH + CHANGEOVER
+
+
+def write_steps(
+    folder: Path, protocol, planned: list[Step], recording: Recording
+) -> list[tuple]:
+    """Write the files of the `planned` steps and of the scans the protocol repeats
+    inside them; returns each step as `(name, kind, file, start, controlled)`."""
+    clock, columns, kept = recording.clock, recording.columns, recording.kept
+    length, begins = recording.length, recording.started + ageing_offset(planned)
+    number = iter(range(1, 1000))
+
+    def kept_at(time: float) -> float:
+        return 1.0 if time <= 0 else float(np.interp(time, clock.t, kept))
+
+    def jv_file(position: int, step: Step) -> str:
+        if position == 0:
+            name = 'jv_initial'
+        elif position == len(planned) - 1:
+            name = 'jv_final'
+        else:
+            name = slug(step.name).replace('j_v', 'jv')
+        return f'{next(number):02d}_{name}.csv'
+
+    series = [each for each in planned if each.kind == 'series']
+    periodic = periodic_scans(protocol, series, length, clock)
+    # Shifted by the J–V sweeps the protocol does not place, each taking its own time
+    # and a changeover either side.
+    delay = timedelta(0)
+    steps = []
+    for position, step in enumerate(planned):
+        if step.kind == 'jv':
+            at = begins + delay + timedelta(hours=step.start)
+            if not step.placed and not position:
+                at = recording.started
+            elif not step.placed:
+                at += CHANGEOVER
+                delay += CHANGEOVER + JV_LENGTH + CHANGEOVER
+            file = jv_file(position, step)
+            write_jv(folder / file, kept_at(step.start))
+            steps.append((step.name, 'jv', file, at, []))
+            continue
+        last = step is series[-1]
+        rows = (clock.t >= step.start) & ((clock.t < step.end) | last)
+        table = {column: values[rows] for column, values in columns.items()}
+        table['time'] = table['time'] - step.start
+        suffix = '' if len(series) == 1 else f'_{slug(step.name)}'
+        file = f'{next(number):02d}_stability_series{suffix}.csv'
+        write_table(folder / file, table)
+        held = controlled(protocol, step.start, step.end, length)
+        steps.append(
+            (
+                step.name,
+                'stability_series',
+                file,
+                begins + delay + timedelta(hours=step.start),
+                [each for each in held if each in table],
+            )
+        )
+        for scan in periodic:
+            if step.start < scan.start < step.end:
+                file = f'{next(number):02d}_{slug(scan.name).replace("j_v", "jv")}.csv'
+                write_jv(folder / file, kept_at(scan.start))
+                at = begins + delay + timedelta(hours=scan.start)
+                steps.append((scan.name, 'jv', file, at, []))
+
+    return steps
+
+
 def simulate(source: Source, index: int, output: Path) -> str:
     """Write the run of `source` into `output`; returns the protocol's entry name."""
     key, protocol, designation = source.key, source.protocol, source.designation
     length = min(RUN_LENGTH, hours(protocol))
     started = START + timedelta(days=7 * index)
-    ageing_start = started + JV_LENGTH + CHANGEOVER
+    planned = planned_steps(protocol, length)
+    ageing_start = started + ageing_offset(planned)
     clock = Clock(
         t=np.round(np.arange(0, length + SAMPLE_EVERY / 2, SAMPLE_EVERY), 6),
         hour=ageing_start.hour + ageing_start.minute / 60,
@@ -647,52 +900,18 @@ def simulate(source: Source, index: int, output: Path) -> str:
     )
     values = conditions(protocol, clock, length)
     kept = remaining(values)
-    quantities = monitored(protocol)
+    quantities = recorded(protocol)
 
     columns = {'time': clock.t}
     columns.update({name: values[name] for name in CONDITIONS if name in quantities})
-    if 'mpp' in quantities:
+    if quantities & set(LOADS.values()):
         columns.update(electrical(values, kept, clock))
     columns = {name: columns[name] for name in COLUMNS if name in columns}
 
     folder = output / designation
     folder.mkdir(parents=True, exist_ok=True)
-    recorded = phases(protocol, length)
-    number = iter(range(1, 2 * len(recorded) + 2))
-    steps = [('initial J–V', 'jv', f'{next(number):02d}_jv_initial.csv', started, [])]
-    write_jv(folder / steps[0][2], 1.0)
-    begins = ageing_start
-    for position, (name, start, end) in enumerate(recorded):
-        last = position == len(recorded) - 1
-        rows = (clock.t >= start) & ((clock.t < end) | last)
-        series = {column: values[rows] for column, values in columns.items()}
-        series['time'] = series['time'] - start
-        suffix = '' if len(recorded) == 1 else f'_{slug(name)}'
-        file = f'{next(number):02d}_stability_series{suffix}.csv'
-        write_table(folder / file, series)
-        steps.append(
-            (
-                name,
-                'stability_series',
-                file,
-                begins,
-                [
-                    each
-                    for each in controlled(protocol, start, end, length)
-                    if each in series
-                ],
-            )
-        )
-        after = begins + timedelta(hours=end - start) + CHANGEOVER
-        jv_name, jv_file = (
-            ('final J–V', 'jv_final')
-            if last
-            else (f'J–V after {name}', f'jv_after{suffix}')
-        )
-        jv_file = f'{next(number):02d}_{jv_file}.csv'
-        write_jv(folder / jv_file, float(kept[rows][-1]))
-        steps.append((jv_name, 'jv', jv_file, after, []))
-        begins = after + JV_LENGTH + CHANGEOVER
+    recording = Recording(clock, columns, kept, started, length)
+    steps = write_steps(folder, protocol, planned, recording)
 
     run = {
         'institution': INSTITUTION,
@@ -701,7 +920,7 @@ def simulate(source: Source, index: int, output: Path) -> str:
         'standard': protocol.standard,
         'operator': OPERATOR,
         'start': started.isoformat(),
-        'end': (steps[-1][3] + JV_LENGTH).isoformat(),
+        'end': (max(step[3] for step in steps) + JV_LENGTH).isoformat(),
         'location': 'Berlin, rooftop test site'
         if protocol.environment == 'outdoor'
         else 'Berlin, lab 2.14',
@@ -720,7 +939,7 @@ def simulate(source: Source, index: int, output: Path) -> str:
                 'start': start.isoformat(),
                 **({'controlled': held} if held else {}),
             }
-            for name, kind, file, start, held in steps
+            for name, kind, file, start, held in sorted(steps, key=lambda s: s[3])
         ],
     }
     (folder / f'{designation}.run.yaml').write_text(
