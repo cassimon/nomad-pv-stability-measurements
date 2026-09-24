@@ -158,7 +158,12 @@ def test_a_series_shows_its_electrical_output_in_the_colour_of_its_role(
     assert all(trace['x'] == [0.0, 1.0, 2.0] for trace in traces)
 
 
-def test_a_measurement_shows_its_series_over_time_since_it_started(normalized):
+def at(hours: float) -> str:
+    """The moment `hours` after `START`, as the overview's time axis gives it."""
+    return (START + timedelta(hours=hours)).strftime('%Y-%m-%dT%H:%M:%S.000')
+
+
+def test_a_measurement_shows_its_series_over_the_dates_it_ran(normalized):
     """On top the efficiency each J–V scan reported, one line per direction, at the
     sweep's mark; below, what the series recorded where it ran."""
 
@@ -191,16 +196,29 @@ def test_a_measurement_shows_its_series_over_time_since_it_started(normalized):
 
     [figure] = measurement.figures
     reverse, forward, power, temperature = figure.figure['data']
-    assert (reverse['name'], reverse['x']) == ('reverse', [0.0, 4.0])
+    assert (reverse['name'], reverse['x']) == ('reverse', [at(0), at(4)])
     assert forward['y'] == pytest.approx([19.0, 16.0])  # %
     assert 'markers' in reverse['mode']
     assert power['name'] == 'ageing · power density · monitored'
     assert (temperature['name'], temperature['x']) == (
         'ageing · temperature · controlled',
-        [1.0, 2.0, 3.0],
+        [at(1), at(2), at(3)],
     )
     assert temperature['y'] == pytest.approx([64.85] * 3)  # °C
-    assert [mark['x0'] for mark in figure.figure['layout']['shapes']] == [0.0, 4.0]
+    marks = figure.figure['layout']['shapes']
+    assert [mark['x0'] for mark in marks] == [at(0), at(4)]
+    # Hovering still tells how long the test had run.
+    assert temperature['customdata'] == [1.0, 2.0, 3.0]
+    layout = figure.figure['layout']
+    [time_axis] = [
+        axis
+        for name, axis in layout.items()
+        if name.startswith('xaxis') and axis['showticklabels']
+    ]
+    assert (time_axis['type'], time_axis['title']['text']) == (
+        'date',
+        'date and time (UTC)',
+    )
 
 
 def test_the_power_each_scan_reported_is_shown_beside_the_tracked_power(normalized):
@@ -230,7 +248,7 @@ def test_the_power_each_scan_reported_is_shown_beside_the_tracked_power(normaliz
     [figure] = measurement.figures
     tracked, reported = figure.figure['data']
     assert reported['yaxis'] == tracked['yaxis']  # the same row
-    assert (reported['mode'], reported['x']) == ('markers', [1.0])
+    assert (reported['mode'], reported['x']) == ('markers', [at(1)])
     assert reported['y'] == pytest.approx([19.0])  # mW/cm²
 
 
@@ -253,7 +271,7 @@ def test_a_measurement_made_of_others_keeps_the_figure_drawn_of_their_steps(log)
 
     [figure] = collection.figures
     [power] = figure.figure['data']
-    assert power['x'] == [0.0, 1.0, 2.0]
+    assert power['x'] == [at(0), at(1), at(2)]
 
 
 def test_a_step_without_a_start_is_left_out_of_the_overview(normalized, log):

@@ -373,13 +373,15 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
     }
 
     def figures_for_plotting(self, logger, steps=None) -> list[PlotlyFigure]:
-        """The whole test on one time axis, in hours since it started: on top the
+        """The whole test on one time axis of dates and times: on top the
         efficiency of each J–V scan as the station reported it, one line per direction,
         then the output and the conditions the series recorded, each in the colour of
         its role, controlled or only monitored, with each scan's power at the maximum
         power point as dots on the power density row, and a dashed line where
         each J–V sweep was taken. Nothing where there is nothing to draw. A step with no
-        `start_time` has no place on the axis and is left out, with a warning.
+        `start_time` has no place on the axis and is left out, with a warning. Times
+        are shown in the time zone the test started in, and hovering gives the hours
+        since it started.
 
         `steps` are the steps to draw, by default this measurement's own; a
         measurement made of others draws theirs too."""
@@ -434,7 +436,9 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         if not pieces and not scans:
             return []
         marks = [(since_start(step), 'J–V') for step in sweeps]
-        figure = over_time_figure_for_plotting(pieces, self.name or '', marks, scans)
+        figure = over_time_figure_for_plotting(
+            pieces, self.name or '', marks, scans, start=start
+        )
         return [PlotlyFigure(label='Over time', index=0, open=True, figure=figure)]
 
     def read_files(

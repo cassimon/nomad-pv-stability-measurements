@@ -2,10 +2,13 @@
 was recorded over time, of one series or of the whole run.
 
 Values are shown in the units solar-cell data is read in: current density in mA/cm²,
-power density in mW/cm², temperature in °C, humidity in %, time in hours. What was
+power density in mW/cm², temperature in °C, humidity in %; time in hours, or, where the
+start is known, as dates and times, with the hours since the start on hover. What was
 recorded takes the colour of its role, as in a protocol's timeline: controlled, or only
 monitored.
 """
+
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -83,8 +86,14 @@ def over_time_figure_for_plotting(
     title: str,
     marks: list[tuple[float, str]] = (),
     scans: dict[str, dict[str, tuple[list[float], object]]] | None = None,
+    start: datetime | None = None,
 ) -> dict:
-    """Quantities over time, one row each, all on one time axis in hours.
+    """Quantities over time, one row each, all on one time axis: in hours, or, given
+    the `start` the hours count from, as dates and times.
+
+    On dates, every time is shown in the time zone `start` is given in, at its offset
+    there, so that the axis never jumps where the clocks change; the axis names the
+    offset. Hovering a point also gives the hours since `start`.
 
     `pieces` are `(name, hours, recorded, controlled)`, one per stretch recorded
     together; each is drawn apart, so that nothing is drawn across the time between
@@ -95,6 +104,7 @@ def over_time_figure_for_plotting(
     row `efficiency`, above the others, as dots joined by lines, one line per
     direction; in a row of `ROWS`, as dots beside what the series recorded there."""
     scans = scans or {}
+    on = _TimeAxis(start)
     rows = [
         name
         for name in ROWS
@@ -120,7 +130,7 @@ def over_time_figure_for_plotting(
                     'type': 'scatter',
                     'mode': 'lines+markers',
                     'name': direction,
-                    'x': hours,
+                    **on.x(hours),
                     'y': efficiency.to(unit).magnitude.tolist(),
                     'line': {'color': DIRECTION_COLORS[direction]},
                     'marker': {'size': 8, 'color': DIRECTION_COLORS[direction]},
@@ -140,7 +150,7 @@ def over_time_figure_for_plotting(
                         'type': 'scatter',
                         'mode': 'lines',
                         'name': ' · '.join(filter(None, (name, label, role))),
-                        'x': hours,
+                        **on.x(hours),
                         'y': recorded[row].to(unit).magnitude.tolist(),
                         'line': {'color': ROLE_COLORS[role]},
                         **axes,
@@ -151,7 +161,7 @@ def over_time_figure_for_plotting(
                     'type': 'scatter',
                     'mode': 'markers',
                     'name': f'{direction} scan · {label}',
-                    'x': hours,
+                    **on.x(hours),
                     'y': values.to(unit).magnitude.tolist(),
                     'marker': {'size': 8, 'color': DIRECTION_COLORS[direction]},
                     **axes,
@@ -161,7 +171,8 @@ def over_time_figure_for_plotting(
         top = 1 - index * (height + ROW_GAP)
         last = index == len(rows) - 1
         layout[f'xaxis{suffix}'] = {
-            **_axis('time (h)' if last else ''),
+            **_axis(on.title if last else ''),
+            **on.axis,
             'anchor': f'y{suffix}',
             'showticklabels': last,
             **({'matches': 'x'} if index else {}),
@@ -176,8 +187,8 @@ def over_time_figure_for_plotting(
             'type': 'line',
             'xref': 'x',
             'yref': 'paper',
-            'x0': at,
-            'x1': at,
+            'x0': on.at(at),
+            'x1': on.at(at),
             'y0': 0,
             'y1': 1,
             'line': {'color': AXIS_COLOR, 'width': 1, 'dash': 'dash'},
@@ -197,7 +208,7 @@ def over_time_figure_for_plotting(
             'text': text,
             'xref': 'x',
             'yref': 'paper',
-            'x': at,
+            'x': on.at(at),
             'y': 1,
             'yanchor': 'bottom',
             'showarrow': False,
@@ -206,6 +217,54 @@ def over_time_figure_for_plotting(
         for at, text in marks
     ]
     return {'data': traces, 'layout': layout}
+
+
+class _TimeAxis:
+    """How times in hours since `start` are placed on the time axis: as they are
+    where `start` is `None`, else as dates and times."""
+
+    def __init__(self, start: datetime | None):
+        self.start = None
+        self.title, self.axis = 'time (h)', {}
+        if start is None:
+            return
+        offset = start.utcoffset()
+        if offset is None:
+            self.start, zone = start, ''
+        else:
+            self.start = start.astimezone(timezone(offset)).replace(tzinfo=None)
+            zone = f' (UTC{_offset(offset)})'
+        self.title, self.axis = f'date and time{zone}', {'type': 'date'}
+
+    def at(self, hours: float):
+        """One moment on the axis."""
+        if self.start is None:
+            return hours
+        return (self.start + timedelta(hours=hours)).isoformat(timespec='milliseconds')
+
+    def x(self, hours: list[float]) -> dict:
+        """The `x` of a trace, and, on dates, the hours since the start on hover."""
+        if self.start is None:
+            return {'x': hours}
+        milliseconds = np.rint(np.asarray(hours, dtype=float) * 3.6e6)
+        moments = np.datetime64(self.start, 'ms') + milliseconds.astype(
+            'timedelta64[ms]'
+        )
+        return {
+            'x': np.datetime_as_string(moments, unit='ms').tolist(),
+            'customdata': np.round(np.asarray(hours, dtype=float), 4).tolist(),
+            'hovertemplate': '%{x|%Y-%m-%d %H:%M:%S}, %{customdata:.2f} h since the '
+            'start<br>%{y}<extra>%{fullData.name}</extra>',
+        }
+
+
+def _offset(offset: timedelta) -> str:
+    """An offset from UTC as written after `UTC`: `+01:00`, `-05:30`, or nothing."""
+    minutes = round(offset.total_seconds() / 60)
+    if minutes == 0:
+        return ''
+    sign = '+' if minutes > 0 else '-'
+    return f'{sign}{abs(minutes) // 60:02d}:{abs(minutes) % 60:02d}'
 
 
 def _legend(keys: dict[str, str]) -> dict:

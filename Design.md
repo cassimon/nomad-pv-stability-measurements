@@ -4539,7 +4539,7 @@ chambers); renaming the `Hold…` classes.
 
 ## 39. The plan given and the plan derived
 
-**Status: steps 1–3 built, step 4 open.** Amends §34.4a (protocols described in run files),
+**Status: built, steps 1–4.** Amends §34.4a (protocols described in run files),
 §37.2 (*CumulativeStabilityMeasurements*, the collection's protocol) and §37.3 (values an
 institution assumes). 518 tests, ruff clean; the UNITOV upload (46 entries) goes through NOMAD
 with no errors, every reference into the upload.
@@ -4603,19 +4603,27 @@ their times.
 - Not changed: `populate_from_plan` reads only `plan`, since a derived protocol states no
   standard and nobody ran its instructions as steps. Nothing calls it yet.
 
-### 39.4 Step 4 — a history over dates (open)
+### 39.4 Step 4 — a history over dates — built
 
 A collection spans days to months, and its runs start at different dates, so hours since the
-first step say little. The measurement's overview (`figures_for_plotting`,
-`step_figures.over_time_figure_for_plotting`) is to draw its time axis as dates and times,
-where the measurement has a start (`datetime`), in the time zone the files give. The protocol's
-timeline stays in hours since it starts: a plan has no date.
+first step say little. **Every** measurement's overview, a run's and a collection's alike, now
+draws its time axis as dates and times (`type: 'date'`), so the two read the same way.
 
-- *To decide:* dates for every measurement's overview, or only a collection's. The
-  recommendation is every one: a run has a start as well, and a run's overview and its
-  collection's then read alike. Hover would still give the hours since the run started.
-- The protocol-timeline helpers that the overview shares (`plan_timeline`) take hours; the
-  overview converts its datetimes itself, so the timeline code does not change.
+- `over_time_figure_for_plotting` still takes hours since a start, and is handed that `start`;
+  it places the hours on dates itself (`_TimeAxis`), so the measurement's code keeps counting in
+  hours. Without a `start` it draws hours, as before: a series step's own figure, *Electrical
+  output*, stays in hours since the step started, and the protocol's timeline in hours since
+  it starts, since a plan has no date.
+- Plotly knows no time zones, so every time is written without one, at the offset of `start`,
+  and the axis names it: `date and time (UTC)`. One fixed offset keeps the axis from jumping
+  where clocks change.
+- Hovering a point gives its date and time and the hours since the start (`customdata`); for a
+  collection, since the device's first measurement.
+- *Verified:* NOMAD stores every `Datetime` in UTC as it is set, so a measurement no longer
+  knows the zone its files gave, and the axis is in UTC. UNITOV's run folders are named in
+  Rome time (`21.28.49`), an hour or two ahead of the axis.
+- *Later:* a local axis would need the zone kept beside the datetime, e.g. a `time_zone`
+  (IANA name) on the measurement, read from the institution (UNITOV: `Europe/Rome`).
 
 ### 39.5 Open
 
