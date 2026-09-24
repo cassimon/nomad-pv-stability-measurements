@@ -71,6 +71,8 @@ class PlotPiece:
     #: s: where it is a moment rather than a stretch, as a J–V scan, the moments it is
     #: drawn at: marks on its row, over whatever else the row holds.
     marks: np.ndarray | None = None
+    #: What the marks stand for, for the legend: `J–V scan`.
+    mark_kind: str | None = None
 
 
 @dataclass

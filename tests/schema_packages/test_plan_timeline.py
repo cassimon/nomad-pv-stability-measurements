@@ -33,12 +33,13 @@ from nomad_pv_stability_measurements.schema_packages.plan_timeline import (
     ASSUMPTION_COLOR,
     OVERHANG,
     axis_sections,
+    mark_symbols,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
     RampTemperature,
 )
-from nomad_pv_stability_measurements.schema_packages.utils import AxisBreak
+from nomad_pv_stability_measurements.schema_packages.utils import AxisBreak, PlotPiece
 
 HOUR = 3600
 K = ureg.kelvin
@@ -67,6 +68,13 @@ def drawn(figure) -> list[dict]:
         for trace in figure['data']
         if trace['y'][0] is not None and trace.get('hoveron') != 'fills'
     ]
+
+
+def legend(layout) -> str:
+    """The legend's text: the roles' colours, then the marks' symbols."""
+    return next(
+        note['text'] for note in layout['annotations'] if 'controlled' in note['text']
+    )
 
 
 def row_labels(layout) -> list[dict]:
@@ -311,6 +319,22 @@ def test_jv_scans_are_marks_over_what_holds_the_load(normalized):
     assert marks['x'] == [0, 0.5]
     assert marks['yaxis'] == bar['yref'].removesuffix(' domain')
     assert 'at 30 min' in marks['hovertext'][1]
+    # The legend says what the diamonds stand for.
+    assert '◆</span> J–V scan' in legend(figure['layout'])
+
+
+def test_each_kind_of_mark_has_its_own_symbol():
+    def moment(kind: str) -> PlotPiece:
+        return PlotPiece('electrical load', kind, 0, 1, marks=[0], mark_kind=kind)
+
+    symbols = mark_symbols([moment('EQE'), moment('J–V scan'), moment('PL image')])
+
+    # A J–V scan is always a diamond; any other kind takes a symbol still free.
+    assert {kind: plotly for kind, (plotly, _) in symbols.items()} == {
+        'J–V scan': 'diamond',
+        'EQE': 'circle',
+        'PL image': 'triangle-up',
+    }
 
 
 def test_values_in_different_units_on_one_row_are_written_not_drawn(normalized):

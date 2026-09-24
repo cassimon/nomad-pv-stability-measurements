@@ -4307,7 +4307,7 @@ quantity for is reported.
 
 ## 38. Stated, controlled, monitored — `specify`; light sources; periods
 
-**Status: steps A–D built, the runs regenerated, J–V scans drawn on the load** (515 tests, ruff clean; all 118 ISOS variants compared whole). Amends §15.2 (a written value no longer
+**Status: steps A–D built, the runs regenerated, J–V scans drawn on the load** (517 tests, ruff clean; all 118 ISOS variants compared whole). Amends §15.2 (a written value no longer
 sets `control`), §17.4 (`set_point` → `value`), §26 (monitoring), §29 (roles), §34.10 (open
 circuit) and §36.3.
 
@@ -4516,6 +4516,16 @@ start (replacing the 2 min bar, `ONE_SCAN_FOR_PLOTTING`); a periodic one, a mark
 schedule costs one trace, not a shape per scan. That the scan preempts the load stays a matter
 of the drawing: at protocol level the routine already overrides the settings, and the plan
 still runs a protocol-level scan beside the load.
+
+**A base class and a legend** (after review). `CharacterizationInstruction(SingleInstruction)`
+holds what every measurement taken during a test shares: `interval` and its words, the marks,
+the electrical load's row (a kind that leaves the terminals alone names its own) and the
+monitored role. A kind names itself in the class attribute `technique`, which names the
+instruction and its marks; a bare one is reported. `JVScan` keeps only its own settings, which
+`describe_settings` adds to the label. `PlotPiece.mark_kind` carries the technique;
+`plan_timeline.mark_symbols` gives each kind its symbol, `MARK_SYMBOLS` fixed (a J–V scan is
+always a diamond) and any other kind the first of `MORE_SYMBOLS` still free; the legend lists
+each kind drawn after the roles, its key drawn as the mark, in its role's colour.
 
 ### 38.8 Later
 

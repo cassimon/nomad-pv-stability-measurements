@@ -65,6 +65,17 @@ BAR_GAP = 3
 BAND_OPACITY = 0.3
 #: px: the marks of what is a moment, not a stretch, as a J–V scan.
 MARK_SIZE = 12
+#: The symbol of each kind of mark, as Plotly names it and as the legend writes it:
+#: one kind always has the same. A kind not listed takes the first of `MORE_SYMBOLS`
+#: no other kind in the figure has.
+MARK_SYMBOLS = {'J–V scan': ('diamond', '◆')}
+MORE_SYMBOLS = (
+    ('circle', '●'),
+    ('triangle-up', '▲'),
+    ('star', '★'),
+    ('hexagram', '✡'),
+    ('cross', '✚'),
+)
 #: Of a row's height, from its foot: where the marks stand, at the top edge of a bar,
 #: clear of its text.
 MARK_HEIGHT = 0.8
@@ -165,7 +176,7 @@ def figure_for_plotting(
         [AXIS_GAP + (1 - AXIS_GAP) * low, AXIS_GAP + (1 - AXIS_GAP) * high]
         for low, high in _domains(heights[::-1], ROW_GAP, 0)[::-1]  # first on top
     ]
-    drawing = _Drawing(sections, x_domains)
+    drawing = _Drawing(sections, x_domains, mark_symbols(pieces))
     layout = {
         'title': {
             'text': f'<b>{_subscripts(title)}</b>' if title else '',
@@ -221,7 +232,7 @@ def figure_for_plotting(
     if goes_on:
         drawing.notes.append(_on_axis('<b>⋯</b>', x_domains[-1][1], 'left', xshift=4))
     drawing.notes.append(_note('time (h)', 0.5, 0, yshift=-55, size=AXIS_FONT_SIZE))
-    drawing.notes.append(_legend())
+    drawing.notes.append(_legend(drawing.symbols, pieces))
     layout['shapes'] = drawing.shapes
     layout['annotations'] = drawing.notes
     return {'data': drawing.data, 'layout': layout}
@@ -230,8 +241,10 @@ def figure_for_plotting(
 class _Drawing:
     """The figure's traces, shapes and notes, as the rows are drawn into its sections."""
 
-    def __init__(self, sections: list[tuple[float, float]], x_domains):
+    def __init__(self, sections: list[tuple[float, float]], x_domains, symbols):
         self.sections, self.x_domains = sections, x_domains
+        #: By kind of mark, its symbol, as `mark_symbols` gives it.
+        self.symbols = symbols
         self.size = TEXT_SIZES[1]
         self.data, self.shapes, self.notes = [], [], []
         self.color = ROLE_COLORS['unspecified']
@@ -364,7 +377,7 @@ class _Drawing:
                     'xaxis': x,
                     'yaxis': y,
                     'marker': {
-                        'symbol': 'diamond',
+                        'symbol': self.symbols[piece.mark_kind][0],
                         'size': MARK_SIZE,
                         'color': color,
                         'line': {'width': 1, 'color': AXIS_COLOR},
@@ -566,11 +579,31 @@ def _row_label(row: str, unit: str, domain: list[float]) -> dict:
     return label
 
 
-def _legend() -> dict:
-    """What the colours mean, above the rows on the right."""
+def mark_symbols(pieces) -> dict[str, tuple[str, str]]:
+    """The symbol of each kind of mark among `pieces`, in the order they first appear:
+    its own from `MARK_SYMBOLS`, else the first of `MORE_SYMBOLS` still free."""
+    kinds = dict.fromkeys(
+        piece.mark_kind for piece in pieces if piece.marks is not None
+    )
+    symbols = {kind: MARK_SYMBOLS[kind] for kind in kinds if kind in MARK_SYMBOLS}
+    free = [each for each in MORE_SYMBOLS if each not in symbols.values()]
+    for kind in kinds:
+        if kind not in symbols:
+            symbols[kind] = free.pop(0) if free else MORE_SYMBOLS[-1]
+    return symbols
+
+
+def _legend(symbols: dict[str, tuple[str, str]], pieces) -> dict:
+    """What the colours mean, and what each kind of mark stands for, above the rows on
+    the right; a mark's key as the mark is drawn, in its role's colour."""
     keys = [
         f'<span style="color:{color}">■</span> {role}'
         for role, color in ROLE_COLORS.items()
+    ]
+    roles = {piece.mark_kind: piece.role for piece in pieces if piece.marks is not None}
+    keys += [
+        f'<span style="color:{ROLE_COLORS[roles[kind]]}">{written}</span> {kind}'
+        for kind, (_, written) in symbols.items()
     ]
     return _note('   '.join(keys), 1, 1, anchor='right', yshift=35)
 

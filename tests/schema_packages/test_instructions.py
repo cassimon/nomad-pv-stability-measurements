@@ -12,6 +12,7 @@ from nomad_pv_stability_measurements.schema_packages.base_instructions import (
     RampInstruction,
 )
 from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
+    CharacterizationInstruction,
     JVScan,
 )
 from nomad_pv_stability_measurements.schema_packages.general import Duration, Period
@@ -506,6 +507,13 @@ def test_one_scan_is_one_mark_and_scans_without_an_interval_are_drawn_as_assumed
     assert piece.marks.tolist() == marks
     assert (piece.assumption or '').startswith(assumed or '')
     assert bool(piece.assumption) == bool(assumed)
+
+
+def test_a_bare_characterization_names_no_measurement_and_is_reported(normalized, log):
+    normalized(CharacterizationInstruction(duration=fixed(1 * ureg.hour)))
+
+    [message] = log.errors
+    assert 'names no measurement' in message
 
 
 @pytest.mark.parametrize(

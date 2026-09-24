@@ -17,27 +17,107 @@ from nomad_pv_stability_measurements.schema_packages.utils import shown
 
 m_package = SchemaPackage()
 
-#: How many scans are drawn where the plan repeats them without saying how often:
+#: How many measurements are drawn where the plan repeats them without saying how often:
 #: evenly over the stretch they are taken in. Only for the drawing, which says so.
 MARKS_FOR_PLOTTING = 4
 
 
-class JVScan(SingleInstruction):
-    """J–V scans taken over the instruction's duration, one every `interval`: the
-    voltage swept as set, the current recorded. Without an `interval`, one scan at the
-    start. An interval `not_stated` scans periodically, as often as whoever runs the
-    test chooses.
+class CharacterizationInstruction(SingleInstruction):
+    """A measurement of the cell taken during a test, rather than a condition held: at
+    the start of the instruction, or once every `interval` over its duration. An
+    interval `not_stated` measures periodically, as often as whoever runs the test
+    chooses. How long one measurement takes is rarely known, so it is no part of the
+    plan: the duration is the stretch the measurements are taken over, usually the
+    whole block they run beside.
 
-    A standard writes it as "J–V every x". How long one scan takes is rarely known, so
-    it is no part of the plan: the duration is the stretch the scans are taken over,
-    usually the whole block they run beside.
+    Each kind of measurement is a subclass, naming itself in `technique`. Each
+    measurement is drawn as a mark at its moment, on the row of what it interrupts, and
+    the figure's legend says what the mark stands for.
     """
+
+    #: What the measurement is, in words: `J–V scan`. It names the instruction, and
+    #: its marks in the legend.
+    technique = ''
 
     interval = SubSection(
         section_def=Period,
-        description='The time from one scan to the next, and what kind of time it is: '
-        'fixed, typical, or not stated where the test only says the scans repeat.',
+        description='The time from one measurement to the next, and what kind of time '
+        'it is: fixed, typical, or not stated where the test only says the '
+        'measurements repeat.',
     )
+
+    def describe(self) -> str:
+        """`J–V scan every 10 min`, and what the kind of measurement adds."""
+        return self.technique + self.describe_interval() + self.describe_settings()
+
+    def describe_interval(self) -> str:
+        """` every 10 min`, ` every ≈ 1 h` where it is only typical, ` periodically`
+        where it is not stated; nothing for one measurement."""
+        interval = self.interval
+        if interval is None:
+            return ''
+        if interval.kind == NOT_STATED:
+            return ' periodically'
+        if interval.value is None:
+            return ''
+        typically = '≈ ' if interval.kind == TYPICAL else ''
+        return f' every {typically}{shown(interval.value.to(ureg.second))}'
+
+    def describe_settings(self) -> str:
+        """What follows the interval: how it is measured. Nothing, unless the kind of
+        measurement says."""
+        return ''
+
+    def time_series_for_plotting(self, start: float, stop: float):
+        """Each measurement a mark at the moment it is taken, not a stretch: one at the
+        start, or one every `interval`."""
+        series = super().time_series_for_plotting(start, stop)
+        for piece in series.pieces:
+            piece.text = None
+            piece.mark_kind = self.technique
+            piece.marks, piece.assumption = self.marks_for_plotting(
+                piece.start, piece.end
+            )
+        return series
+
+    def marks_for_plotting(self, start: float, end: float):
+        """`(times, assumption)`: when the measurements are taken between `start` and
+        `end`, in seconds, and what the drawing assumes. Where the interval is not
+        stated, a few are drawn evenly, and the drawing says so; where nothing ends the
+        drawing yet, only the first, since only the extent is needed."""
+        interval = self.interval
+        if interval is None or end == inf:
+            return np.array([start]), None
+        if interval.kind == NOT_STATED or interval.value is None:
+            times = np.linspace(start, end, MARKS_FOR_PLOTTING, endpoint=False)
+            return times, f'interval not stated: drawn {MARKS_FOR_PLOTTING} times'
+        return np.arange(start, end, interval.value.to('s').magnitude), None
+
+    def row_for_plotting(self) -> str:
+        """The electrical load's: most measurements of a cell take its terminals,
+        whatever else holds them, so they are drawn over what the load does. One that
+        leaves the terminals alone, an image say, names its own row."""
+        return 'electrical load'
+
+    def role_for_plotting(self) -> str:
+        """Monitored: a measurement regulates no condition."""
+        return 'monitored'
+
+    def normalize(self, archive, logger):
+        super().normalize(archive, logger)
+        if not self.technique:
+            logger.error(
+                f'{self.name or "<unnamed>"} is a bare `{type(self).__name__}`, which '
+                f'names no measurement: use one of its kinds, as `JVScan`.'
+            )
+
+
+class JVScan(CharacterizationInstruction):
+    """J–V scans: the voltage swept as set, the current recorded. A standard writes
+    them as "J–V every x"."""
+
+    technique = 'J–V scan'
+
     voltage_start = Quantity(
         type=np.float64,
         unit='V',
@@ -75,61 +155,14 @@ class JVScan(SingleInstruction):
         'another source than the one the cell ages under.',
     )
 
-    def describe(self) -> str:
-        """`J–V scan every 10 min at 1000 W/m² (xenon lamp, AM1.5G)`: how often, and
-        the light it is measured under."""
-        said = 'J–V scan' + self.describe_interval()
+    def describe_settings(self) -> str:
+        """` at 1000 W/m² (xenon lamp, AM1.5G)`: the light it is measured under."""
+        said = ''
         if self.irradiance is not None:
             said += f' at {shown(self.irradiance)}'
         if self.light_source is not None:
             said += f' ({self.light_source.describe()})'
         return said
-
-    def describe_interval(self) -> str:
-        """` every 10 min`, ` every ≈ 1 h` where it is only typical, ` periodically`
-        where it is not stated; nothing for one scan."""
-        interval = self.interval
-        if interval is None:
-            return ''
-        if interval.kind == NOT_STATED:
-            return ' periodically'
-        if interval.value is None:
-            return ''
-        typically = '≈ ' if interval.kind == TYPICAL else ''
-        return f' every {typically}{shown(interval.value.to(ureg.second))}'
-
-    def time_series_for_plotting(self, start: float, stop: float):
-        """Each scan a mark at the moment it is taken, not a stretch: one at the start,
-        or one every `interval`."""
-        series = super().time_series_for_plotting(start, stop)
-        for piece in series.pieces:
-            piece.text = None
-            piece.marks, piece.assumption = self.marks_for_plotting(
-                piece.start, piece.end
-            )
-        return series
-
-    def marks_for_plotting(self, start: float, end: float):
-        """`(times, assumption)`: when the scans are taken between `start` and `end`, in
-        seconds, and what the drawing assumes. Where the interval is not stated, a few
-        are drawn evenly, and the drawing says so; where nothing ends the drawing yet,
-        only the first, since only the extent is needed."""
-        interval = self.interval
-        if interval is None or end == inf:
-            return np.array([start]), None
-        if interval.kind == NOT_STATED or interval.value is None:
-            times = np.linspace(start, end, MARKS_FOR_PLOTTING, endpoint=False)
-            return times, f'interval not stated: drawn {MARKS_FOR_PLOTTING} times'
-        return np.arange(start, end, interval.value.to('s').magnitude), None
-
-    def row_for_plotting(self) -> str:
-        """The electrical load's: a scan takes the cell's terminals, whatever else
-        holds them, so it is drawn over what the load does."""
-        return 'electrical load'
-
-    def role_for_plotting(self) -> str:
-        """Monitored: a scan measures the cell, and regulates no condition."""
-        return 'monitored'
 
 
 m_package.__init_metainfo__()
