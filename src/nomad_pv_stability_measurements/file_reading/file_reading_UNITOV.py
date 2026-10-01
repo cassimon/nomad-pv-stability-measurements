@@ -109,7 +109,7 @@ _TRACKING_SETTINGS = {
     'dV track (V)': ('tracking_step', 'V'),
     'track delay (s)': ('tracking_delay', 's'),
 }
-#: Tracking settings of the run, not of the series: `read_protocol` reads them.
+#: Tracking settings of the run, not of the series: `read_stability_run` reads them.
 _TRACKING_SETTINGS_OF_RUN = {
     'JV interval (min)',
     'Test duration (min)',
@@ -126,7 +126,7 @@ _JV_SETTINGS_NOT_READ = {
 }
 
 
-def is_protocol_file(path: str | Path, content: str) -> bool:
+def stability_run_belongs_to_this_institution(path: str | Path, content: str) -> bool:
     """A UNITOV Tracking file, which stands for its run: named
     `..._Stability (Tracking)_<device>.txt`, and saying `Test	Stability (Tracking)`."""
     return _kind(path) == 'Tracking' and bool(
@@ -134,17 +134,7 @@ def is_protocol_file(path: str | Path, content: str) -> bool:
     )
 
 
-def is_stability_series_file(path: str | Path) -> bool:
-    """A UNITOV tracking series, by its name: `..._Stability (Tracking)_<device>.txt`."""
-    return _kind(path) == 'Tracking'
-
-
-def is_jv_file(path: str | Path) -> bool:
-    """A UNITOV J–V sweep, by its name: `..._Stability (JV)_<device>.txt`."""
-    return _kind(path) == 'JV'
-
-
-def read_protocol(path: str | Path) -> dict:
+def read_stability_run(path: str | Path) -> dict:
     """The run the Tracking file at `path` stands for, with the other files of its
     folder as its steps: the tracking series, one J–V sweep per J–V file, and a scan
     with its figures of merit only for each row of the Parameters file whose J–V file
@@ -186,12 +176,7 @@ def read_protocol(path: str | Path) -> dict:
     }
 
 
-def read_embedded_protocol(path: str | Path) -> dict | None:
-    """`None`: no UNITOV file states the test a run was to be (`derive_protocol`)."""
-    return None
-
-
-def derive_protocol(path: str | Path) -> dict | None:
+def derive_stability_protocol_from_stability_run(path: str | Path) -> dict | None:
     """The test the Tracking file at `path` shows: one phase, as long as its
     `Test duration`, holding the load as its `Algorithm` says, under UNITOV's
     `ASSUMED_CONDITIONS`. No file states the voltage a `Fixed Voltage` run holds, so
@@ -207,7 +192,7 @@ def derive_protocol(path: str | Path) -> dict | None:
     phase = {'name': 'tracking', 'duration': duration}
     notes = []
     if algorithm.lower() == 'fixed voltage':
-        recorded = read_stability_series(path)['voltage'].to('V').magnitude
+        recorded = read_stability_series_file(path)['voltage'].to('V').magnitude
         phase['voltage'] = f'{recorded.mean():.3f} V'
         notes.append(
             'The voltage held is the mean of the recorded voltage, as no file states '
@@ -231,7 +216,7 @@ def derive_protocol(path: str | Path) -> dict | None:
     )
 
 
-def read_collection(path: str | Path) -> dict | None:
+def read_collection_all_measurements_on_device(path: str | Path) -> dict | None:
     """The collection of the device the file at `path` was measured on, if this file
     stands for it: the Tracking file of the device's first run, or, for a device
     without runs, its first file. `None` for every other file.
@@ -267,7 +252,7 @@ def read_collection(path: str | Path) -> dict | None:
     }
 
 
-def read_stability_series(path: str | Path) -> dict[str, object]:
+def read_stability_series_file(path: str | Path) -> dict[str, object]:
     """The tracking series at `path`: `time` since the start, `voltage`,
     `current_density` and `power_density`, one value per sample, and the tracker's
     `[Tracking Settings]` as `settings`. A column or setting that is neither read nor
@@ -312,6 +297,13 @@ def read_jv_file(path: str | Path) -> dict[str, object]:
     }
 
 
+#: How each kind of step file is read, by the step kind it fills.
+STEP_READERS = {
+    'stability_series': read_stability_series_file,
+    'jv': read_jv_file,
+}
+
+
 def _read_sections(path: str | Path) -> tuple[dict[str, dict[str, str]], list]:
     """A UNITOV file as its header, `{section: {key: value}}`, and the tables of its
     data, each a list of rows of cells as text, split at rows with no text."""
@@ -349,7 +341,7 @@ def _scans(folder: Path, label: str | None = None) -> list[dict]:
         return f'J–V {number}' + (f', {label}' if label else '')
 
     for file in sorted(folder.iterdir()):
-        if is_jv_file(file):
+        if _kind(file) == 'JV':
             general = _read_sections(file)[0].get('General info', {})
             scans[_number(file)] = {
                 'name': named(_number(file)),

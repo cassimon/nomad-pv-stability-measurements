@@ -6,23 +6,27 @@ parser asks each module in `INSTITUTIONS` whether a file is its run file, and re
 run with the functions of the first that says yes.
 
 A run's `plan` is the protocol it was given: the protocol file its run file names, in
-the same upload, or the test the run file describes itself. Then the file makes two
-entries: the run, and a child entry keyed `PROTOCOL_KEY` for the protocol it describes.
-Where a run was given none, the institution may work one out from the run's files; it
-becomes a child entry keyed `DERIVED_PROTOCOL_KEY`, which the run refers to as its
-`derived_plan`, never as its `plan`.
+the same upload, or the test the run file describes itself, the `protocol` its
+`read_stability_run` gives. Then the file makes two entries: the run, and a child
+entry keyed `PROTOCOL_KEY` for the protocol it describes. Where a run was given none,
+an institution with a `derive_stability_protocol_from_stability_run` may work one out
+from the run's files; it becomes a child entry keyed `DERIVED_PROTOCOL_KEY`, which the
+run refers to as its `derived_plan`, never as its `plan`.
 
 A device's whole history is its **collection**: all its runs, and the measurements
-taken outside any run. It follows no protocol; its runs follow their own. The one file
-that stands for it, as the institution's `read_collection` says, also makes the
-collection (`COLLECTION_KEY`) and the device's sample (`SAMPLE_KEY`). Where that file
-is no run file, the collection is its own entry.
+taken outside any run. It follows no protocol; its runs follow their own. Where an
+institution has a `read_collection_all_measurements_on_device`, the one file that
+stands for it, as that says, also makes the collection (`COLLECTION_KEY`) and the
+device's sample (`SAMPLE_KEY`). Where that file is no run file, the collection is its
+own entry.
 Entry ids follow from the file and the key, so every entry can refer to another before
 it is processed.
 
 To read a new institution's runs: write its module from the template and add it to
 `INSTITUTIONS`. The parser is offered every file of an upload, so each module's
-`is_protocol_file` and `read_collection` should look at the name before the content.
+`stability_run_belongs_to_this_institution` and
+`read_collection_all_measurements_on_device` should look at the name before the
+content.
 """
 
 import os
@@ -63,7 +67,7 @@ SAMPLE_KEY = 'sample'
 def institution_of(path: str | Path, content: str) -> ModuleType | None:
     """The file reading module of the institution whose run file this is, if any."""
     for module in INSTITUTIONS:
-        if module.is_protocol_file(path, content):
+        if module.stability_run_belongs_to_this_institution(path, content):
             return module
     return None
 
@@ -73,8 +77,11 @@ def collection_of(path: str | Path) -> tuple[ModuleType | None, dict | None]:
     one. A reader that fails counts as no collection here; reading the file reports
     it."""
     for module in INSTITUTIONS:
+        read = getattr(module, 'read_collection_all_measurements_on_device', None)
+        if read is None:
+            continue
         try:
-            collection = module.read_collection(path)
+            collection = read(path)
         except Exception:  # an institution's reader may raise anything
             continue
         if collection is not None:
@@ -150,12 +157,16 @@ class StabilityMeasurementParser(MatchingParser):
             return keys or False
         if collection is not None:
             keys.append(COLLECTION_KEY)
-        for key, read in (
-            (PROTOCOL_KEY, institution.read_embedded_protocol),
-            (DERIVED_PROTOCOL_KEY, institution.derive_protocol),
-        ):
+
+        def described(path):
+            return institution.read_stability_run(path).get('protocol')
+
+        derive = getattr(
+            institution, 'derive_stability_protocol_from_stability_run', None
+        )
+        for key, read in ((PROTOCOL_KEY, described), (DERIVED_PROTOCOL_KEY, derive)):
             try:
-                if read(filename) is not None:
+                if read is not None and read(filename) is not None:
                     keys.append(key)
             except Exception:  # parsing the file reports it
                 pass
@@ -198,23 +209,21 @@ class StabilityMeasurementParser(MatchingParser):
     ) -> StabilityMeasurement:
         """The run the file at `mainfile` stands for."""
         measurement = StabilityMeasurement()
+        read = institution.read_stability_run(mainfile)
         problems = measurement.read_files(
             mainfile,
-            read_protocol=_referring(institution.read_protocol, archive, mainfile),
-            read_stability_series=institution.read_stability_series,
-            read_jv_file=institution.read_jv_file,
+            read_stability_run=_referring(lambda _: read, archive, mainfile),
+            step_readers=institution.STEP_READERS,
         )
         for problem in problems:
             logger.error(problem, institution=institution.INSTITUTION)
-        embedded = _protocol(institution, 'read_embedded_protocol', mainfile, logger)
+        embedded = read.get('protocol')
         if embedded is None:
-            measurement.plan = protocol_reference(
-                institution.read_protocol(mainfile)['run'], archive
-            )
+            measurement.plan = protocol_reference(read['run'], archive)
         else:
             _load_protocol(embedded, children, PROTOCOL_KEY, logger)
             measurement.plan = child_reference(archive, PROTOCOL_KEY)
-        derived = _protocol(institution, 'derive_protocol', mainfile, logger)
+        derived = _derived_protocol(institution, mainfile, logger)
         if derived is not None:
             _load_protocol(derived, children, DERIVED_PROTOCOL_KEY, logger)
             measurement.derived_plan = child_reference(archive, DERIVED_PROTOCOL_KEY)
@@ -247,13 +256,12 @@ class StabilityMeasurementParser(MatchingParser):
         }
         problems = measurement.read_files(
             mainfile,
-            read_protocol=_referring(
+            read_stability_run=_referring(
                 lambda _: {'run': run, 'steps': collection.get('steps', [])},
                 archive,
                 mainfile,
             ),
-            read_stability_series=institution.read_stability_series,
-            read_jv_file=institution.read_jv_file,
+            step_readers=institution.STEP_READERS,
         )
         for problem in problems:
             logger.error(problem, institution=institution.INSTITUTION)
@@ -271,13 +279,13 @@ class StabilityMeasurementParser(MatchingParser):
         return measurement
 
 
-def _referring(read_protocol, archive: 'EntryArchive', mainfile: str):
-    """`read_protocol`, with each sample that names the `file` whose entry holds it
+def _referring(read_stability_run, archive: 'EntryArchive', mainfile: str):
+    """`read_stability_run`, with each sample that names the `file` whose entry holds it
     referring to that entry instead."""
 
     def read(path):
-        protocol = read_protocol(path)
-        run = dict(protocol.get('run') or {})
+        found = read_stability_run(path)
+        run = dict(found.get('run') or {})
         samples = []
         for each in run.get('samples', []):
             sample = dict(each)
@@ -290,7 +298,7 @@ def _referring(read_protocol, archive: 'EntryArchive', mainfile: str):
             samples.append(sample)
         if samples:
             run['samples'] = samples
-        return {**protocol, 'run': run}
+        return {**found, 'run': run}
 
     return read
 
@@ -302,26 +310,28 @@ def _run_for_plotting(institution: ModuleType, path: str) -> tuple | None:
     try:
         run.read_files(
             path,
-            read_protocol=institution.read_protocol,
-            read_stability_series=institution.read_stability_series,
-            read_jv_file=institution.read_jv_file,
+            read_stability_run=institution.read_stability_run,
+            step_readers=institution.STEP_READERS,
         )
     except Exception:  # the run's own entry reports it
         return None
     return run.name, list(run.steps)
 
 
-def _protocol(
-    institution: ModuleType, reader: str, mainfile: str, logger: 'BoundLogger'
+def _derived_protocol(
+    institution: ModuleType, mainfile: str, logger: 'BoundLogger'
 ) -> dict | None:
-    """The protocol the institution's `reader`, `read_embedded_protocol` or
-    `derive_protocol`, finds for the run file at `mainfile`; `None` where it fails,
-    reported."""
+    """The protocol the institution works out for the run file at `mainfile`, where it
+    has a `derive_stability_protocol_from_stability_run`; `None` where it has none, or
+    it fails, reported."""
+    derive = getattr(institution, 'derive_stability_protocol_from_stability_run', None)
+    if derive is None:
+        return None
     try:
-        return getattr(institution, reader)(mainfile)
+        return derive(mainfile)
     except Exception as error:  # an institution's reader may raise anything
         logger.error(
-            f'the protocol of the run cannot be read by `{reader}`: {error}',
+            f'the protocol of the run cannot be worked out: {error}',
             institution=institution.INSTITUTION,
         )
         return None

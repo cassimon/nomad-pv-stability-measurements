@@ -3764,6 +3764,13 @@ several series; a J–V sweep between them is its own step.
 
 ### 34.3 Reading — one module per institution
 
+*Amended by §43: `stability_run_belongs_to_this_institution` and `read_stability_run` for
+`is_protocol_file` and `read_protocol`; `read_embedded_protocol` is `read_stability_run`'s
+`protocol`; `is_stability_series_file` and `is_jv_file` are gone;
+`derive_stability_protocol_from_stability_run`, `ASSUMED_CONDITIONS` and
+`read_collection_all_measurements_on_device` are optional; step files are read through
+`STEP_READERS`.*
+
 Institutions write runs in formats of their own. Each gets `file_reading/file_reading_<INSTITUTION>.py`
 with the same interface, written out in `file_reading/file_reading_TEMPLATE.py`. The folder
 `file_reading/` sits beside `parsers/` and `schema_packages/`: an institution works only there.
@@ -4790,3 +4797,49 @@ Span      frozen dataclass (seconds, typical): +, ×, total, longest, as_duratio
   translator writes `m_def` (and `typical: true`) instead of `kind`. No migration:
   `tests/data/channels.archive.yaml` and the ISOS expectations name the classes. The simulated
   runs regenerate byte for byte.
+
+## 43. A smaller template for an institution, and a reader per kind of step
+
+**Status: built.** Amends §34.3 (the interface), §37 (`ASSUMED_CONDITIONS` and the derived
+protocol) and the collection's reader (§38–40).
+
+**Why.** The template asked for nine names, with 224 lines of comment. Someone adding their
+institution should see at once what they must write and what they may. And more kinds of
+measurement than J–V will be taken during a test (PL, EL, EQE, …): a function per kind in the
+interface would grow it with every technique, for every institution.
+
+**Decided.**
+- **Required:** `INSTITUTION`, `stability_run_belongs_to_this_institution(path, content)`,
+  `read_stability_run(path)`, and `STEP_READERS`.
+- **Step readers.** `read_stability_run` only names each step's `kind` and `file`. The module's
+  `STEP_READERS` maps each kind of step file it writes to a function that reads one such file
+  (`path`) into data by the names of the step's quantities. Their names are the institution's
+  own; the template's `read_stability_series_file` and `read_jv_file` are examples.
+- **Step kinds.** `measurement.STEP_KINDS` maps each kind to its step class
+  (`stability_series` → `StabilitySeriesStep`, `jv` → `JVSweepStep`). `read_files(path,
+  read_stability_run, step_readers)` builds each step from it. A kind not in `STEP_KINDS` is
+  reported and the step left out; a file of a kind with no reader is reported and the step kept
+  without its data. A new kind is a step class and one entry; only an institution that has such
+  files adds a reader.
+- Keyed by kind, not by filename pattern: the run reader already knows each step's kind, and
+  patterns would bring back the `is_*_file` checks.
+- Matching stays cheap: `read_stability_run` names files without reading them, so asking it
+  whether a run file describes its own protocol reads no data.
+- **Optional**, below a comment of its own in the template: `ASSUMED_CONDITIONS`,
+  `derive_stability_protocol_from_stability_run(path)` and
+  `read_collection_all_measurements_on_device(path)`. The parser looks them up with
+  `getattr`; where one is missing, nothing is derived or collected. SIM writes none of them;
+  UNITOV all.
+- The names say what each does, long as they are: the old `is_protocol_file` and
+  `read_protocol` read a run file, not a protocol file.
+- `read_embedded_protocol` is gone: a test the run file describes is the same file read, so it
+  is `read_stability_run`'s optional `protocol` key. The parser reads the run once.
+- `is_stability_series_file` and `is_jv_file` are gone: the parser never called them.
+- A collection stays the institution's to give: NOMAD groups nothing by itself, and only the
+  institution knows its scans outside any run.
+- The template's docstrings tell the reader what to do: the steps to add an institution, then
+  per function what to return, with one example dict, and when to fill in or delete an optional
+  one.
+- `test_file_reading_interface.py`: every module has the two required functions and a
+  non-empty `STEP_READERS` whose kinds are in `STEP_KINDS`, each reader taking one `path`; a
+  function named as one of the template's takes its parameters.

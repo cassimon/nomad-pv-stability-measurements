@@ -4,9 +4,9 @@ The interface of `file_reading_TEMPLATE.py`, filled in for SIM's files.
 
 SIM writes a run as a folder:
 
-    ISOS-L-2.run.yaml           read_protocol; says `institution: SIM`
+    ISOS-L-2.run.yaml           read_stability_run; says `institution: SIM`
     01_jv_initial.csv           read_jv_file
-    02_stability_series.csv     read_stability_series
+    02_stability_series.csv     read_stability_series_file
     03_jv_final.csv             read_jv_file
 
 A run recorded in phases has one stability series per phase and a J–V sweep after
@@ -24,8 +24,8 @@ after another, `repeat` times, and what each holds:
 
 Each CSV names a column and its unit in the header, as `temperature (°C)`. A J–V file
 starts with the figures of merit the station reported, one row per scan, then an empty
-line, then the curve. What
-another institution could share is in `file_reading_utils.py`.
+line, then the curve. What another institution could share is in
+`file_reading_utils.py`.
 """
 
 import re
@@ -42,44 +42,29 @@ from nomad_pv_stability_measurements.file_reading.file_reading_utils import (
 )
 
 INSTITUTION = 'SIM'
-#: SIM's files state every condition.
-ASSUMED_CONDITIONS: dict[str, str] = {}
 
-_PROTOCOL_FILE_NAME = re.compile(r'.*\.run\.ya?ml')
+_RUN_FILE_NAME = re.compile(r'.*\.run\.ya?ml')
 _SAYS_INSTITUTION = re.compile(
     rf'^\s*institution:\s*[\'"]?{INSTITUTION}[\'"]?\s*$', re.M
 )
-_STABILITY_SERIES_FILE_NAME = re.compile(r'\d+_stability_series(_\w+)?\.csv')
-_JV_FILE_NAME = re.compile(r'\d+_jv_\w+\.csv')
 
 
-def is_protocol_file(path: str | Path, content: str) -> bool:
+def stability_run_belongs_to_this_institution(path: str | Path, content: str) -> bool:
     """A SIM run file: named `*.run.yaml`, and saying `institution: SIM`."""
     return bool(
-        _PROTOCOL_FILE_NAME.fullmatch(Path(path).name)
-        and _SAYS_INSTITUTION.search(content)
+        _RUN_FILE_NAME.fullmatch(Path(path).name) and _SAYS_INSTITUTION.search(content)
     )
 
 
-def is_stability_series_file(path: str | Path) -> bool:
-    """A SIM stability series, by its name: `02_stability_series.csv`, or with its
-    phase, `02_stability_series_burn_in.csv`."""
-    return bool(_STABILITY_SERIES_FILE_NAME.fullmatch(Path(path).name))
-
-
-def is_jv_file(path: str | Path) -> bool:
-    """A SIM J–V sweep, by its name: `01_jv_initial.csv`."""
-    return bool(_JV_FILE_NAME.fullmatch(Path(path).name))
-
-
-def read_protocol(path: str | Path) -> dict:
-    """The run file at `path`, as `{'run': {...}, 'steps': [...]}`.
+def read_stability_run(path: str | Path) -> dict:
+    """The run file at `path`, as `{'run': {...}, 'steps': [...]}`, and the test it
+    describes under `test conditions`, where it does, as `protocol`.
 
     Its dates come as datetimes. Each step names its `kind` (`jv` or
     `stability_series`) and its `file`, given as a path beside the run file.
     """
     path = Path(path)
-    document = yaml.safe_load(path.read_text(encoding='utf-8'))
+    document = yaml.safe_load(path.read_text(encoding='utf-8')) or {}
     run = document.get('run') or {}
     for key in ('start', 'end'):
         if key in run:
@@ -90,27 +75,14 @@ def read_protocol(path: str | Path) -> dict:
             step['start'] = as_datetime(step['start'])
         if 'file' in step:
             step['file'] = str(path.parent / step['file'])
-    return {'run': run, 'steps': steps}
-
-
-def read_embedded_protocol(path: str | Path) -> dict | None:
-    """The protocol of the run file's `test conditions`, or `None` if it has none."""
-    document = yaml.safe_load(Path(path).read_text(encoding='utf-8')) or {}
+    read = {'run': run, 'steps': steps}
     conditions = document.get('test conditions')
-    return None if conditions is None else protocol_from_phases(**conditions)
+    if conditions is not None:
+        read['protocol'] = protocol_from_phases(**conditions)
+    return read
 
 
-def derive_protocol(path: str | Path) -> dict | None:
-    """`None`: a SIM run file names its protocol or describes it."""
-    return None
-
-
-def read_collection(path: str | Path) -> dict | None:
-    """`None`: every SIM run stands alone, and SIM has no data outside its runs."""
-    return None
-
-
-def read_stability_series(path: str | Path) -> dict[str, pint.Quantity]:
+def read_stability_series_file(path: str | Path) -> dict[str, pint.Quantity]:
     """The stability series at `path`, one quantity array per column, by the column's
     name: `time`, and whichever of `temperature`, `irradiance`, `relative_humidity`,
     `voltage`, `current_density` and `power_density` the run recorded."""
@@ -126,3 +98,10 @@ def read_jv_file(path: str | Path) -> dict[str, object]:
     if reported:
         curve['figures_of_merit'] = reported[0]
     return curve
+
+
+#: How each kind of step file is read, by the step kind it fills.
+STEP_READERS = {
+    'stability_series': read_stability_series_file,
+    'jv': read_jv_file,
+}

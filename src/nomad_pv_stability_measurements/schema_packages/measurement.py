@@ -339,11 +339,16 @@ class JVSweepStep(PlotSection, ActivityStep):
             ]
 
 
+#: The kinds of step a run can hold, by the word a reader gives as a step's `kind`.
+STEP_KINDS = {'stability_series': StabilitySeriesStep, 'jv': JVSweepStep}
+
+
 class StabilityMeasurement(PlotSection, StabilityActivity):
     """A stability test as it ran, read from the files an institution writes.
 
     Each institution writes its runs in a format of its own. `read_files` is handed
-    the functions that read that format, and never opens a file itself. It shows the
+    the functions that read that format, one per kind of step file, and never opens a
+    file itself. It shows the
     whole test over time: every series where it ran, every J–V sweep where it was
     taken.
     """
@@ -487,15 +492,13 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
             if scan.direction is not None and getattr(scan, name) is not None
         ]
 
-    def read_files(
-        self, path, read_protocol, read_stability_series, read_jv_file
-    ) -> list[str]:
+    def read_files(self, path, read_stability_run, step_readers) -> list[str]:
         """Fill this measurement in from the run file at `path` and the step files
-        it names, each read by the function given for it.
+        it names, each read by the function `step_readers` gives for its kind.
 
-        `read_protocol(path)` returns `{'run': {...}, 'steps': [...]}`; each step
-        names its `kind`, `stability_series` or `jv`, and the `file` the matching
-        function reads into one array per column. A J–V file may also hand back
+        `read_stability_run(path)` returns `{'run': {...}, 'steps': [...]}`; each step
+        names its `kind`, a key of `STEP_KINDS`, and the `file` its reader reads into
+        one array per column. A J–V file may also hand back
         `figures_of_merit`, a table of what the station reported, one row per scan. A
         series step may say which of its quantities were `controlled`. How a step was
         set up, such as a sweep's `scan_rate`, is its `settings`, one value per name of
@@ -505,8 +508,8 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         Returns what had no place here, one message each, so that nothing is left out
         unsaid.
         """
-        protocol = read_protocol(path)
-        run = protocol['run']
+        read = read_stability_run(path)
+        run = read['run']
         for key, field in self.fields_of_run.items():
             if run.get(key) is not None:
                 setattr(self, field, run[key])
@@ -514,21 +517,19 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         self.instruments = [
             InstrumentReference(**each) for each in run.get('instruments', [])
         ]
-        readers = {
-            'stability_series': (StabilitySeriesStep, read_stability_series),
-            'jv': (JVSweepStep, read_jv_file),
-        }
         problems = []
         steps = []
-        for step in protocol['steps']:
-            if step.get('kind') not in readers:
+        for step in read['steps']:
+            kind = step.get('kind')
+            if kind not in STEP_KINDS:
                 problems.append(
-                    f'step `{step.get("name")}` is of kind `{step.get("kind")}`; '
-                    f'only {", ".join(f"`{kind}`" for kind in readers)} are read.'
+                    f'step `{step.get("name")}` is of kind `{kind}`; only '
+                    f'{", ".join(f"`{each}`" for each in STEP_KINDS)} are read.'
                 )
                 continue
-            section_class, read = readers[step['kind']]
-            section = section_class(name=step.get('name'), start_time=step.get('start'))
+            section = STEP_KINDS[kind](
+                name=step.get('name'), start_time=step.get('start')
+            )
             if step.get('controlled') is not None:
                 if isinstance(section, StabilitySeriesStep):
                     section.controlled = list(step['controlled'])
@@ -537,7 +538,7 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
                         f'step `{step.get("name")}` says what was controlled, which '
                         'only a stability series has a place for.'
                     )
-            problems += _read_step(section, step, read)
+            problems += _read_step(section, step, step_readers.get(kind))
             steps.append(section)
         self.steps = steps
         return problems
@@ -744,7 +745,12 @@ def _read_step(section, step: dict, read) -> list[str]:
     problems = []
     if step.get('file') is None and step.get('figures_of_merit') is None:
         problems.append(f'step `{step.get("name")}` names no file to read.')
-    columns = dict(read(step['file'])) if step.get('file') else {}
+    if step.get('file') is not None and read is None:
+        problems.append(
+            f'step `{step.get("name")}` names a file of kind `{step.get("kind")}`, '
+            'which the institution has no reader for.'
+        )
+    columns = dict(read(step['file'])) if step.get('file') and read else {}
     reported = columns.pop('figures_of_merit', None)
     if step.get('figures_of_merit') is not None:
         if reported is not None:

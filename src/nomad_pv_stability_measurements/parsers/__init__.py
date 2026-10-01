@@ -31,6 +31,6 @@ measurement_parser_entry_point = StabilityMeasurementParserEntryPoint(
     'went and the files of its steps, into a StabilityMeasurement entry. Recognizes '
     'which institution wrote it.',
     # Institutions name their run files in their own ways, so every file is offered
-    # and each institution's `is_protocol_file` decides.
+    # and each institution's `stability_run_belongs_to_this_institution` decides.
     mainfile_name_re=r'.*',
 )

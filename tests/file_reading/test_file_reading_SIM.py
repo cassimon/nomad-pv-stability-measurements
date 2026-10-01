@@ -9,13 +9,10 @@ from nomad.units import ureg
 
 import nomad_pv_stability_measurements
 from nomad_pv_stability_measurements.file_reading.file_reading_SIM import (
-    is_jv_file,
-    is_protocol_file,
-    is_stability_series_file,
-    read_embedded_protocol,
+    STEP_READERS,
     read_jv_file,
-    read_protocol,
-    read_stability_series,
+    read_stability_run,
+    stability_run_belongs_to_this_institution,
 )
 
 SIMULATED = (
@@ -43,25 +40,10 @@ def written(tmp_path, name, text):
         ('ISOS-L-2.stability.yaml', 'run:\n  institution: SIM\n', False),
     ],
 )
-def test_a_protocol_file_is_recognized_by_its_name_and_institution(
+def test_a_run_file_is_recognized_by_its_name_and_institution(
     name, content, recognized
 ):
-    assert is_protocol_file(name, content) is recognized
-
-
-@pytest.mark.parametrize(
-    ('name', 'series', 'jv'),
-    [
-        ('02_stability_series.csv', True, False),
-        ('04_stability_series_burn_in.csv', True, False),
-        ('05_jv_after_burn_in.csv', False, True),
-        ('01_jv_initial.csv', False, True),
-        ('03_jv_final.csv', False, True),
-        ('notes.csv', False, False),
-    ],
-)
-def test_a_step_file_is_recognized_by_its_name(name, series, jv):
-    assert (is_stability_series_file(name), is_jv_file(name)) == (series, jv)
+    assert stability_run_belongs_to_this_institution(name, content) is recognized
 
 
 def test_a_jv_file_gives_the_direction_of_each_row(tmp_path):
@@ -79,7 +61,7 @@ def test_a_jv_file_gives_the_direction_of_each_row(tmp_path):
     assert sweep['voltage'].units == ureg.volt
 
 
-def test_the_protocol_file_gives_dates_and_step_files_beside_it(tmp_path):
+def test_the_run_file_gives_dates_and_step_files_beside_it(tmp_path):
     path = written(
         tmp_path,
         'ISOS-D-1.run.yaml',
@@ -88,11 +70,11 @@ def test_the_protocol_file_gives_dates_and_step_files_beside_it(tmp_path):
         "     file: 02_stability_series.csv, start: '2026-03-02T09:12:00+01:00'}\n",
     )
 
-    protocol = read_protocol(path)
-    [step] = protocol['steps']
+    read = read_stability_run(path)
+    [step] = read['steps']
 
     plus_one = timezone(timedelta(hours=1))
-    assert protocol['run']['start'] == datetime(2026, 3, 2, 9, tzinfo=plus_one)
+    assert read['run']['start'] == datetime(2026, 3, 2, 9, tzinfo=plus_one)
     assert step['start'] == datetime(2026, 3, 2, 9, 12, tzinfo=plus_one)
     assert step['file'] == str(tmp_path / '02_stability_series.csv')
 
@@ -100,19 +82,19 @@ def test_the_protocol_file_gives_dates_and_step_files_beside_it(tmp_path):
 def test_the_simulated_runs_are_recognized_and_read():
     """Every file the example upload ships is recognized as SIM's and readable, each
     step's columns one length, and each J–V sweep reported per direction swept."""
-    protocol_files = sorted(SIMULATED.glob('*/*.run.yaml'))
+    run_files = sorted(SIMULATED.glob('*/*.run.yaml'))
 
-    assert len(protocol_files) == ISOS_FILES
-    for path in protocol_files:
-        assert is_protocol_file(path, path.read_text(encoding='utf-8'))
-        for step in read_protocol(path)['steps']:
-            read = read_jv_file if is_jv_file(step['file']) else read_stability_series
-            assert is_jv_file(step['file']) or is_stability_series_file(step['file'])
-            columns = read(step['file'])
+    assert len(run_files) == ISOS_FILES
+    for path in run_files:
+        assert stability_run_belongs_to_this_institution(
+            path, path.read_text(encoding='utf-8')
+        )
+        for step in read_stability_run(path)['steps']:
+            columns = STEP_READERS[step['kind']](step['file'])
             reported = columns.pop('figures_of_merit', None)
             lengths = {np.size(values) for values in columns.values()}
             assert len(lengths) == 1, step['file']
-            if is_jv_file(step['file']):
+            if step['kind'] == 'jv':
                 assert list(reported['direction']) == list(
                     dict.fromkeys(columns['direction'])
                 ), step['file']
@@ -133,5 +115,5 @@ def test_a_run_file_describing_its_test_gives_that_protocol(tmp_path):
         'run: {institution: SIM, protocol: isos/ISOS-D-3.stability.yaml}\n',
     )
 
-    assert read_embedded_protocol(described)['data']['name'] == 'Damp heat'
-    assert read_embedded_protocol(named) is None
+    assert read_stability_run(described)['protocol']['data']['name'] == 'Damp heat'
+    assert 'protocol' not in read_stability_run(named)

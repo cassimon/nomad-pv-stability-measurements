@@ -10,15 +10,13 @@ from nomad.units import ureg
 
 import nomad_pv_stability_measurements
 from nomad_pv_stability_measurements.file_reading.file_reading_UNITOV import (
-    derive_protocol,
-    is_jv_file,
-    is_protocol_file,
-    is_stability_series_file,
-    read_collection,
-    read_embedded_protocol,
+    STEP_READERS,
+    derive_stability_protocol_from_stability_run,
+    read_collection_all_measurements_on_device,
     read_jv_file,
-    read_protocol,
-    read_stability_series,
+    read_stability_run,
+    read_stability_series_file,
+    stability_run_belongs_to_this_institution,
 )
 from nomad_pv_stability_measurements.schema_packages.measurement import (
     StabilityMeasurement,
@@ -32,14 +30,6 @@ RUN = BATCH / 'AI14/AI14_1A/17.23.47'
 JV = RUN / '0001_2025-11-20_17.23.47_Stability (JV)_AI14-1A.txt'
 TRACKING = RUN / '0000_2025-11-20_17.23.47_Stability (Tracking)_AI14-1A.txt'
 PARAMETERS = RUN / '0000_2025-11-20_17.23.47_Stability (Parameters)_AI14-1A.txt'
-
-
-@pytest.mark.parametrize(
-    ('path', 'series', 'jv'),
-    [(TRACKING, True, False), (JV, False, True), (PARAMETERS, False, False)],
-)
-def test_a_step_file_is_known_by_its_name(path, series, jv):
-    assert (is_stability_series_file(path), is_jv_file(path)) == (series, jv)
 
 
 def test_a_jv_file_is_the_curve_forward_then_reverse_as_its_header_says():
@@ -72,12 +62,11 @@ def test_a_jv_file_is_read_into_a_sweep_with_nothing_left_over():
 
     problems = measurement.read_files(
         RUN,
-        read_protocol=lambda path: {
+        read_stability_run=lambda path: {
             'run': {},
             'steps': [{'name': 'J–V', 'kind': 'jv', 'file': JV}],
         },
-        read_stability_series=None,
-        read_jv_file=read_jv_file,
+        step_readers={'jv': read_jv_file},
     )
 
     [sweep] = measurement.steps
@@ -90,7 +79,7 @@ def test_a_jv_file_is_read_into_a_sweep_with_nothing_left_over():
 
 
 def test_a_tracking_file_is_the_series_since_the_start_and_how_it_was_tracked():
-    series = read_stability_series(TRACKING)
+    series = read_stability_series_file(TRACKING)
 
     assert series['time'][0].to('s').magnitude == pytest.approx(0.003236 * 3600)
     assert series['voltage'][0].to('V').magnitude == pytest.approx(1.4, abs=1e-5)
@@ -110,14 +99,13 @@ def test_a_tracking_file_is_read_into_a_series_with_nothing_left_over():
 
     problems = measurement.read_files(
         RUN,
-        read_protocol=lambda path: {
+        read_stability_run=lambda path: {
             'run': {},
             'steps': [
                 {'name': 'tracking', 'kind': 'stability_series', 'file': TRACKING}
             ],
         },
-        read_stability_series=read_stability_series,
-        read_jv_file=None,
+        step_readers={'stability_series': read_stability_series_file},
     )
 
     [series] = measurement.steps
@@ -135,11 +123,11 @@ def test_a_tracking_file_is_read_into_a_series_with_nothing_left_over():
     ],
 )
 def test_the_tracking_file_stands_for_its_run(path, content, recognized):
-    assert is_protocol_file(path, content) is recognized
+    assert stability_run_belongs_to_this_institution(path, content) is recognized
 
 
 def test_a_run_says_who_ran_it_when_on_what_device_and_channel():
-    run = read_protocol(TRACKING)['run']
+    run = read_stability_run(TRACKING)['run']
 
     assert run['start'] == datetime(
         2025, 11, 20, 17, 23, 47, tzinfo=ZoneInfo('Europe/Rome')
@@ -153,7 +141,7 @@ def test_a_run_says_who_ran_it_when_on_what_device_and_channel():
 
 
 def test_a_run_is_its_folder_the_series_then_each_scan_in_the_order_started():
-    steps = read_protocol(TRACKING)['steps']
+    steps = read_stability_run(TRACKING)['steps']
 
     assert [(step['name'], step['kind']) for step in steps] == [
         ('tracking', 'stability_series'),
@@ -168,9 +156,7 @@ def test_a_scan_whose_file_is_missing_keeps_what_the_parameters_logged():
     tracking = next((BATCH / 'AI14/AI14_1C/17.23.47').glob('*(Tracking)*'))
     measurement = StabilityMeasurement()
 
-    problems = measurement.read_files(
-        tracking, read_protocol, read_stability_series, read_jv_file
-    )
+    problems = measurement.read_files(tracking, read_stability_run, STEP_READERS)
 
     _, logged, kept = measurement.steps
     assert problems == []
@@ -187,7 +173,7 @@ def test_a_scan_whose_file_is_missing_keeps_what_the_parameters_logged():
 
 
 def test_a_runs_test_is_derived_holding_the_mean_voltage_under_assumed_conditions():
-    data = derive_protocol(TRACKING)['data']
+    data = derive_stability_protocol_from_stability_run(TRACKING)['data']
 
     [phase] = data['routine']['instructions']
     *holds, scans = phase['instructions']
@@ -208,8 +194,8 @@ def test_a_runs_test_is_derived_holding_the_mean_voltage_under_assumed_condition
 
 def test_no_file_states_a_test_and_only_the_tracking_file_derives_one():
     # UNITOV's files say how the station was set up, not what the test was to be.
-    assert read_embedded_protocol(TRACKING) is None
-    assert derive_protocol(JV) is None
+    assert 'protocol' not in read_stability_run(TRACKING)
+    assert derive_stability_protocol_from_stability_run(JV) is None
 
 
 def loose(folder: Path) -> Path:
@@ -226,7 +212,7 @@ def test_a_device_is_collected_its_runs_in_order_and_the_scans_between(tmp_path)
     loose(device)
     runs = sorted(device.glob('*/*(Tracking)*'))
 
-    collections = [read_collection(run) for run in runs]
+    collections = [read_collection_all_measurements_on_device(run) for run in runs]
 
     # Only the first run's Tracking file stands for the collection.
     [collection] = [each for each in collections if each is not None]
@@ -244,6 +230,6 @@ def test_a_device_is_collected_its_runs_in_order_and_the_scans_between(tmp_path)
 def test_a_device_without_runs_is_collected_from_its_first_file(tmp_path):
     scan = loose(tmp_path / 'AI14_1A')
 
-    collection = read_collection(scan)
+    collection = read_collection_all_measurements_on_device(scan)
 
     assert (collection['runs'], len(collection['steps'])) == ([], 1)

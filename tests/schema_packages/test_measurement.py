@@ -437,9 +437,11 @@ def read_from(protocol, tables):
     """Readers that hand back what they are given, as an institution's would read it
     from files: `protocol` for the run file, `tables` by step file."""
     return {
-        'read_protocol': lambda path: protocol,
-        'read_stability_series': lambda path: tables[path],
-        'read_jv_file': lambda path: tables[path],
+        'read_stability_run': lambda path: protocol,
+        'step_readers': {
+            'stability_series': lambda path: tables[path],
+            'jv': lambda path: tables[path],
+        },
     }
 
 
@@ -636,14 +638,28 @@ def test_what_has_no_place_is_reported_and_the_rest_read():
     assert 'column `wind_speed`' in unknown_column
 
 
+def test_a_step_file_the_institution_has_no_reader_for_is_reported():
+    steps = [{'name': 'initial J–V', 'kind': 'jv', 'file': 'jv.csv'}]
+    measurement = StabilityMeasurement()
+
+    problems = measurement.read_files(
+        'run.yaml',
+        read_stability_run=lambda path: {'run': {}, 'steps': steps},
+        step_readers={},
+    )
+
+    [problem] = problems
+    assert [step.name for step in measurement.steps] == ['initial J–V']
+    assert 'no reader for' in problem
+
+
 def test_a_simulated_run_is_read_with_the_functions_of_its_institution():
     measurement = StabilityMeasurement()
 
     problems = measurement.read_files(
         SIMULATED / 'ISOS-L-2' / 'ISOS-L-2.run.yaml',
-        read_protocol=file_reading_SIM.read_protocol,
-        read_stability_series=file_reading_SIM.read_stability_series,
-        read_jv_file=file_reading_SIM.read_jv_file,
+        read_stability_run=file_reading_SIM.read_stability_run,
+        step_readers=file_reading_SIM.STEP_READERS,
     )
 
     assert problems == []
