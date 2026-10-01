@@ -11,10 +11,8 @@ from nomad_pv_stability_measurements.schema_packages.characterization_instructio
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
-    Duration,
     IndefiniteRepeatingBlock,
     InstructionBlock,
-    Period,
 )
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBetweenIrradiance,
@@ -39,6 +37,11 @@ from nomad_pv_stability_measurements.schema_packages.protocol import StabilityPr
 from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
     RampTemperature,
 )
+from nomad_pv_stability_measurements.schema_packages.timing import (
+    FiniteDuration,
+    OpenEndedDuration,
+    WholeBlockDuration,
+)
 from nomad_pv_stability_measurements.schema_packages.utils import AxisBreak, PlotPiece
 
 HOUR = 3600
@@ -48,8 +51,8 @@ SUN = 1000  # W/m²
 UPRIGHT = -90
 
 
-def whole_block() -> Duration:
-    return Duration(kind='whole_block')
+def whole_block() -> WholeBlockDuration:
+    return WholeBlockDuration()
 
 
 def red_notes(layout) -> list[str]:
@@ -102,17 +105,17 @@ def test_breaks_cut_the_axis_into_sections_at_their_true_times():
 def test_a_protocol_shows_its_timeline(normalized):
     light = HoldIrradiance(
         value=SUN * ureg('W/m^2'),
-        duration=Duration(kind='fixed', value=1 * ureg.hour),
+        duration=FiniteDuration(value=1 * ureg.hour),
     )
     dark = HoldIrradiance(
         value=0 * ureg('W/m^2'),
-        duration=Duration(kind='fixed', value=1 * ureg.hour),
+        duration=FiniteDuration(value=1 * ureg.hour),
     )
     protocol = normalized(
         StabilityProtocol(
             name='light–dark',
             instructions=[
-                MPPTracking(duration=Duration(kind='whole_block')),
+                MPPTracking(duration=WholeBlockDuration()),
                 IndefiniteRepeatingBlock(sub_instructions=[light, dark]),
             ],
         )
@@ -144,7 +147,7 @@ def test_a_protocol_shows_its_timeline(normalized):
 
 def test_a_block_whose_iteration_never_ends_gets_no_figure_of_its_own(normalized):
     cycling = IndefiniteRepeatingBlock(
-        sub_instructions=[MPPTracking(duration=Duration(kind='open_ended'))]
+        sub_instructions=[MPPTracking(duration=OpenEndedDuration())]
     )
     protocol = normalized(StabilityProtocol(instructions=[cycling]))
 
@@ -216,14 +219,18 @@ def test_a_pace_the_protocol_does_not_state_is_drawn_dashed_and_said_in_red(
 
 
 @pytest.mark.parametrize(
-    ('kind', 'about', 'said'),
-    [('fixed', '', []), ('typical', '≈ ', ['typically 1 h', 'typically 1 h'])],
+    ('typical', 'about', 'said'),
+    [
+        (False, '', []),
+        (True, '≈ ', ['typically 1 h', 'typically 1 h']),
+    ],
 )
 def test_a_typical_length_is_drawn_as_its_length_and_said_in_red_and_in_the_title(
-    normalized, kind, about, said
+    normalized, typical, about, said
 ):
     light = HoldIrradiance(
-        value=SUN * ureg('W/m^2'), duration=Duration(kind=kind, value=1 * ureg.hour)
+        value=SUN * ureg('W/m^2'),
+        duration=FiniteDuration(value=1 * ureg.hour, typical=typical),
     )
     routine = CountingRepeatingBlock(repeat_n=2, sub_instructions=[light])
     protocol = normalized(StabilityProtocol(name='soak', instructions=[routine]))
@@ -241,8 +248,8 @@ def test_a_typical_length_is_drawn_as_its_length_and_said_in_red_and_in_the_titl
     assert all('dash' not in line.get('line', {}) for line in lines)
 
 
-def one_hour() -> Duration:
-    return Duration(kind='fixed', value=1 * ureg.hour)
+def one_hour() -> FiniteDuration:
+    return FiniteDuration(value=1 * ureg.hour)
 
 
 def one_after_another(*instructions) -> StabilityProtocol:
@@ -262,14 +269,14 @@ def test_every_piece_tells_all_of_itself_where_hovered_even_if_too_narrow_to_wri
     brief = HoldCurrent(
         value=0.02 * ureg.ampere,
         control=True,
-        duration=Duration(kind='fixed', value=1 * ureg.minute),
+        duration=FiniteDuration(value=1 * ureg.minute),
     )
     protocol = normalized(
         one_after_another(
             HoldVoltage(
                 value=0.8 * ureg.volt,
                 control=True,
-                duration=Duration(kind='fixed', value=1000 * ureg.hour),
+                duration=FiniteDuration(value=1000 * ureg.hour),
             ),
             brief,
         )
@@ -303,7 +310,7 @@ def test_jv_scans_are_marks_over_what_holds_the_load(normalized):
                 MPPTracking(control=True, duration=one_hour()),
                 JVScan(
                     duration=whole_block(),
-                    interval=Period(kind='fixed', value=30 * ureg.minute),
+                    interval=FiniteDuration(value=30 * ureg.minute),
                 ),
             ]
         )

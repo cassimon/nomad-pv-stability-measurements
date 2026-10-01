@@ -1,7 +1,7 @@
 """Instructions, blocks and plans.
 
-An instruction is completed after its `duration`, whose kind says what it is: a fixed or
-typical length, as long as its block, open-ended, or derived. A single instruction states
+An instruction is completed after its `duration`, whose class says what kind of length it
+is: a fixed or typical one, as long as its block, open-ended, or derived. A single instruction states
 it; a block's is always derived from what it contains. A repeating block's kind says whether
 it finishes: a timed one always, an indefinite one never, a counting one should. Only a
 plan, or a timed block, stops instructions early.
@@ -16,7 +16,6 @@ from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
     CountingRepeatingBlock,
-    Duration,
     IndefiniteRepeatingBlock,
     InstructionBlock,
     Objective,
@@ -26,32 +25,40 @@ from nomad_pv_stability_measurements.schema_packages.general import (
     TimedRepeatingBlock,
     TimePlan,
 )
+from nomad_pv_stability_measurements.schema_packages.timing import (
+    DerivedDuration,
+    Duration,
+    FiniteDuration,
+    OpenEndedDuration,
+    WholeBlockDuration,
+)
 
 
-def single(kind='fixed', seconds=None, **fields) -> SingleInstruction:
-    duration = Duration(kind=kind)
-    if seconds is not None:
-        duration.value = seconds * ureg.second
+def lasting(duration, **fields) -> SingleInstruction:
     return SingleInstruction(duration=duration, **fields)
 
 
 def fixed(seconds, **fields) -> SingleInstruction:
-    return single('fixed', seconds, **fields)
+    return lasting(FiniteDuration(value=seconds * ureg.second), **fields)
+
+
+def typical(seconds) -> SingleInstruction:
+    return lasting(FiniteDuration(typical=True, value=seconds * ureg.second))
 
 
 def whole_block() -> SingleInstruction:
     """A setting: as long as the block it is in."""
-    return single('whole_block')
+    return lasting(WholeBlockDuration())
 
 
 def open_ended() -> SingleInstruction:
-    return single('open_ended')
+    return lasting(OpenEndedDuration())
 
 
 def seconds(section):
     """Its length in seconds; `None` where it is open-ended."""
-    assert section.duration.kind != 'whole_block'
-    if section.duration.kind == 'open_ended':
+    assert not isinstance(section.duration, WholeBlockDuration)
+    if isinstance(section.duration, OpenEndedDuration):
         return None
     return section.duration.value.to('s').magnitude
 
@@ -63,7 +70,7 @@ def test_a_block_lasts_one_pass_of_its_instructions(normalized, mode, expected):
     )
 
     assert seconds(normalized(block)) == pytest.approx(expected)
-    assert block.duration.kind == 'derived'
+    assert isinstance(block.duration, DerivedDuration)
 
 
 def test_a_counting_block_lasts_its_count_times_one_pass(normalized):
@@ -98,7 +105,7 @@ def test_a_timed_block_lasts_its_repeat_duration_whatever_it_contains(normalized
     )
 
     assert seconds(normalized(block)) == pytest.approx(3600)
-    assert block.duration.kind == 'fixed'
+    assert isinstance(block.duration, FiniteDuration)
 
 
 def test_what_is_open_ended_makes_everything_around_it_open_ended(normalized):
@@ -142,12 +149,12 @@ def test_a_typical_length_counts_and_makes_the_whole_typical(normalized, mode):
         CountingRepeatingBlock(
             repeat_n=2,
             sub_instruction_execution_mode=mode,
-            sub_instructions=[single('typical', 60), fixed(30)],
+            sub_instructions=[typical(60), fixed(30)],
         )
     )
 
     assert seconds(block) == pytest.approx(180 if mode == 'sequential' else 120)
-    assert block.duration.includes_typical is True
+    assert block.duration.typical is True
 
 
 @pytest.mark.parametrize(
@@ -187,7 +194,7 @@ def test_a_phase_that_holds_a_condition_ends_with_its_routine(normalized):
 
 def test_a_blocks_written_duration_is_replaced_by_the_derived_one(normalized):
     block = InstructionBlock(
-        duration=Duration(kind='fixed', value=10 * ureg.second),
+        duration=FiniteDuration(value=10 * ureg.second),
         sub_instructions=[fixed(60)],
     )
 
@@ -198,8 +205,8 @@ def test_a_blocks_written_duration_is_replaced_by_the_derived_one(normalized):
     ('written', 'expected'),
     [
         (None, 90),  # derived: one instruction after another
-        (Duration(kind='fixed', value=600 * ureg.second), 600),  # stops them all there
-        (Duration(kind='open_ended'), None),  # ended from outside, e.g. at T80
+        (FiniteDuration(value=600 * ureg.second), 600),  # stops them all there
+        (OpenEndedDuration(), None),  # ended from outside, e.g. at T80
     ],
 )
 def test_a_plans_duration_is_written_or_derived(normalized, log, written, expected):
@@ -232,9 +239,10 @@ def test_a_scheduled_plan_ends_its_duration_after_it_starts(
     [
         (fixed(0), 'must be positive'),
         (SingleInstruction(), 'states no duration'),
-        (single('derived', 60), 'nothing to derive it from'),
-        (single('typical'), 'but no value'),
-        (single('open_ended', 60), 'takes no value'),
+        (lasting(DerivedDuration(value=60 * ureg.second)), 'nothing to derive it from'),
+        (lasting(FiniteDuration(typical=True)), 'but no value'),
+        # The base says not what kind of length it is; its classes do.
+        (lasting(Duration()), 'bare `Duration`'),
         (fixed(60, sub_instructions=[fixed(60)]), 'cannot have sub-instructions'),
         (InstructionBlock(), 'no sub-instructions'),
         (
@@ -245,7 +253,7 @@ def test_a_scheduled_plan_ends_its_duration_after_it_starts(
         # The base says not how it ends; its kinds do.
         (RepeatingBlock(sub_instructions=[fixed(60)]), 'bare `RepeatingBlock`'),
         (
-            TimePlan(duration=Duration(kind='whole_block'), instructions=[fixed(60)]),
+            TimePlan(duration=WholeBlockDuration(), instructions=[fixed(60)]),
             'in no block',
         ),
     ],
@@ -404,7 +412,7 @@ def test_a_plan_that_never_ends_is_drawn_until_its_routine_breaks_off(normalized
 def test_a_plan_is_drawn_until_its_duration(normalized):
     plan = normalized(
         TimePlan(
-            duration=Duration(kind='fixed', value=90 * ureg.minute),
+            duration=FiniteDuration(value=90 * ureg.minute),
             instructions=[fixed(HOUR) for _ in range(3)],
         )
     )

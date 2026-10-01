@@ -46,23 +46,22 @@ from nomad_pv_stability_measurements.schema_packages.characterization_instructio
     JVScan,
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
-    FIXED,
-    NOT_STATED,
-    OPEN_ENDED,
-    TYPICAL,
-    WHOLE_BLOCK,
     CountingRepeatingBlock,
-    Duration,
     IndefiniteRepeatingBlock,
     Instruction,
     InstructionBlock,
-    Period,
     Plan,
     RepeatingBlock,
     TimedRepeatingBlock,
 )
 from nomad_pv_stability_measurements.schema_packages.light_sources import LightSource
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
+from nomad_pv_stability_measurements.schema_packages.timing import (
+    Duration,
+    FiniteDuration,
+    OpenEndedDuration,
+    WholeBlockDuration,
+)
 
 #: Keys an instruction may be written with that are no field of the schema. They are
 #: read here and never reach the archive.
@@ -93,10 +92,10 @@ RETIRED_REPEATS = {
     'until_end_of_duration': 'a timed block, `repeat_for: 12 h`',
     'n_times': 'the number itself, `repeat: 5`',
 }
-#: How a duration is written where it is no fixed length.
-DURATION_WORDS = {'open-ended': OPEN_ENDED, 'whole block': WHOLE_BLOCK}
-#: How a period is written where it is no fixed length: `every: not stated`.
-PERIOD_WORDS = {'not stated': NOT_STATED}
+#: The words for a duration that is no length, and the class each writes.
+DURATION_WORDS = {'open-ended': OpenEndedDuration, 'whole block': WholeBlockDuration}
+#: The words for an interval that is no length: `every: not stated`.
+INTERVAL_WORDS = {'not stated': OpenEndedDuration}
 #: What a typical length is written with: `typical 1 min`.
 TYPICAL_WORD = 'typical'
 #: Every way a single instruction in a block may write its duration.
@@ -206,7 +205,7 @@ def _settled(reads: list, path: str, in_block: bool, problems: list) -> list:
         if cls is None or issubclass(cls, InstructionBlock) or 'duration' in each:
             continue
         if not in_block:
-            each['duration'] = {'kind': WHOLE_BLOCK}
+            each['duration'] = {'m_def': m_def(WholeBlockDuration)}
         elif 'ramp_rate' not in each:
             problems.append(
                 Problem(
@@ -323,8 +322,8 @@ def _sub_section(value, cls: type, key: str, where: str, problems: list):
         return _instruction_list(value, where, in_block, problems)
     if key == LIGHT_SOURCE_WORD:
         return _light_source(value, where, problems)
-    if issubclass(sub_section.sub_section.section_cls, Period):
-        return _time_span(value, Period, PERIOD_WORDS, where, problems)
+    if issubclass(sub_section.sub_section.section_cls, Duration):
+        return _time_span(value, INTERVAL_WORDS, where, problems)
     return _section(value, sub_section.sub_section.section_cls, where, problems)
 
 
@@ -367,23 +366,26 @@ def _duration(value, cls: type, where: str, problems: list, bare: dict) -> None:
             )
         )
     else:
-        read = _time_span(value, Duration, DURATION_WORDS, where, problems)
+        read = _time_span(value, DURATION_WORDS, where, problems)
         if read is not None:
             bare['duration'] = read
 
 
-def _time_span(value, cls: type, named: dict, where: str, problems: list):
-    """`1 h` as a fixed length, `typical 1 min` as a typical one, a word of `named` as
-    its kind; a bare archive's section as itself."""
+def _time_span(value, named: dict, where: str, problems: list):
+    """A length as the class of its kind: `1 h` a finite one, `typical 1 min` a typical
+    one, a word of `named` as the class it names; a bare archive's section as itself."""
     if isinstance(value, dict):
-        return _section(value, cls, where, problems)
+        return _section(value, Duration, where, problems)
     if isinstance(value, str) and value.strip().lower() in named:
-        return {'kind': named[value.strip().lower()]}
-    kind, text = FIXED, value
+        return {'m_def': m_def(named[value.strip().lower()])}
+    typical, text = False, value
     if isinstance(value, str) and value.strip().lower().startswith(TYPICAL_WORD):
-        kind, text = TYPICAL, value.strip()[len(TYPICAL_WORD) :]
-    read = _value(text, cls, 'value', where, problems)
-    return None if read is None else {'kind': kind, 'value': read}
+        typical, text = True, value.strip()[len(TYPICAL_WORD) :]
+    read = _value(text, FiniteDuration, 'value', where, problems)
+    if read is None:
+        return None
+    length = {'m_def': m_def(FiniteDuration), 'value': read}
+    return {**length, 'typical': True} if typical else length
 
 
 def _renamed(written: str, cls: type) -> str:

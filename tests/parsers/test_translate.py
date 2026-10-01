@@ -50,6 +50,11 @@ from nomad_pv_stability_measurements.schema_packages.protocol import StabilityPr
 from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
     RampTemperature,
 )
+from nomad_pv_stability_measurements.schema_packages.timing import (
+    FiniteDuration,
+    OpenEndedDuration,
+    WholeBlockDuration,
+)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 approx = pytest.approx
@@ -65,8 +70,8 @@ def entry(cls, **fields) -> dict:
 
 
 #: What a protocol's own instruction lasts where it writes no duration.
-WHOLE_BLOCK = {'kind': 'whole_block'}
-HOUR = {'kind': 'fixed', 'value': 3600.0}
+WHOLE_BLOCK = {'m_def': m_def(WholeBlockDuration)}
+HOUR = {'m_def': m_def(FiniteDuration), 'value': 3600.0}
 
 
 def instructions(*authored):
@@ -393,7 +398,10 @@ def test_settings_come_first_then_the_routine():
 
     assert translation.problems == []
     assert data['m_def'] == m_def(StabilityProtocol)
-    assert data['duration'] == {'kind': 'fixed', 'value': approx(3600000)}
+    assert data['duration'] == {
+        'm_def': m_def(FiniteDuration),
+        'value': approx(3600000),
+    }
     assert [each['m_def'] for each in data['instructions']] == [
         m_def(HoldTemperature),
         m_def(IndefiniteRepeatingBlock),
@@ -541,8 +549,11 @@ def test_a_value_written_the_former_way_is_refused_with_the_way_now(
     ('written', 'duration'),
     [
         ('1 h', HOUR),
-        ('typical 1 min', {'kind': 'typical', 'value': 60.0}),
-        ('open-ended', {'kind': 'open_ended'}),
+        (
+            'typical 1 min',
+            {'m_def': m_def(FiniteDuration), 'value': 60.0, 'typical': True},
+        ),
+        ('open-ended', {'m_def': m_def(OpenEndedDuration)}),
         ('whole block', WHOLE_BLOCK),
     ],
 )
@@ -554,6 +565,19 @@ def test_a_duration_is_a_length_or_says_what_kind_it_is(written, duration):
 
     assert translation.problems == []
     assert translation.archive['sub_instructions'][0]['duration'] == duration
+
+
+def test_a_length_that_is_no_value_has_no_value_to_write():
+    written = {'m_def': m_def(OpenEndedDuration), 'value': 3600}
+    translation = translate_section(
+        {'instructions': [{'channel': 'temperature', 'duration': written}]},
+        CountingRepeatingBlock,
+    )
+
+    [problem] = translation.problems
+    assert '`value` is not a field of OpenEndedDuration' in problem.message
+    duration = translation.archive['sub_instructions'][0]['duration']
+    assert duration == {'m_def': m_def(OpenEndedDuration)}
 
 
 def test_a_setting_written_without_a_duration_lasts_as_long_as_the_protocol():
@@ -626,7 +650,7 @@ def test_jv_scans_are_written_with_their_settings_in_words_or_by_field():
     [scans] = translation.archive['data']['instructions'][0]['sub_instructions']
     assert translation.problems == []
     assert scans['m_def'] == m_def(JVScan)
-    assert scans['interval'] == {'kind': 'fixed', 'value': approx(600.0)}
+    assert scans['interval'] == {'m_def': m_def(FiniteDuration), 'value': approx(600.0)}
     assert (scans['voltage_stop'], scans['scan_rate']) == approx((1.2, 0.1))
     assert scans['scan_order'] == 'reverse then forward'
     assert scans['light_source'] == entry(ArtificialLightSource, solar_simulator=True)
@@ -635,9 +659,12 @@ def test_jv_scans_are_written_with_their_settings_in_words_or_by_field():
 @pytest.mark.parametrize(
     ('every', 'interval'),
     [
-        ('10 min', {'kind': 'fixed', 'value': 600.0}),
-        ('typical 1 h', {'kind': 'typical', 'value': 3600.0}),
-        ('not stated', {'kind': 'not_stated'}),
+        ('10 min', {'m_def': m_def(FiniteDuration), 'value': 600.0}),
+        (
+            'typical 1 h',
+            {'m_def': m_def(FiniteDuration), 'value': 3600.0, 'typical': True},
+        ),
+        ('not stated', {'m_def': m_def(OpenEndedDuration)}),
     ],
 )
 def test_how_often_jv_scans_repeat_is_written_like_a_duration(every, interval):

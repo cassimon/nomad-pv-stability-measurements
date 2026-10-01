@@ -3553,7 +3553,7 @@ descriptions, where an author choosing the mode reads it.
 
 ## 33. Durations say what kind they are
 
-**Status: settled in review; steps 1–4 of §33.8 built.** Supersedes §32 and the first bullet
+**Status: settled in review; steps 1–4 of §33.8 built. Amended by §42:** the kinds are classes, not a `kind` field. Supersedes §32 and the first bullet
 of §23.1.
 
 ### 33.1 Why
@@ -4739,3 +4739,54 @@ on one side, which the title's offset makes plain). A name that is no time zone 
 **A value held steady.** A row whose values (and summary bars) vary by less than 5 % of their
 size (`LEAST_SPAN`) spans that much around their middle: UNITOV's 1.4 V, kept to 1 µV, was
 drawn with ticks a millionth apart. A row of zeros keeps Plotly's own range.
+
+## 42. Lengths of time are classes, in `timing.py`
+
+**Status: built.** Amends §33 (durations say what kind they are) and the `Period` of the
+characterization intervals.
+
+**Why.** `TimeSpan` carried a `value` half its kinds must not have, and a `kind` string every
+check and caller switched on (`kind_of`, `seconds_of`, `is_typical`, `WITH_VALUE`, …, in six
+modules). The inheritance derived nothing, and the class did not say what it was.
+
+**Decided.** One class per kind of length, and only where the logic differs. The role, how
+long something lasts or the time between two measurements, is the field the length fills
+(`duration`, `interval`), not its class: a period is a duration.
+
+```
+Duration                       abstract: no length known → never ends; reported where written bare
+├─ FiniteDuration              value (required, positive), typical: bool
+│   └─ DerivedDuration         worked out from what it holds; never written by hand, replaced
+├─ OpenEndedDuration           decided outside the plan (YAML `open-ended`, `every: not stated`)
+└─ WholeBlockDuration          as long as its parallel block
+Timed     the mixin of what has a `duration` (Instruction, TimePlan): derive_duration,
+          states_its_duration, span, seconds, settle_duration
+Span      frozen dataclass (seconds, typical): +, ×, total, longest, as_duration,
+          titled_for_plotting
+```
+
+- **Typical is a property, not a kind:** a typical length has the same fields, check and logic
+  as an exact one; `typical` only qualifies the value (and of a derived length, says some part
+  of it is typical). An interval not stated is open-ended: the plan leaves it to whoever runs
+  the test, as an open-ended duration is ended from outside. A first cut had 14 classes
+  (`Fixed`/`Typical` × `Duration`/`Period`, `UnstatedPeriod`, `Length`, `StatedLength`);
+  merged where the logic was the same.
+- A kind without a value has no `value` field: NOMAD drops it silently, the translator reports
+  it as an unknown field. A bare `Duration` is reported.
+- A length answers for itself: `span()` and `written(about)` (`12 h`; `≈ 12 h` or
+  `typically 12 h` where typical); the owner phrases it (` for …`, ` every …`,
+  ` periodically`). `InstructionBlock.one_iteration()` returns a `Span`.
+- An interval that is a `WholeBlockDuration` or a `DerivedDuration` is no time between two
+  measurements: `CharacterizationInstruction.normalize` reports it (a check of its own field,
+  as a whole-block duration's place is the instruction's).
+- **Timing and execution apart.** `timing.py` knows nothing of blocks or modes:
+  `Duration.together(durations, parallel)` only adds up. What a mode means, and where a
+  `WholeBlockDuration` may stand, is the instructions': `Instruction.execution_mode` and
+  `Instruction.together` (static), `Instruction.report_a_place_without_a_parallel_block`; a
+  plan with one reports it itself.
+- NOMAD aliases rename fields only, not classes in `m_def`, so they fold nothing together;
+  none are used (nothing is published).
+- The YAML is unchanged (`1 h`, `typical 1 min`, `open-ended`, `whole block`, `not stated`); the
+  translator writes `m_def` (and `typical: true`) instead of `kind`. No migration:
+  `tests/data/channels.archive.yaml` and the ISOS expectations name the classes. The simulated
+  runs regenerate byte for byte.

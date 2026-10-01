@@ -23,7 +23,6 @@ from nomad_pv_stability_measurements.schema_packages import (  # noqa: F401
 from nomad_pv_stability_measurements.schema_packages.general import (
     Planned,
     TimePlan,
-    titled_for_plotting,
 )
 from nomad_pv_stability_measurements.schema_packages.light_sources import GeoLocation
 from nomad_pv_stability_measurements.schema_packages.plan_timeline import (
@@ -106,7 +105,7 @@ class StabilityProtocol(PlotSection, TimePlan):
         series = self.time_series_for_plotting()
         if not series.pieces:
             return []
-        title = titled_for_plotting(self.name, self.duration)
+        title = self.span().titled_for_plotting(self.name)
         figure = figure_for_plotting(series, title, self.seconds() == inf)
         return [PlotlyFigure(label='Timeline', index=0, open=True, figure=figure)]
 

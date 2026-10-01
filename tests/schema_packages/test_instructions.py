@@ -15,7 +15,6 @@ from nomad_pv_stability_measurements.schema_packages.characterization_instructio
     CharacterizationInstruction,
     JVScan,
 )
-from nomad_pv_stability_measurements.schema_packages.general import Duration, Period
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBelowRelativeHumidity,
     HoldBetweenIrradiance,
@@ -46,16 +45,23 @@ from nomad_pv_stability_measurements.schema_packages.standard_values import (
     Dark,
     RoomTemperature,
 )
+from nomad_pv_stability_measurements.schema_packages.timing import (
+    DerivedDuration,
+    Duration,
+    FiniteDuration,
+    OpenEndedDuration,
+    WholeBlockDuration,
+)
 
 K = ureg.kelvin
 
 
-def fixed(value) -> Duration:
-    return Duration(kind='fixed', value=value)
+def fixed(value) -> FiniteDuration:
+    return FiniteDuration(value=value)
 
 
-def open_ended() -> Duration:
-    return Duration(kind='open_ended')
+def open_ended() -> OpenEndedDuration:
+    return OpenEndedDuration()
 
 
 @pytest.mark.parametrize(
@@ -162,7 +168,7 @@ def test_a_ramp_derives_its_rate_or_its_duration(
     # The rate is a magnitude; the direction is the ends.
     derived = getattr(ramp, field)
     if field == 'duration':
-        assert derived.kind == 'derived'
+        assert isinstance(derived, DerivedDuration)
         derived = derived.value
     assert derived.magnitude == pytest.approx(expected)
     assert log.errors == []
@@ -194,7 +200,7 @@ def test_a_cycle_states_no_path_so_it_takes_no_rate(normalized, log):
         )
     )
 
-    assert ramp.duration.kind == 'open_ended'
+    assert isinstance(ramp.duration, OpenEndedDuration)
     [error] = log.errors
     assert 'does not state' in error
 
@@ -464,7 +470,7 @@ def test_control_regulates_what_is_set_and_monitor_logs_what_follows(
 
 
 def test_jv_scans_are_marks_at_their_moments_on_the_electrical_load(normalized, log):
-    every = Period(kind='fixed', value=10 * ureg.minute)
+    every = FiniteDuration(value=10 * ureg.minute)
     scans = normalized(JVScan(duration=fixed(1 * ureg.hour), interval=every))
 
     [piece] = scans.time_series_for_plotting(0, 7200).pieces
@@ -479,10 +485,10 @@ def test_jv_scans_are_marks_at_their_moments_on_the_electrical_load(normalized, 
     ('interval', 'label'),
     [
         (None, 'J–V scan'),
-        (Period(kind='typical', value=1 * ureg.hour), 'J–V scan every ≈ 1 h'),
+        (FiniteDuration(typical=True, value=1 * ureg.hour), 'J–V scan every ≈ 1 h'),
         # "a periodicity that depends on the characteristic degradation timescale of
         # each given device" (Khenkin et al. 2020, p.43)
-        (Period(kind='not_stated'), 'J–V scan periodically'),
+        (OpenEndedDuration(), 'J–V scan periodically'),
     ],
 )
 def test_jv_scans_say_how_their_interval_is_known(normalized, interval, label):
@@ -495,13 +501,13 @@ def test_jv_scans_say_how_their_interval_is_known(normalized, interval, label):
     ('interval', 'marks', 'assumed'),
     [
         (None, [0], None),
-        (Period(kind='not_stated'), [0, 900, 1800, 2700], 'interval not stated'),
+        (OpenEndedDuration(), [0, 900, 1800, 2700], 'interval not stated'),
     ],
 )
 def test_one_scan_is_one_mark_and_scans_without_an_interval_are_drawn_as_assumed(
     interval, marks, assumed
 ):
-    scans = JVScan(duration=Duration(kind='whole_block'), interval=interval)
+    scans = JVScan(duration=WholeBlockDuration(), interval=interval)
 
     [piece] = scans.time_series_for_plotting(0, 3600).pieces
     assert piece.marks.tolist() == marks
@@ -519,12 +525,17 @@ def test_a_bare_characterization_names_no_measurement_and_is_reported(normalized
 @pytest.mark.parametrize(
     ('interval', 'reported'),
     [
-        (Period(kind='fixed', value=0 * ureg.minute), 'must be positive'),
-        (Period(kind='typical'), 'but no value'),
-        (Period(kind='not_stated', value=1 * ureg.hour), 'takes no value'),
+        (FiniteDuration(value=0 * ureg.minute), 'must be positive'),
+        (FiniteDuration(typical=True), 'but no value'),
+        # The base says not what kind of length it is; its classes do.
+        (Duration(), 'bare `Duration`'),
+        # A time between two measurements, never the stretch they are taken over.
+        (WholeBlockDuration(), 'no time between two measurements'),
     ],
 )
-def test_an_interval_s_value_suits_its_kind(normalized, log, interval, reported):
+def test_an_interval_is_a_length_of_a_stated_kind_and_positive(
+    normalized, log, interval, reported
+):
     normalized(JVScan(duration=fixed(1 * ureg.hour), interval=interval))
 
     [message] = log.errors

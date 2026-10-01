@@ -8,7 +8,6 @@ from nomad.units import ureg
 from nomad_pv_stability_measurements.schema_packages.characterization_instructions import (
     JVScan,
 )
-from nomad_pv_stability_measurements.schema_packages.general import Period
 from nomad_pv_stability_measurements.schema_packages.hold_below_instructions import (
     HoldBetweenIrradiance,
 )
@@ -24,6 +23,7 @@ from nomad_pv_stability_measurements.schema_packages.light_sources import (
     SulfurPlasmaLamp,
     XenonLamp,
 )
+from nomad_pv_stability_measurements.schema_packages.timing import FiniteDuration
 
 W_PER_M2 = ureg('W/m^2')
 DAY = datetime(2026, 6, 21, tzinfo=timezone.utc)
@@ -126,7 +126,7 @@ def test_naming_the_source_states_something_about_the_light(monitor, role, writt
 
 def test_a_j_v_scan_says_the_light_it_is_measured_under():
     scans = JVScan(
-        interval=Period(kind='fixed', value=10 * ureg.minute),
+        interval=FiniteDuration(value=10 * ureg.minute),
         irradiance=1000 * W_PER_M2,
         light_source=XenonLamp(
             solar_simulator=True, simulator_classification='AAA', spectrum='AM1.5G'

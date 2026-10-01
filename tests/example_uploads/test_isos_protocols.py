@@ -52,6 +52,11 @@ from nomad_pv_stability_measurements.schema_packages.protocol import StabilityPr
 from nomad_pv_stability_measurements.schema_packages.ramp_instructions import (
     RampTemperature,
 )
+from nomad_pv_stability_measurements.schema_packages.timing import (
+    FiniteDuration,
+    OpenEndedDuration,
+    WholeBlockDuration,
+)
 
 EXAMPLES = Path(example_uploads.__file__).parent / 'isos'
 #: "Very short" (§18.3): one or two sentences of what the standard says.
@@ -67,9 +72,9 @@ TIMELINES_WITHIN = 5.0
 
 
 #: How long a setting lasts: as long as the protocol, which runs them all in parallel.
-WHOLE_BLOCK = {'kind': 'whole_block'}
+WHOLE_BLOCK = {'m_def': m_def(WholeBlockDuration)}
 #: What only the protocol, or an objective, ends: the routines, which repeat indefinitely.
-OPEN_ENDED = {'kind': 'open_ended'}
+OPEN_ENDED = {'m_def': m_def(OpenEndedDuration)}
 
 
 def instruction(cls, **fields) -> dict:
@@ -77,7 +82,7 @@ def instruction(cls, **fields) -> dict:
 
 
 def fixed(seconds: float) -> dict:
-    return {'kind': 'fixed', 'value': pytest.approx(seconds)}
+    return {'m_def': m_def(FiniteDuration), 'value': pytest.approx(seconds)}
 
 
 def kelvin(celsius: float):
@@ -153,7 +158,7 @@ MPP = ('MPP', instruction(MPPTracking, control=True, monitor=True))
 def periodic_jv(light_source: dict) -> dict:
     return instruction(
         JVScan,
-        interval={'kind': 'not_stated'},
+        interval={'m_def': m_def(OpenEndedDuration)},
         light_source=light_source,
     )
 

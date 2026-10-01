@@ -65,10 +65,7 @@ from nomad_pv_stability_measurements.schema_packages.characterization_instructio
     JVScan,
 )
 from nomad_pv_stability_measurements.schema_packages.general import (
-    FIXED,
-    TYPICAL,
     InstructionBlock,
-    seconds_of,
 )
 from nomad_pv_stability_measurements.schema_packages.protocol import StabilityProtocol
 
@@ -271,7 +268,7 @@ def segments(instruction, start: float, stop: float) -> list[tuple]:
     `(start, end, instruction)` in hours, up to `stop` where its container ends."""
     if not isinstance(instruction, InstructionBlock):
         return [(start, min(stop, start + hours(instruction)), instruction)]
-    one = seconds_of(instruction.one_iteration()) / 3600
+    one = instruction.one_iteration().seconds / 3600
     end = min(stop, start + hours(instruction))
     found, time, count = [], start, 0
     while time < end and count < instruction.repetitions():
@@ -374,8 +371,9 @@ def periodic_scans(protocol, series: list[Step], length: float, clock) -> list[S
         interval = getattr(instruction, 'interval', None)
         if not isinstance(instruction, JVScan) or interval is None:
             continue
-        if interval.kind in (FIXED, TYPICAL) and interval.value is not None:
-            every = interval.value.to('hour').magnitude
+        every = interval.span()
+        if every.ends:
+            every = every.seconds / 3600
         else:
             every = SCAN_EVERY
             clock.notes.add(

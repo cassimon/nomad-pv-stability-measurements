@@ -63,7 +63,7 @@ def is_jv_file(path: str | Path) -> bool:
 
 
 def read_protocol(path: str | Path) -> dict:
-    """The run file at `path`, as
+    """The run file at `path`, returned as a Python dict of plain data. Fir example return:
 
         {
             'run': {

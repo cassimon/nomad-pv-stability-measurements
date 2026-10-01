@@ -4,15 +4,17 @@ from math import inf
 
 import numpy as np
 from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
-from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
-    NOT_STATED,
-    TYPICAL,
-    Period,
     SingleInstruction,
 )
 from nomad_pv_stability_measurements.schema_packages.light_sources import LightSource
+from nomad_pv_stability_measurements.schema_packages.timing import (
+    DerivedDuration,
+    Duration,
+    OpenEndedDuration,
+    WholeBlockDuration,
+)
 from nomad_pv_stability_measurements.schema_packages.utils import shown
 
 m_package = SchemaPackage()
@@ -25,7 +27,7 @@ MARKS_FOR_PLOTTING = 4
 class CharacterizationInstruction(SingleInstruction):
     """A measurement of the cell taken during a test, rather than a condition held: at
     the start of the instruction, or once every `interval` over its duration. An
-    interval `not_stated` measures periodically, as often as whoever runs the test
+    `OpenEndedDuration` as interval measures periodically, as often as whoever runs the test
     chooses. How long one measurement takes is rarely known, so it is no part of the
     plan: the duration is the stretch the measurements are taken over, usually the
     whole block they run beside.
@@ -40,10 +42,10 @@ class CharacterizationInstruction(SingleInstruction):
     technique = ''
 
     interval = SubSection(
-        section_def=Period,
-        description='The time from one measurement to the next, and what kind of time '
-        'it is: fixed, typical, or not stated where the test only says the '
-        'measurements repeat.',
+        section_def=Duration,
+        description='The time from one measurement to the next: a `FiniteDuration`, '
+        'exact or typical, or an `OpenEndedDuration` where the test only says the '
+        'measurements repeat. Empty: one measurement, at the start.',
     )
 
     def describe(self) -> str:
@@ -53,15 +55,10 @@ class CharacterizationInstruction(SingleInstruction):
     def describe_interval(self) -> str:
         """` every 10 min`, ` every ≈ 1 h` where it is only typical, ` periodically`
         where it is not stated; nothing for one measurement."""
-        interval = self.interval
-        if interval is None:
-            return ''
-        if interval.kind == NOT_STATED:
+        if isinstance(self.interval, OpenEndedDuration):
             return ' periodically'
-        if interval.value is None:
-            return ''
-        typically = '≈ ' if interval.kind == TYPICAL else ''
-        return f' every {typically}{shown(interval.value.to(ureg.second))}'
+        length = '' if self.interval is None else self.interval.written()
+        return f' every {length}' if length else ''
 
     def describe_settings(self) -> str:
         """What follows the interval: how it is measured. Nothing, unless the kind of
@@ -85,13 +82,13 @@ class CharacterizationInstruction(SingleInstruction):
         `end`, in seconds, and what the drawing assumes. Where the interval is not
         stated, a few are drawn evenly, and the drawing says so; where nothing ends the
         drawing yet, only the first, since only the extent is needed."""
-        interval = self.interval
-        if interval is None or end == inf:
+        if self.interval is None or end == inf:
             return np.array([start]), None
-        if interval.kind == NOT_STATED or interval.value is None:
+        every = self.interval.span()
+        if not every.ends:
             times = np.linspace(start, end, MARKS_FOR_PLOTTING, endpoint=False)
             return times, f'interval not stated: drawn {MARKS_FOR_PLOTTING} times'
-        return np.arange(start, end, interval.value.to('s').magnitude), None
+        return np.arange(start, end, every.seconds), None
 
     def row_for_plotting(self) -> str:
         """The electrical load's: most measurements of a cell take its terminals,
@@ -105,6 +102,12 @@ class CharacterizationInstruction(SingleInstruction):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
+        if isinstance(self.interval, WholeBlockDuration | DerivedDuration):
+            logger.error(
+                f'{self.name or "<unnamed>"} writes a {type(self.interval).__name__} as '
+                f'its `interval`, which is no time between two measurements: write a '
+                f'FiniteDuration or an OpenEndedDuration.'
+            )
         if not self.technique:
             logger.error(
                 f'{self.name or "<unnamed>"} is a bare `{type(self).__name__}`, which '

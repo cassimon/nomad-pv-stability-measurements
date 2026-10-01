@@ -6,14 +6,13 @@ from nomad.metainfo import MEnum, MSection, Quantity, SchemaPackage, SubSection
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.general import (
-    DERIVED,
-    FIXED,
-    TYPICAL,
-    Duration,
     SingleInstruction,
-    kind_of,
 )
 from nomad_pv_stability_measurements.schema_packages.light_sources import LightSource
+from nomad_pv_stability_measurements.schema_packages.timing import (
+    DerivedDuration,
+    Duration,
+)
 from nomad_pv_stability_measurements.schema_packages.utils import (
     MONITORED,
     shown,
@@ -427,7 +426,7 @@ class RampInstruction(MonitorControlInstruction):
         """From `ramp_rate` and its ends, where no duration is stated and the path
         between the ends is."""
         if (
-            kind_of(self) not in (None, DERIVED)
+            self.states_its_duration()
             or type(self) in ABSTRACT_INSTRUCTIONS
             or self.ramp_rate is None
             or self.start_point is None
@@ -435,8 +434,8 @@ class RampInstruction(MonitorControlInstruction):
             or self.end_of_ramp_behavior == 'cycle'
         ):
             return None
-        return Duration(
-            kind=DERIVED, value=abs(self.end_point - self.start_point) / self.ramp_rate
+        return DerivedDuration(
+            value=abs(self.end_point - self.start_point) / self.ramp_rate
         )
 
     def assumed_rate_for_plotting(self):
@@ -505,8 +504,8 @@ class RampInstruction(MonitorControlInstruction):
         span = abs(self.end_point - self.start_point)
         # The rate and the duration say one thing, so whichever was written, both are
         # stored, as the sampling pair is.
-        # A duration worked out from the rate is `derived`, and so not checked here.
-        stated = kind_of(self) in (FIXED, TYPICAL) and self.duration.value is not None
+        # A duration worked out from the rate is a `DerivedDuration`, not checked here.
+        stated = self.states_its_duration() and self.span().ends
         if self.ramp_rate is None and stated:
             self.ramp_rate = span / self.duration.value
         elif self.ramp_rate is not None and stated:
@@ -564,13 +563,9 @@ RAMP_SHAPES = {'hold': hold_after_ramp, 'sawtooth': sawtooth, 'triangle': triang
 def held_for(instruction) -> str:
     """` for 12 h`, where a hold states its length; `typically` where that is only a
     typical one. A hold never derives one."""
-    if (
-        kind_of(instruction) not in (FIXED, TYPICAL)
-        or instruction.duration.value is None
-    ):
-        return ''
-    typically = 'typically ' if kind_of(instruction) == TYPICAL else ''
-    return f' for {typically}{shown(instruction.duration.value)}'
+    duration = instruction.duration
+    length = '' if duration is None else duration.written('typically ')
+    return f' for {length}' if length else ''
 
 
 #: The bases that name no quantity: writing one directly is an authoring mistake.

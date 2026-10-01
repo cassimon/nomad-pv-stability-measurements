@@ -9,7 +9,7 @@ from nomad.client import normalize_all, parse
 from nomad.datamodel.metainfo.basesections.v2 import ActivityStep
 from nomad.units import ureg
 
-from nomad_pv_stability_measurements.schema_packages.general import Duration, Plan
+from nomad_pv_stability_measurements.schema_packages.general import Plan
 from nomad_pv_stability_measurements.schema_packages.hold_instructions import (
     HoldIrradiance,
     HoldTemperature,
@@ -18,16 +18,21 @@ from nomad_pv_stability_measurements.schema_packages.protocol import (
     StabilityActivity,
     StabilityProtocol,
 )
+from nomad_pv_stability_measurements.schema_packages.timing import (
+    FiniteDuration,
+    OpenEndedDuration,
+    WholeBlockDuration,
+)
 
 START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def fixed(seconds) -> Duration:
-    return Duration(kind='fixed', value=seconds * ureg.second)
+def fixed(seconds) -> FiniteDuration:
+    return FiniteDuration(value=seconds * ureg.second)
 
 
-def whole_block() -> Duration:
-    return Duration(kind='whole_block')
+def whole_block() -> WholeBlockDuration:
+    return WholeBlockDuration()
 
 
 def executed(protocol, **given):
@@ -73,7 +78,7 @@ def test_settings_alone_give_the_protocol_no_end(normalized):
         )
     )
 
-    assert protocol.duration.kind == 'open_ended'
+    assert isinstance(protocol.duration, OpenEndedDuration)
 
 
 @pytest.mark.parametrize(
