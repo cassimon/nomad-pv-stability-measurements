@@ -18,6 +18,9 @@ from nomad_pv_stability_measurements.parsers.measurement_parser import (
     child_reference,
     protocol_reference,
 )
+from nomad_pv_stability_measurements.schema_packages.measurement import (
+    StabilityMeasurementCollection,
+)
 
 PARSER = measurement_parser_entry_point.load()
 DEVICE = (
@@ -147,6 +150,7 @@ def test_a_device_without_runs_is_its_collection_with_its_sample_and_no_plan(
     assert list(keys) == [SAMPLE_KEY]
     assert log.errors == []
     collection = archive.data
+    assert isinstance(collection, StabilityMeasurementCollection)
     assert [step.name for step in collection.steps] == ['J–V 1, 09.00.00']
     # A device's history follows no protocol, and none is made up for it.
     assert collection.plan is None and collection.derived_plan is None

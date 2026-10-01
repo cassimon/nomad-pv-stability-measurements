@@ -14,6 +14,7 @@ from nomad_pv_stability_measurements.schema_packages.measurement import (
     JVFiguresOfMerit,
     JVSweepStep,
     StabilityMeasurement,
+    StabilityMeasurementCollection,
     StabilitySeriesStep,
 )
 from nomad_pv_stability_measurements.schema_packages.plan_timeline import ROLE_COLORS
@@ -252,7 +253,7 @@ def test_the_power_each_scan_reported_is_shown_beside_the_tracked_power(normaliz
     assert reported['y'] == pytest.approx([19.0])  # mW/cm²
 
 
-def test_a_measurement_made_of_others_keeps_the_figure_drawn_of_their_steps(log):
+def test_a_collection_keeps_the_figure_drawn_of_its_runs_steps(log):
     run = StabilityMeasurement(
         name='run',
         steps=[
@@ -264,14 +265,96 @@ def test_a_measurement_made_of_others_keeps_the_figure_drawn_of_their_steps(log)
             )
         ],
     )
-    collection = StabilityMeasurement(name='device', sub_activities=[run])
-    collection.figures = collection.figures_for_plotting(log, list(run.steps))
+    collection = StabilityMeasurementCollection(name='device', sub_activities=[run])
+    collection.figures = collection.figures_for_plotting(log, [('run', run.steps)])
 
     collection.normalize(EntryArchive(), log)
 
     [figure] = collection.figures
     [power] = figure.figure['data']
+    # A run long enough to be seen is drawn whole, its steps named after it.
+    assert power['name'] == 'run · ageing · power density · monitored'
     assert power['x'] == [at(0), at(1), at(2)]
+
+
+def test_a_run_too_short_to_see_in_a_history_is_its_mean_between_its_extremes(log):
+    """Six minutes in a hundred hours would be a clump of points: the run becomes one
+    point per row, at its middle, labelled with what it holds."""
+
+    def sweep(minutes, efficiency):
+        return JVSweepStep(
+            start_time=START + timedelta(hours=100, minutes=minutes),
+            figures_of_merit=[
+                JVFiguresOfMerit(direction='reverse', efficiency=efficiency)
+            ],
+        )
+
+    first = [
+        StabilitySeriesStep(
+            name='ageing',
+            start_time=START,
+            time=[0.0, 5.0, 10.0] * ureg.hour,
+            power_density=ELECTRICAL['power_density'],
+        )
+    ]
+    short = [
+        sweep(0, 0.20),
+        StabilitySeriesStep(
+            name='tracking',
+            start_time=START + timedelta(hours=100),
+            time=[0.0, 3.0, 6.0] * ureg.minute,
+            power_density=[100.0, 200.0, 300.0] * ureg('W/m^2'),
+        ),
+        sweep(6, 0.18),
+    ]
+    collection = StabilityMeasurementCollection(name='device', datetime=START)
+
+    [figure] = collection.figures_for_plotting(log, [('A', first), ('B', short)])
+
+    traces = {trace['name']: trace for trace in figure.figure['data']}
+    power = traces['B · 6 min tracking · 2 J–V scans · power density · monitored']
+    assert power['x'] == [at(100.05)]
+    assert power['y'] == pytest.approx([20.0])  # mW/cm², the mean
+    assert power['error_y']['arrayminus'] == pytest.approx([10.0])  # to the least
+    assert power['error_y']['array'] == pytest.approx([10.0])  # to the greatest
+    efficiency = traces['B · 6 min tracking · 2 J–V scans · reverse scan · PCE']
+    assert efficiency['y'] == pytest.approx([19.0])  # %
+    assert efficiency['mode'] == 'markers'  # joined to nothing
+    # The long run is drawn whole.
+    assert traces['A · ageing · power density · monitored']['x'] == [
+        at(0),
+        at(5),
+        at(10),
+    ]
+    labels = [each['text'] for each in figure.figure['layout']['annotations']]
+    assert 'B · 6 min tracking · 2 J–V scans' in labels
+
+
+def test_runs_too_close_to_tell_apart_are_one_summary_for_all_of_them(log):
+    def tracking(hours, power):
+        return StabilitySeriesStep(
+            name='tracking',
+            start_time=START + timedelta(hours=hours),
+            time=[0.0, 6.0] * ureg.minute,
+            power_density=power * ureg('W/m^2'),
+        )
+
+    runs = [
+        ('A', [tracking(0, [100.0, 100.0]), tracking(10, [100.0, 100.0])]),
+        ('B', [tracking(100, [100.0, 200.0])]),
+        ('C', [tracking(100.2, [300.0, 400.0])]),
+    ]
+    collection = StabilityMeasurementCollection(name='device', datetime=START)
+
+    [figure] = collection.figures_for_plotting(log, runs)
+
+    merged = [
+        trace for trace in figure.figure['data'] if trace['name'].startswith('2 runs')
+    ]
+    [power] = merged
+    assert power['name'] == '2 runs · 12 min tracking · power density · monitored'
+    assert power['y'] == pytest.approx([25.0])  # mW/cm², over both runs
+    assert 'B' in power['hovertext'][0] and 'C' in power['hovertext'][0]
 
 
 def test_a_step_without_a_start_is_left_out_of_the_overview(normalized, log):

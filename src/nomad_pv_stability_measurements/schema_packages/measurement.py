@@ -3,7 +3,8 @@
 A `StabilityMeasurement` is a stability test as it ran, read from the files it left:
 who ran it, when, on what, and its steps in the order they ran. A step that records
 conditions and output over time is a `StabilitySeriesStep`; a J–V sweep is a
-`JVSweepStep`.
+`JVSweepStep`. A `StabilityMeasurementCollection` is a device's whole history: its runs,
+and the steps taken outside any run.
 """
 
 import numpy as np
@@ -14,7 +15,7 @@ from nomad.datamodel.metainfo.basesections.v2 import (
     SystemReference,
 )
 from nomad.datamodel.metainfo.plot import PlotlyFigure, PlotSection
-from nomad.metainfo import MEnum, Quantity, SchemaPackage, SubSection
+from nomad.metainfo import MEnum, Quantity, Reference, SchemaPackage, SubSection
 from nomad.units import ureg
 
 from nomad_pv_stability_measurements.schema_packages.protocol import (
@@ -23,6 +24,8 @@ from nomad_pv_stability_measurements.schema_packages.protocol import (
 from nomad_pv_stability_measurements.schema_packages.step_figures import (
     ELECTRICAL_ROWS,
     ROWS,
+    OverTime,
+    RunSummary,
     jv_figure_for_plotting,
     over_time_figure_for_plotting,
 )
@@ -78,13 +81,16 @@ class StabilitySeriesStep(PlotSection, ActivityStep):
         shape=['*'],
         unit='A/m^2',
         description='The current through the cell per area at each sample time; '
-        'positive where the cell delivers power.',
+        'positive where the cell delivers power, negative where it is driven and takes '
+        'power, as beyond its open-circuit voltage.',
     )
     power_density = Quantity(
         type=np.float64,
         shape=['*'],
         unit='W/m^2',
-        description='The power the cell delivers per area at each sample time.',
+        description='The power the cell delivers per area at each sample time: '
+        'positive while it produces power, negative where it is driven and takes '
+        'power, as beyond its open-circuit voltage.',
     )
 
     #: The quantities recorded at each sample time, beside `time` itself.
@@ -157,9 +163,8 @@ class StabilitySeriesStep(PlotSection, ActivityStep):
         if not recorded:
             return []
         hours = self.time.to('hour').magnitude.tolist()
-        figure = over_time_figure_for_plotting(
-            [(self.name, hours, recorded, self.controlled or [])], self.name or ''
-        )
+        pieces = [(self.name, hours, recorded, self.controlled or [])]
+        figure = over_time_figure_for_plotting(OverTime(pieces), self.name or '')
         return [
             PlotlyFigure(label='Electrical output', index=0, open=True, figure=figure)
         ]
@@ -294,7 +299,7 @@ class JVSweepStep(PlotSection, ActivityStep):
         shape=['*'],
         unit='A/m^2',
         description='The current through the cell per area at each point; positive '
-        'where the cell delivers power.',
+        'where the cell delivers power, negative where it is driven and takes power.',
     )
     direction = Quantity(
         type=MEnum('forward', 'reverse'),
@@ -357,11 +362,12 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         'notes': 'description',
     }
 
+    #: Whether `normalize` draws the figure from the measurement's own steps.
+    draws_figure_when_normalized = True
+
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
-        # A measurement made of others draws its figure where they are read: they are
-        # other entries, which need not have been processed when this one is.
-        if not self.sub_activities:
+        if self.draws_figure_when_normalized:
             self.figures = self.figures_for_plotting(logger)
 
     #: What the overview shows of each J–V scan, as the station reported it, and in
@@ -383,10 +389,26 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         are shown in the time zone the test started in, and hovering gives the hours
         since it started.
 
-        `steps` are the steps to draw, by default this measurement's own; a
-        measurement made of others draws theirs too."""
-        steps = self.steps if steps is None else steps
-        placed = [step for step in steps if step.start_time is not None]
+        `steps` are the steps to draw, by default this measurement's own."""
+        placed = self.placed_for_plotting(
+            logger, self.steps if steps is None else steps
+        )
+        if not placed:
+            return []
+        start = self.datetime or min(step.start_time for step in placed)
+        pieces, reported, marks = self.drawn_for_plotting(placed, start)
+        scans = _scans(reported)
+        if not pieces and not scans:
+            return []
+        figure = over_time_figure_for_plotting(
+            OverTime(pieces, marks, scans), self.name or '', start
+        )
+        return [PlotlyFigure(label='Over time', index=0, open=True, figure=figure)]
+
+    @staticmethod
+    def placed_for_plotting(logger, steps) -> list:
+        """Of `steps`, those with a `start_time`, which places them on the time axis;
+        a series or a sweep without one is left out, with a warning."""
         for step in steps:
             if step.start_time is None and isinstance(
                 step, StabilitySeriesStep | JVSweepStep
@@ -395,51 +417,47 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
                     f'step `{step.name}` has no `start_time`, so the overview over '
                     'time leaves it out.'
                 )
-        if not placed:
-            return []
-        start = self.datetime or min(step.start_time for step in placed)
+        return [step for step in steps if step.start_time is not None]
+
+    def drawn_for_plotting(self, steps, start, prefix: str | None = None) -> tuple:
+        """What `steps` draw, in hours since `start`: the pieces the series recorded,
+        what each J–V scan reported, `{row: {direction: [(hours, value)]}}`, and a
+        mark where each sweep was taken. `prefix` names the run the steps belong to,
+        before each step's own name."""
 
         def since_start(step) -> float:
             return (step.start_time - start).total_seconds() / 3600
 
         pieces = [
             (
-                step.name,
+                ' · '.join(filter(None, (prefix, step.name))),
                 (since_start(step) + step.time.to('hour').magnitude).tolist(),
                 step.recorded_for_plotting(ROWS),
                 step.controlled or [],
             )
-            for step in placed
+            for step in steps
             if isinstance(step, StabilitySeriesStep)
         ]
         pieces = [piece for piece in pieces if piece[2]]
-        sweeps = [step for step in placed if isinstance(step, JVSweepStep)]
+        sweeps = [step for step in steps if isinstance(step, JVSweepStep)]
         reported = {}
         for step in sweeps:
-            for scan in step.figures_of_merit:
-                for name, row in self.reported_for_plotting.items():
-                    value = getattr(scan, name)
-                    if scan.direction is not None and value is not None:
-                        reported.setdefault(row, {}).setdefault(
-                            scan.direction, []
-                        ).append((since_start(step), value))
-        scans = {
-            row: {
-                direction: (
-                    [at for at, _ in points],
-                    ureg.Quantity.from_list([value for _, value in points]),
+            for row, direction, value in self.reported_by_scan_for_plotting(step):
+                reported.setdefault(row, {}).setdefault(direction, []).append(
+                    (since_start(step), value)
                 )
-                for direction, points in by_direction.items()
-            }
-            for row, by_direction in reported.items()
-        }
-        if not pieces and not scans:
-            return []
         marks = [(since_start(step), 'J–V') for step in sweeps]
-        figure = over_time_figure_for_plotting(
-            pieces, self.name or '', marks, scans, start=start
-        )
-        return [PlotlyFigure(label='Over time', index=0, open=True, figure=figure)]
+        return pieces, reported, marks
+
+    def reported_by_scan_for_plotting(self, sweep) -> list[tuple]:
+        """`(row, direction, value)` of what each scan of `sweep` reported that the
+        overview shows."""
+        return [
+            (row, scan.direction, getattr(scan, name))
+            for scan in sweep.figures_of_merit
+            for name, row in self.reported_for_plotting.items()
+            if scan.direction is not None and getattr(scan, name) is not None
+        ]
 
     def read_files(
         self, path, read_protocol, read_stability_series, read_jv_file
@@ -495,6 +513,199 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
             steps.append(section)
         self.steps = steps
         return problems
+
+
+class StabilityMeasurementCollection(StabilityMeasurement):
+    """A collection of stability measurements: one device's whole history, its runs
+    and the measurements taken outside any run, whose conditions in between nobody
+    specified.
+
+    The runs are other entries, in `sub_activities`; the measurements outside any run
+    are its own steps. It follows no protocol, given or derived: each run has its own.
+    Its figure shows all of them over time, drawn where the runs are read, since they
+    need not have been processed when the collection is.
+    """
+
+    sub_activities = Quantity(
+        type=Reference(StabilityMeasurement.m_def),
+        shape=['*'],
+        description="The runs of the device's history, each a measurement of its own. "
+        'It stands in until activities can hold activities of their own.',
+    )
+
+    draws_figure_when_normalized = False
+
+    #: A run that spans less than this share of the whole history would be a clump of
+    #: points, and is drawn as a summary instead.
+    compact_share_for_plotting = 0.02
+    #: Summaries closer together than this share of the whole history would be drawn
+    #: on top of each other, and are drawn as one.
+    merge_share_for_plotting = 0.01
+
+    def figures_for_plotting(self, logger, runs=()) -> list[PlotlyFigure]:
+        """The device's history on one time axis of dates and times: its own steps,
+        and the steps of each of its `runs`, given as `(name, steps)` where they are
+        read.
+
+        A run is drawn as its own figure draws it, its steps named after it. A run that
+        spans less than `compact_share_for_plotting` of the history is summarized
+        instead: one point per row, at the middle of the run, the mean of what it
+        recorded there with a bar from the least to the greatest value, and a label
+        saying what it holds. Summaries closer together than `merge_share_for_plotting`
+        of the history are one, for all their runs. No line joins two runs: nothing
+        was measured between them."""
+        groups = [(None, self.placed_for_plotting(logger, self.steps))]
+        groups += [
+            (name, self.placed_for_plotting(logger, steps)) for name, steps in runs
+        ]
+        groups = [(name, steps) for name, steps in groups if steps]
+        if not groups:
+            return []
+        start = self.datetime or min(
+            step.start_time for _, steps in groups for step in steps
+        )
+        spans = [_span(steps, start) for _, steps in groups]
+        whole = max(end for _, end in spans) - min(begin for begin, _ in spans)
+        pieces, reported, marks, compact = [], {}, [], []
+        for (name, steps), (begin, end) in zip(groups, spans):
+            if (
+                name is not None
+                and end - begin < self.compact_share_for_plotting * whole
+            ):
+                compact.append((name, steps, begin, end))
+                continue
+            drawn = self.drawn_for_plotting(steps, start, prefix=name)
+            pieces += drawn[0]
+            for row, by_direction in drawn[1].items():
+                for direction, points in by_direction.items():
+                    reported.setdefault(row, {}).setdefault(direction, []).extend(
+                        points
+                    )
+            marks += drawn[2]
+        summaries = [
+            self.summary_for_plotting(each)
+            for each in _nearby(compact, self.merge_share_for_plotting * whole)
+        ]
+        scans = _scans(reported)
+        if not pieces and not scans and not summaries:
+            return []
+        figure = over_time_figure_for_plotting(
+            OverTime(pieces, marks, scans, summaries), self.name or '', start
+        )
+        return [PlotlyFigure(label='Over time', index=0, open=True, figure=figure)]
+
+    def summary_for_plotting(self, runs) -> RunSummary:
+        """The `runs`, each `(name, steps, begin, end)`, its span in hours since the
+        history started, as one point per row: named after the run, or, for several,
+        after how many there are."""
+        values, scans, tracked, sweeps, electrical = {}, {}, 0.0, 0, False
+        for step in (step for _, steps, _, _ in runs for step in steps):
+            if isinstance(step, StabilitySeriesStep):
+                recorded = step.recorded_for_plotting(ROWS)
+                for row, quantity in recorded.items():
+                    role = (
+                        'controlled' if row in (step.controlled or []) else 'monitored'
+                    )
+                    values.setdefault((row, role), []).append(quantity)
+                if recorded:
+                    times = step.time.to('hour').magnitude
+                    tracked += float(times[-1] - times[0])
+                    electrical |= any(row in recorded for row in ELECTRICAL_ROWS)
+            elif isinstance(step, JVSweepStep):
+                sweeps += 1
+                for row, direction, value in self.reported_by_scan_for_plotting(step):
+                    scans.setdefault(row, {}).setdefault(direction, []).append(value)
+        names = [name for name, _, _, _ in runs]
+        parts = [names[0] if len(names) == 1 else f'{len(names)} runs']
+        if values:
+            what = 'tracking' if electrical else 'monitoring'
+            parts.append(f'{_duration(tracked)} {what}' if tracked else what)
+        if sweeps:
+            parts.append(f'{sweeps} J–V scan{"s" if sweeps > 1 else ""}')
+        return RunSummary(
+            begin=min(begin for _, _, begin, _ in runs),
+            end=max(end for _, _, _, end in runs),
+            label=' · '.join(parts),
+            names=names,
+            values={key: _statistics(each) for key, each in values.items()},
+            scans={
+                row: {
+                    direction: _statistics(each)
+                    for direction, each in by_direction.items()
+                }
+                for row, by_direction in scans.items()
+            },
+        )
+
+
+def _nearby(runs: list, within: float) -> list[list]:
+    """`runs`, each `(name, steps, begin, end)`, in groups of those whose middles lie
+    `within` hours of the one before, in time order."""
+    groups = []
+    last = None
+    for run in sorted(runs, key=lambda each: each[2] + each[3]):
+        middle = (run[2] + run[3]) / 2
+        if groups and middle - last <= within:
+            groups[-1].append(run)
+        else:
+            groups.append([run])
+        last = middle
+    return groups
+
+
+def _scans(reported: dict) -> dict:
+    """What J–V scans reported, `{row: {direction: [(hours, value)]}}`, as
+    `over_time_figure_for_plotting` takes it: in time order, `(hours, values)`."""
+    scans = {}
+    for row, by_direction in reported.items():
+        for direction, points in by_direction.items():
+            ordered = sorted(points, key=lambda point: point[0])
+            scans.setdefault(row, {})[direction] = (
+                [at for at, _ in ordered],
+                ureg.Quantity.from_list([value for _, value in ordered]),
+            )
+    return scans
+
+
+def _span(steps, start) -> tuple[float, float]:
+    """From when to when `steps` ran, in hours since `start`: a sweep at its start, a
+    series until its last sample."""
+    begins, ends = [], []
+    for step in steps:
+        at = (step.start_time - start).total_seconds() / 3600
+        begins.append(at)
+        series = isinstance(step, StabilitySeriesStep) and step.time is not None
+        last = step.time[-1].to('hour').magnitude if series and len(step.time) else 0
+        ends.append(at + float(last))
+    return min(begins), max(ends)
+
+
+def _statistics(quantities: list) -> tuple:
+    """The mean, the least and the greatest of every value in `quantities`, each a
+    quantity, and how many values there are."""
+    units = quantities[0].units
+    values = np.concatenate(
+        [np.atleast_1d(each.to(units).magnitude) for each in quantities]
+    )
+    return (
+        ureg.Quantity(values.mean(), units),
+        ureg.Quantity(values.min(), units),
+        ureg.Quantity(values.max(), units),
+        len(values),
+    )
+
+
+#: How a span is said: in each unit, its length in hours, while less than a number of
+#: it; else in days.
+SPOKEN_UNITS = (('s', 1 / 3600, 90), ('min', 1 / 60, 90), ('h', 1, 48))
+
+
+def _duration(hours: float) -> str:
+    """A span as it is said: `40 s`, `6 min`, `1.5 h`, `12 d`."""
+    for unit, length, below in SPOKEN_UNITS:
+        if hours / length < below:
+            return f'{hours / length:.2g} {unit}'
+    return f'{hours / 24:.2g} d'
 
 
 def _read_step(section, step: dict, read) -> list[str]:

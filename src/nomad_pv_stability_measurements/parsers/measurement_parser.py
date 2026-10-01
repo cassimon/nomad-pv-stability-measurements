@@ -41,6 +41,7 @@ from nomad_pv_stability_measurements.file_reading import (
 from nomad_pv_stability_measurements.parsers.parser import load_protocol, stem
 from nomad_pv_stability_measurements.schema_packages.measurement import (
     StabilityMeasurement,
+    StabilityMeasurementCollection,
 )
 from nomad_pv_stability_measurements.schema_packages.sample import SolarCellSample
 
@@ -226,7 +227,7 @@ class StabilityMeasurementParser(MatchingParser):
         archive: 'EntryArchive',
         children: dict[str, 'EntryArchive'],
         logger: 'BoundLogger',
-    ) -> StabilityMeasurement:
+    ) -> StabilityMeasurementCollection:
         """The collection the file at `mainfile` stands for: its own steps, its runs
         as `sub_activities`, and one figure of all their steps; with its sample as a
         child entry. `found` is the institution and the collection, as
@@ -234,7 +235,7 @@ class StabilityMeasurementParser(MatchingParser):
         institution, collection = found
         sample = dict(collection.get('sample') or {})
         _load_sample(sample, children.get(SAMPLE_KEY), logger)
-        measurement = StabilityMeasurement()
+        measurement = StabilityMeasurementCollection()
         reference = {'name', 'lab_id'}
         run = {
             'name': collection.get('name'),
@@ -259,13 +260,13 @@ class StabilityMeasurementParser(MatchingParser):
         references = [entry_reference(archive, mainfile, each, None) for each in runs]
         if all(references):
             measurement.sub_activities = references
-        steps = list(measurement.steps)
-        for path in runs:
-            steps += _steps_of_run(institution, path)
+        read = [_run_for_plotting(institution, path) for path in runs]
+        read = [each for each in read if each is not None]
+        steps = list(measurement.steps) + [step for _, each in read for step in each]
         placed = [step for step in steps if step.start_time is not None]
         if placed:
             measurement.datetime = min(step.start_time for step in placed)
-        measurement.figures = measurement.figures_for_plotting(logger, steps)
+        measurement.figures = measurement.figures_for_plotting(logger, read)
         return measurement
 
 
@@ -293,9 +294,9 @@ def _referring(read_protocol, archive: 'EntryArchive', mainfile: str):
     return read
 
 
-def _steps_of_run(institution: ModuleType, path: str) -> list:
-    """The steps of the run at `path`, each named after the run too, for the figure
-    of a collection. What cannot be read is reported by the run's own entry."""
+def _run_for_plotting(institution: ModuleType, path: str) -> tuple | None:
+    """The name and the steps of the run at `path`, for the figure of a collection;
+    `None` where it cannot be read, which the run's own entry reports."""
     run = StabilityMeasurement()
     try:
         run.read_files(
@@ -305,10 +306,8 @@ def _steps_of_run(institution: ModuleType, path: str) -> list:
             read_jv_file=institution.read_jv_file,
         )
     except Exception:  # the run's own entry reports it
-        return []
-    for step in run.steps:
-        step.name = f'{run.name} · {step.name}'
-    return list(run.steps)
+        return None
+    return run.name, list(run.steps)
 
 
 def _protocol(

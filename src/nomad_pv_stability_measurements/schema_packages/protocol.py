@@ -8,7 +8,6 @@ from nomad.metainfo import (
     Quantity,
     Reference,
     SchemaPackage,
-    SectionProxy,
     SubSection,
 )
 
@@ -133,13 +132,6 @@ class StabilityActivity(Measurement, Planned):
         'none was given: from how the files lie, what they recorded, and conditions '
         'the institution assumes. Its `notes` name every value assumed or worked out. '
         'It describes the test; nobody followed it.',
-    )
-    sub_activities = Quantity(
-        type=Reference(SectionProxy('StabilityActivity')),
-        shape=['*'],
-        description='Other stability tests that are part of this one: the runs of a '
-        "device's whole history, whose conditions in between nobody specified. It "
-        'stands in until activities can hold activities of their own.',
     )
 
     def populate_from_plan(self):

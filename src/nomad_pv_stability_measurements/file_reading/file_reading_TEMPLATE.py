@@ -160,7 +160,9 @@ def read_stability_series(path: str | Path) -> dict[str, object]:
     the quantity it fills in a `StabilitySeriesStep`: `time` (from the step's start),
     and whichever of `temperature`, `irradiance`, `relative_humidity`, `voltage`,
     `current_density` and `power_density` the file records. Every array is as long
-    as `time`.
+    as `time`. Current and power density are positive where the cell delivers power
+    and negative where it is driven and takes power, as beyond its open-circuit
+    voltage: convert a file written the other way round.
 
     A column with another name is reported when the measurement is read, not stored.
 
@@ -173,7 +175,9 @@ def read_stability_series(path: str | Path) -> dict[str, object]:
 def read_jv_file(path: str | Path) -> dict[str, object]:
     """The J–V sweep at `path`: `voltage` and `current_density` as quantity arrays,
     and `direction` as an array of `'forward'` or `'reverse'`, one per point, as in a
-    `JVSweepStep`. Current density is positive where the cell delivers power.
+    `JVSweepStep`. Current density is positive where the cell delivers power and
+    negative where it is driven and takes power: convert a file written the other way
+    round.
 
     Where the file holds what the J–V station reported of each scan, also
     `figures_of_merit`: a table of one row per scan, one array per column by the name

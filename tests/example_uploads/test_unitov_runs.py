@@ -15,6 +15,7 @@ from nomad_pv_stability_measurements.example_uploads import (
 )
 from nomad_pv_stability_measurements.schema_packages.measurement import (
     StabilityMeasurement,
+    StabilityMeasurementCollection,
 )
 
 UPLOAD_ID = 'unitov'
@@ -78,16 +79,21 @@ def test_every_run_and_cell_loads_and_refers_only_into_its_upload(tmp_path, log)
         for each in entries.values()
         if isinstance(each.data, StabilityMeasurement)
     ]
-    collections = [each for each in measurements if each.sub_activities]
+    collections = [
+        each
+        for each in measurements
+        if isinstance(each, StabilityMeasurementCollection)
+    ]
+    runs = [each for each in measurements if each not in collections]
     assert log.errors == []
     # Each run with the protocol derived for it, and each cell's collection.
     assert kinds == {
-        'StabilityMeasurement': RUNS + CELLS,
+        'StabilityMeasurement': RUNS,
+        'StabilityMeasurementCollection': CELLS,
         'StabilityProtocol': RUNS,
         'SolarCellSample': CELLS,
     }
     assert sum(len(each.sub_activities) for each in collections) == RUNS
-    runs = [each for each in measurements if not each.sub_activities]
     # No UNITOV file names a protocol, so none is given; a collection has none at all.
     assert all(each.plan is None and each.samples for each in measurements)
     assert all(each.derived_plan is not None for each in runs)

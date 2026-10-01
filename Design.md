@@ -4634,3 +4634,88 @@ draws its time axis as dates and times (`type: 'date'`), so the two read the sam
   `protocol`, or an ELN entry of its own that assigns a protocol to a run. The first fits the
   design (every reference from `generate_entry_id`); the second allows a link across uploads.
 - **Deviations** between a `plan` and a `derived_plan`, once a run has both.
+
+## 40. The collection as a class of its own, and its figure in summaries
+
+**Status: built, steps 1–4.** Amends §37.2 (collections) and §39.4 (the collection's
+figure). 520 tests, ruff clean; the UNITOV collections drawn and looked at.
+
+### 40.1 Why
+
+A collection was a plain `StabilityMeasurement` that happened to have `sub_activities`, and
+every activity carried a field only collections use. Its figure drew every run's points on one
+axis of dates, and a device's history is mostly empty: the UNITOV runs last about a minute and
+lie about 20 h apart, so a run is about 1/1000 of the axis, a clump of points and then nothing;
+AI22-1B has three runs within two minutes, drawn on top of each other.
+
+### 40.2 Decided
+
+- **`StabilityMeasurementCollection(StabilityMeasurement)`**, not NOMAD's v2 `Collection`: that is
+  an `Entity` (BFO continuant), which groups things, not activities. `Experiment` groups
+  activities, but its `steps` are `ExperimentStep`s, which would clash with a collection's own
+  steps (the scans outside any run).
+- **`sub_activities`** moves from `StabilityActivity` to the collection, typed
+  `Reference(StabilityMeasurement)`. A run holds no runs.
+- **Summaries, not an axis cut.** Cutting the empty stretches out of the axis (as `AxisBreak`
+  does in the protocol timeline) would draw every run whole but lose the true spacing in time,
+  which is what a history is about. Rejected.
+
+### 40.3 Step 1 — the class — built
+
+- `measurement.py`: `StabilityMeasurementCollection` with `sub_activities`, and
+  `draws_figure_when_normalized = False`: its figure is drawn where its runs are read (§37.2), so
+  `normalize` keeps it. The rule "a measurement with `sub_activities` keeps its figure" is gone.
+- The parser makes a collection a `StabilityMeasurementCollection`. The UNITOV upload: 17
+  `StabilityMeasurement`, 6 `StabilityMeasurementCollection`, 17 protocols, 6 samples.
+
+### 40.4 Step 2 — a run too short to see becomes a summary — built
+
+- The parser hands the collection's figure its steps **grouped by run**, `[(run name, steps)]`,
+  instead of one flat list with the run's name in each step's.
+- A run is **compact** where its span is less than `COMPACT_FRACTION` = 2 % of the whole
+  history's span (about 20 px of a 1000 px axis). Decided per run: a long run is still drawn in
+  full, so one history can mix both.
+- A compact run is drawn as **one point per row**, at the middle of the run: the mean of all the
+  run's samples of that quantity, in the colour of its role; for the efficiency and the power at
+  the maximum power point, one mean per scan direction. An **error bar from the run's minimum to
+  its maximum** keeps a burn-in or a drop inside the run visible.
+- **A label** above the top row: `<run name> · 1 h tracking · 3 J–V scans`. Hovering gives the
+  run's times and how many samples each mean is made of.
+- **No line joins two summaries**: nothing between runs was measured. Scans outside any run
+  stay single markers.
+
+*As built.* `StabilityMeasurement.figures_for_plotting` is split into `placed_for_plotting`
+(steps with a start, a warning for the rest), `drawn_for_plotting` (pieces, reported values and
+marks, with an optional `prefix` naming the run) and `reported_by_scan_for_plotting`; the
+collection overrides `figures_for_plotting(logger, runs)` and adds `summary_for_plotting`.
+`step_figures.over_time_figure_for_plotting(drawn, title, start)` now takes one `OverTime`
+(pieces, marks, scans, summaries: plain data), and a summary is a `RunSummary` (begin, end,
+label, `values` by `(row, role)`, `scans` by row and direction, each `(mean, least, greatest,
+count)`). A series' role counts per series, so a run whose series differ in role gives one
+point per role. The label says `tracking` where the run recorded electrical output, else
+`monitoring`, with the span of its series (`44 s`, `6 min`, `1.5 h`, `12 d`), and leaves the
+span out where a series holds one sample. Labels that would overlap (estimated for an axis
+about 1000 px wide) go up to three lines high, and the top margin and the legend move up with
+them. The legend also names the scan directions of summaries. On the way: a row's `domain`
+could come out at −6e−17, which Plotly's validator rejects; it is clamped at 0.
+
+### 40.5 Step 3 — runs on the same spot merge — built
+
+Summaries whose middles lie within `merge_share_for_plotting` = 1 % of the history of the one
+before merge into one point (`_nearby`, chained in time order), labelled
+`3 runs · 73 s tracking · 4 J–V scans`, its mean and extremes over all their values, the run
+names listed on hover (`RunSummary.names`). AI22-1B's five runs become two points.
+
+### 40.6 Step 4 — docs — built
+
+The root CLAUDE.md (modules, collections) and this section's status.
+
+### 40.7 The sign of current and power
+
+Current and power density are positive where the cell delivers power and negative where it is
+driven and takes power; the schema's descriptions and the template's readers say so, and a
+reader converts a file written the other way round. Nothing flips a sign from the data: a cell
+that stops producing power is negative by right. UNITOV's runs hold 1.4 V, about twice the
+cells' Voc (0.73 V), so their negative tracked current and power are intended; its J–V files
+are already positive at short circuit. *Open, for UNITOV:* whether these runs are in the dark
+(a bias stress, as ISOS-V), where the assumed 1000 W/m² would be wrong.
