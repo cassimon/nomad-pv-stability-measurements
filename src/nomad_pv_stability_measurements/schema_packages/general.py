@@ -718,8 +718,7 @@ class Planned(ArchiveSection):
         type=Reference(Plan),
         description='A plan worked out afterwards from what the activity recorded, and '
         'from values assumed where nothing was recorded, where no plan was given. It '
-        'describes the activity; nobody followed it, so the activity is never compared '
-        'with it for deviations.',
+        'describes the activity; ',
     )
 
     deviations_from_plan = SubSection(

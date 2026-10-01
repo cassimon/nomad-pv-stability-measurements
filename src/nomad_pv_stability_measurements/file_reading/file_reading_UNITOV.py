@@ -159,6 +159,7 @@ def read_protocol(path: str | Path) -> dict:
         'name': f'{info.get("Device")}, {start:%Y-%m-%d %H:%M:%S}',
         'operator': info.get('User'),
         'start': start,
+        'time_zone': _TIME_ZONE.key,
         'samples': [
             {
                 'name': info.get('Device'),
@@ -256,6 +257,7 @@ def read_collection(path: str | Path) -> dict | None:
     loose = [folder for folder in _folders(path) if not _tracking(folder)]
     return {
         'name': info.get('Device'),
+        'time_zone': _TIME_ZONE.key,
         'sample': {key: value for key, value in sample.items() if value is not None},
         'runs': [str(_tracking(folder)) for folder in runs],
         'steps': sorted(

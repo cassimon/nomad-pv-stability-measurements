@@ -210,16 +210,62 @@ def test_a_measurement_shows_its_series_over_the_dates_it_ran(normalized):
     assert [mark['x0'] for mark in marks] == [at(0), at(4)]
     # Hovering still tells how long the test had run.
     assert temperature['customdata'] == [1.0, 2.0, 3.0]
-    layout = figure.figure['layout']
-    [time_axis] = [
+    axis = time_axis(figure)
+    assert (axis['type'], axis['title']['text']) == ('date', 'date and time (UTC)')
+
+
+def time_axis(figure) -> dict:
+    """The time axis of an overview, the one that shows its ticks."""
+    [axis] = [
         axis
-        for name, axis in layout.items()
+        for name, axis in figure.figure['layout'].items()
         if name.startswith('xaxis') and axis['showticklabels']
     ]
-    assert (time_axis['type'], time_axis['title']['text']) == (
-        'date',
-        'date and time (UTC)',
+    return axis
+
+
+def held(time_zone=None) -> StabilityMeasurement:
+    """A test that held its cell at 1.4 V, which the source kept to a millionth."""
+    return StabilityMeasurement(
+        datetime=START,
+        time_zone=time_zone,
+        steps=[
+            StabilitySeriesStep(
+                start_time=START,
+                time=HOURS,
+                voltage=[1.399999, 1.4, 1.399999] * ureg.volt,
+            )
+        ],
     )
+
+
+def test_the_dates_are_shown_where_the_test_ran(normalized, log):
+    [figure] = normalized(held('Europe/Rome')).figures
+
+    [series] = figure.figure['data']
+    # Stored in UTC; in Rome, in March, an hour later.
+    assert series['x'][0] == '2026-03-02T09:00:00.000'
+    assert time_axis(figure)['title']['text'] == (
+        'date and time (Europe/Rome, UTC+01:00)'
+    )
+    assert not log.errors
+
+
+def test_a_time_zone_that_names_none_is_reported_and_the_dates_shown_in_utc(
+    normalized, log
+):
+    [figure] = normalized(held('Rome')).figures
+
+    assert time_axis(figure)['title']['text'] == 'date and time (UTC)'
+    assert any('`Rome`' in message for message in log.errors)
+
+
+def test_a_value_held_steady_is_not_drawn_down_to_its_last_digit(normalized):
+    [figure] = normalized(held()).figures
+
+    low, high = figure.figure['layout']['yaxis']['range']
+    # Some hundredths of a volt around the value held, not a millionth.
+    assert (low, high) == pytest.approx((1.365, 1.435), abs=1e-5)
 
 
 def test_the_power_each_scan_reported_is_shown_beside_the_tracked_power(normalized):
@@ -404,6 +450,7 @@ def test_a_measurement_takes_who_ran_what_when_and_on_what_from_the_run_file():
         'location': 'Lab 2',
         'standard': 'ISOS-D-3',
         'operator': 'A. Researcher',
+        'time_zone': 'Europe/Rome',
         'notes': 'Simulated.',
         'samples': [{'name': 'cell A', 'lab_id': 'A-1'}],
         'instruments': [{'name': 'climate chamber'}],
@@ -418,6 +465,7 @@ def test_a_measurement_takes_who_ran_what_when_and_on_what_from_the_run_file():
         'A. Researcher',
         'Simulated.',
     )
+    assert measurement.time_zone == 'Europe/Rome'
     assert [(each.name, each.lab_id) for each in measurement.samples] == [
         ('cell A', 'A-1')
     ]

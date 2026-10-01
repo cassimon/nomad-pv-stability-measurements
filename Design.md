@@ -4719,3 +4719,23 @@ that stops producing power is negative by right. UNITOV's runs hold 1.4 V, about
 cells' Voc (0.73 V), so their negative tracked current and power are intended; its J–V files
 are already positive at short circuit. *Open, for UNITOV:* whether these runs are in the dark
 (a bias stress, as ISOS-V), where the assumed 1000 W/m² would be wrong.
+*Settled:* these are test data only, likely of a cell meant to be held at 1.4 V; nothing changes.
+
+## 41. The time zone a test ran in, and a value held steady
+
+**Status: built.** Amends §39 (dates in UTC on the axis) and the over-time figures of §34.8.
+
+**The time zone.** NOMAD stores every `Datetime` in UTC, so the zone a reader handed a time in
+is lost; UNITOV's runs, named in Rome time, were drawn an hour off their names.
+`StabilityMeasurement.time_zone` (text, an IANA name such as `Europe/Rome`) keeps it: a reader
+gives it in `run` (and `read_collection` for a collection), `read_files` takes it like any
+field of the run. The overview converts its start into that zone and the axis shows every time
+at the start's offset there, titled `date and time (Europe/Rome, UTC+01:00)`; one fixed offset,
+so the axis never jumps where the clocks change (a history across a change reads an hour off
+on one side, which the title's offset makes plain). A name that is no time zone is a
+`logger.error`, and the times are shown in UTC. Empty, UTC as before. UNITOV gives
+`Europe/Rome`; SIM gives none.
+
+**A value held steady.** A row whose values (and summary bars) vary by less than 5 % of their
+size (`LEAST_SPAN`) spans that much around their middle: UNITOV's 1.4 V, kept to 1 µV, was
+drawn with ticks a millionth apart. A row of zeros keeps Plotly's own range.

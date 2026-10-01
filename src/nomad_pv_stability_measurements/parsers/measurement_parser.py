@@ -239,6 +239,7 @@ class StabilityMeasurementParser(MatchingParser):
         reference = {'name', 'lab_id'}
         run = {
             'name': collection.get('name'),
+            'time_zone': collection.get('time_zone'),
             'samples': [
                 {key: sample[key] for key in reference & set(sample)}
                 | {'file': mainfile}

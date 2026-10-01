@@ -75,6 +75,7 @@ def read_protocol(path: str | Path) -> dict:
                 'operator': 'A. Researcher',
                 'start': datetime(...),
                 'end': datetime(...),
+                'time_zone': 'Europe/Berlin',  # where the test ran
                 'location': 'Berlin, lab 2.14',
                 'samples': [{'name': 'cell A'}],  # or, where a collection holds it:
                 # [{'name': 'AI14-1A', 'lab_id': 'AI14-1A', 'file': '/path/to/it'}]
@@ -104,6 +105,10 @@ def read_protocol(path: str | Path) -> dict:
 
     Where the run file does not list the steps, find them beside it, for example the
     other files in its folder, using `is_stability_series_file` and `is_jv_file`.
+
+    Give every datetime with its time zone, as the file means it. NOMAD stores times
+    in UTC, so name the zone the test ran in as `time_zone`, by its name in the IANA
+    time zone database, for the figures to show the times as they were there.
 
     Leave out what the file does not say. List the steps in the order they ran, and
     give each step's `file` as a path that can be opened as it is. A series' optional
@@ -200,6 +205,7 @@ def read_collection(path: str | Path) -> dict | None:
 
         {
             'name': 'AI14-1A',
+            'time_zone': 'Europe/Rome',  # as in `read_protocol`
             'sample': {  # the device, by the names of a `SolarCellSample`'s fields
                 'name': 'AI14-1A',
                 'lab_id': 'AI14-1A',

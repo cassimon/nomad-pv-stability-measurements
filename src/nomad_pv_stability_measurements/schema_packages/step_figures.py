@@ -52,6 +52,10 @@ LABEL_CHARACTER_SHARE = 0.007
 LABEL_LINE_HEIGHT = 16
 #: How many lines of labels there are at most, before labels overlap after all.
 LABEL_LINES = 3
+#: Of the size of a row's values: the least range its axis spans. A value held steady
+#: varies by a few millionths, which the axis would otherwise zoom into, its ticks
+#: telling apart what no one reads apart.
+LEAST_SPAN = 0.05
 
 
 @dataclass
@@ -142,7 +146,7 @@ def over_time_figure_for_plotting(
 
     On dates, every time is shown in the time zone `start` is given in, at its offset
     there, so that the axis never jumps where the clocks change; the axis names the
-    offset. Hovering a point also gives the hours since `start`."""
+    zone and the offset. Hovering a point also gives the hours since `start`."""
     pieces, marks, scans = drawn.pieces, drawn.marks, drawn.scans
     summaries = drawn.summaries
     on = _TimeAxis(start)
@@ -243,6 +247,7 @@ def over_time_figure_for_plotting(
             **_axis(f'{label}<br>({written})'),
             'anchor': f'x{suffix}',
             'domain': [max(top - height, 0.0), top],
+            **_least_range(each for each in traces if each['yaxis'] == axes['yaxis']),
         }
     layout['shapes'] = [
         {
@@ -362,6 +367,27 @@ def _run_labels(summaries, pieces, marks, on) -> tuple[list[dict], int]:
     return labels, max(len(ends), 1)
 
 
+def _least_range(traces) -> dict:
+    """The `range` of a row whose `traces` vary by less than `LEAST_SPAN` of their
+    size: that much, around their middle. Nothing where they vary by more, or are all
+    zero, which the axis shows well as it is."""
+    values = []
+    for trace in traces:
+        y = np.asarray(trace['y'], dtype=float)
+        bars = trace.get('error_y', {})
+        values += [y, y + bars.get('array', 0), y - bars.get('arrayminus', 0)]
+    values = np.concatenate(values) if values else np.array([])
+    values = values[np.isfinite(values)]
+    if not values.size:
+        return {}
+    least, greatest = values.min(), values.max()
+    span = LEAST_SPAN * max(abs(least), abs(greatest))
+    if span == 0 or greatest - least >= span:
+        return {}
+    middle = (least + greatest) / 2
+    return {'range': [middle - span / 2, middle + span / 2]}
+
+
 class _TimeAxis:
     """How times in hours since `start` are placed on the time axis: as they are
     where `start` is `None`, else as dates and times."""
@@ -376,7 +402,8 @@ class _TimeAxis:
             self.start, self.zone = start, ''
         else:
             self.start = start.astimezone(timezone(offset)).replace(tzinfo=None)
-            self.zone = f' (UTC{_offset(offset)})'
+            named = f'{start.tzinfo.key}, ' if hasattr(start.tzinfo, 'key') else ''
+            self.zone = f' ({named}UTC{_offset(offset)})'
         self.title, self.axis = f'date and time{self.zone}', {'type': 'date'}
 
     def written(self, hours: float) -> str:

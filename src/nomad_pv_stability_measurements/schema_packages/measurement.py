@@ -7,6 +7,8 @@ conditions and output over time is a `StabilitySeriesStep`; a J–V sweep is a
 and the steps taken outside any run.
 """
 
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 import numpy as np
 from nomad.datamodel.data import ArchiveSection
 from nomad.datamodel.metainfo.basesections.v2 import (
@@ -350,6 +352,12 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         type=str,
         description='Who ran the test.',
     )
+    time_zone = Quantity(
+        type=str,
+        description='The time zone the test ran in, by its name in the IANA time zone '
+        'database, e.g. `Europe/Rome`. Times are stored in UTC, which loses the zone '
+        'they were taken in; the figures show them in this one. Left empty, in UTC.',
+    )
 
     #: Where each entry of a run file's `run` goes.
     fields_of_run = {
@@ -359,6 +367,7 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         'location': 'location',
         'standard': 'method',
         'operator': 'operator',
+        'time_zone': 'time_zone',
         'notes': 'description',
     }
 
@@ -367,6 +376,11 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
 
     def normalize(self, archive, logger):
         super().normalize(archive, logger)
+        if self.time_zone is not None and self.zone() is None:
+            logger.error(
+                f'`time_zone` `{self.time_zone}` is not the name of a time zone, such '
+                'as `Europe/Rome`; times are shown in UTC.'
+            )
         if self.draws_figure_when_normalized:
             self.figures = self.figures_for_plotting(logger)
 
@@ -386,8 +400,8 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         power point as dots on the power density row, and a dashed line where
         each J–V sweep was taken. Nothing where there is nothing to draw. A step with no
         `start_time` has no place on the axis and is left out, with a warning. Times
-        are shown in the time zone the test started in, and hovering gives the hours
-        since it started.
+        are shown in the measurement's `time_zone`, and hovering gives the hours since
+        it started.
 
         `steps` are the steps to draw, by default this measurement's own."""
         placed = self.placed_for_plotting(
@@ -401,9 +415,23 @@ class StabilityMeasurement(PlotSection, StabilityActivity):
         if not pieces and not scans:
             return []
         figure = over_time_figure_for_plotting(
-            OverTime(pieces, marks, scans), self.name or '', start
+            OverTime(pieces, marks, scans),
+            self.name or '',
+            self.local_for_plotting(start),
         )
         return [PlotlyFigure(label='Over time', index=0, open=True, figure=figure)]
+
+    def zone(self) -> ZoneInfo | None:
+        """The `time_zone`, where it names one."""
+        try:
+            return ZoneInfo(self.time_zone) if self.time_zone else None
+        except (ZoneInfoNotFoundError, ValueError):
+            return None
+
+    def local_for_plotting(self, moment):
+        """`moment` as it was in the measurement's `time_zone`, if it names one."""
+        zone = self.zone()
+        return moment if zone is None else moment.astimezone(zone)
 
     @staticmethod
     def placed_for_plotting(logger, steps) -> list:
@@ -590,7 +618,9 @@ class StabilityMeasurementCollection(StabilityMeasurement):
         if not pieces and not scans and not summaries:
             return []
         figure = over_time_figure_for_plotting(
-            OverTime(pieces, marks, scans, summaries), self.name or '', start
+            OverTime(pieces, marks, scans, summaries),
+            self.name or '',
+            self.local_for_plotting(start),
         )
         return [PlotlyFigure(label='Over time', index=0, open=True, figure=figure)]
 
