@@ -20,6 +20,9 @@ from pathlib import Path
 
 API = 'https://box.hu-berlin.de/api/v2.1/via-repo-token'
 
+#: Logs of a public repository's workflows are public: there, no file is named.
+NAME_FILES = os.environ.get('GITHUB_ACTIONS') != 'true'
+
 
 def ask(endpoint: str, **query):
     """The API's JSON answer, asked with the repo token."""
@@ -52,7 +55,8 @@ def main(dest: Path):
         urllib.request.urlretrieve(ask('download-link', path=path), target)
         os.utime(target, (mtime, mtime))
         downloaded += 1
-        print(f'fetched {path}')
+        if NAME_FILES:
+            print(f'fetched {path}')
 
     print(f'{downloaded} of {len(files)} files downloaded into {dest}')
 

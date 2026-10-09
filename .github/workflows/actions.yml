@@ -36,7 +36,7 @@ jobs:
       env:
         PV_TEST_DATA: test-resources/Ready-PV-data
       run: |
-        uv run --with coverage coverage run -m pytest -sv
+        uv run --with coverage coverage run -m pytest -v --tb=no -rN
     - name: Submit to coveralls
       continue-on-error: true
       env:
