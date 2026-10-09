@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from nomad.datamodel import EntryArchive, EntryMetadata
 from nomad.utils import generate_entry_id
+from pv_data import PV_DATA, requires_pv_data
 
-import nomad_pv_stability_measurements
 from nomad_pv_stability_measurements.parsers import measurement_parser_entry_point
 from nomad_pv_stability_measurements.parsers.measurement_parser import (
     COLLECTION_KEY,
@@ -23,10 +23,7 @@ from nomad_pv_stability_measurements.schema_packages.measurement import (
 )
 
 PARSER = measurement_parser_entry_point.load()
-DEVICE = (
-    Path(nomad_pv_stability_measurements.__file__).parent
-    / 'example_uploads/institutes/UNITOV/example_batch/AI14/AI14_1A'
-)
+DEVICE = PV_DATA / 'UNITOV/example_batch/AI14/AI14_1A'
 
 
 def matched(path: Path):
@@ -116,6 +113,7 @@ def test_outside_an_upload_a_run_refers_to_no_protocol():
     assert protocol_reference({'protocol': 'x.stability.yaml'}, EntryArchive()) is None
 
 
+@requires_pv_data
 @pytest.mark.parametrize(
     ('run', 'keys'),
     [
@@ -130,6 +128,7 @@ def test_the_first_run_of_a_device_also_makes_its_collection_and_sample(run, key
     assert list(matched(tracking)) == keys
 
 
+@requires_pv_data
 def test_a_device_without_runs_is_its_collection_with_its_sample_and_no_plan(
     tmp_path, log
 ):
@@ -157,6 +156,7 @@ def test_a_device_without_runs_is_its_collection_with_its_sample_and_no_plan(
     assert children[SAMPLE_KEY].data.name == 'AI14-1A'
 
 
+@requires_pv_data
 def test_a_run_given_no_protocol_refers_to_the_one_derived_as_its_derived_plan(log):
     [tracking] = (DEVICE / '17.23.47').glob('*(Tracking)*')
     mainfile = tracking.relative_to(DEVICE.parent).as_posix()

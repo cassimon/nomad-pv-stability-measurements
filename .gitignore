@@ -131,3 +131,6 @@ dmypy.json
 
 # macOS folder metadata
 .DS_Store
+
+# Measured data downloaded from HU-Box for the tests
+/test-resources/

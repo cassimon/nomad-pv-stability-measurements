@@ -7,8 +7,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from nomad.units import ureg
+from pv_data import PV_DATA, requires_pv_data
 
-import nomad_pv_stability_measurements
 from nomad_pv_stability_measurements.file_reading.file_reading_UNITOV import (
     STEP_READERS,
     derive_stability_protocol_from_stability_run,
@@ -22,10 +22,9 @@ from nomad_pv_stability_measurements.schema_packages.measurement import (
     StabilityMeasurement,
 )
 
-BATCH = (
-    Path(nomad_pv_stability_measurements.__file__).parent
-    / 'example_uploads/institutes/UNITOV/example_batch'
-)
+pytestmark = requires_pv_data
+
+BATCH = PV_DATA / 'UNITOV/example_batch'
 RUN = BATCH / 'AI14/AI14_1A/17.23.47'
 JV = RUN / '0001_2025-11-20_17.23.47_Stability (JV)_AI14-1A.txt'
 TRACKING = RUN / '0000_2025-11-20_17.23.47_Stability (Tracking)_AI14-1A.txt'

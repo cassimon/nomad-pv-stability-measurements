@@ -12,6 +12,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+      with:
+          persist-credentials: false
+    # First, before any action or package is installed: whatever runs before this
+    # step could read the token from its environment.
+    - name: Fetch measured data from HU-Box
+      env:
+        HUBOX_REPO_TOKEN: ${{ secrets.HUBOX_REPO_TOKEN }}
+      run: |
+        python3 scripts/fetch_pv_data.py test-resources/Ready-PV-data
     - name: Install uv
       uses: astral-sh/setup-uv@v5
       with:
@@ -24,6 +33,8 @@ jobs:
       run: |
         uv sync --all-extras
     - name: Test with pytest
+      env:
+        PV_TEST_DATA: test-resources/Ready-PV-data
       run: |
         uv run --with coverage coverage run -m pytest -sv
     - name: Submit to coveralls
@@ -37,6 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/ruff-action@v3
       - run: ruff check .
       # Uncomment the following line to enable format check
